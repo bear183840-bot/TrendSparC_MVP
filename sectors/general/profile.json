@@ -1,0 +1,9 @@
+{
+  "sector_id": "general",
+  "display_name": "General (sector-unspecified fallback)",
+  "status": "template_only",
+  "aliases": [],
+  "keywords": [],
+  "pipeline_entrypoint": "sectors.general.adapter",
+  "system_prompt_path": "sectors/general/prompts/system_prompt.md"
+}

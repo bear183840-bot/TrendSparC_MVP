@@ -1,0 +1,9 @@
+{
+  "sector_id": "sk_hynix",
+  "display_name": "SK hynix",
+  "status": "template_only",
+  "aliases": ["SK hynix", "SK하이닉스", "하이닉스"],
+  "keywords": ["HBM", "DRAM", "NAND", "메모리", "반도체"],
+  "pipeline_entrypoint": "sectors.sk_hynix.adapter",
+  "system_prompt_path": "sectors/sk_hynix/prompts/system_prompt.md"
+}
