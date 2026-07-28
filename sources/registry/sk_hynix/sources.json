@@ -21,24 +21,34 @@
       "reliability_reason": "최대 경쟁사 공식 1차 자료"
     },
     {
-      "name": "DART",
-      "country": "KR",
-      "type": "government_api",
-      "url": "https://opendart.fss.or.kr/",
-      "collection_method": ["api"],
-      "frequency": "new_filings_only",
-      "category": ["투자"],
-      "reliability_reason": "전자공시, 정부 공식 API — 실적/M&A/지분투자 등 재무 이벤트의 1차 근거"
-    },
-    {
       "name": "전자신문(반도체)",
       "country": "KR",
       "type": "news_media",
       "url": "https://www.etnews.com/news/section.html?id2=061",
       "collection_method": ["rss"],
       "frequency": "daily",
-      "category": ["전체"],
+      "category": ["시장·경쟁", "정책·리스크"],
       "reliability_reason": "국내 반도체 전문매체, RSS 제공으로 파싱 안정적, 정책·시장 뉴스 커버리지 넓음"
+    },
+    {
+      "name": "TrendForce Press Center",
+      "country": "TW",
+      "type": "market_research",
+      "url": "https://www.trendforce.com/presscenter/news",
+      "collection_method": ["rss", "crawling"],
+      "frequency": "daily",
+      "category": ["시장·경쟁"],
+      "reliability_reason": "DRAM/NAND 계약가·현물가 및 수급 동향을 정기 발표하는 반도체 시장조사 전문기관, 가격·시장점유율 데이터의 1차 근거"
+    },
+    {
+      "name": "BIS (미국 상무부 산업안보국) Newsroom",
+      "country": "US",
+      "type": "government_newsroom",
+      "url": "https://www.bis.gov/news-updates",
+      "collection_method": ["crawling"],
+      "frequency": "new_filings_only",
+      "category": ["정책·리스크"],
+      "reliability_reason": "대중국 반도체 수출통제 등 규제 발표의 미국 정부 공식 1차 출처, 국내 매체 보도보다 선행 확인 가능"
     }
   ]
 }

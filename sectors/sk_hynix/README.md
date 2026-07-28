@@ -12,7 +12,8 @@ and sources already defined below.
 - keywords: HBM/DRAM/NAND 등 기술, 투자/CAPEX, 실적, M&A, 공급망, 경쟁사(NVIDIA/TSMC/Micron/삼성전자), 정책/규제 등 (전체 목록은 `profile.json` 참고)
 
 ## 소스 레지스트리 (`sources/registry/sk_hynix/sources.json`)
-4개 등록: SK하이닉스 뉴스룸, 삼성전자DS 뉴스룸, DART(전자공시), 전자신문(반도체).
+5개 등록: SK하이닉스 뉴스룸, 삼성전자DS 뉴스룸, 전자신문(반도체), TrendForce Press Center(시장조사),
+BIS 미국 상무부 산업안보국 Newsroom(수출통제 등 규제 공식 발표).
 각 소스의 `collection_method`/`frequency`/`reliability_reason`은 registry 파일에 그대로 명시되어 있으며,
 등록되지 않은 소스에는 임의로 신뢰도를 부여하지 않습니다.
 

@@ -1,18 +1,26 @@
-"""validator stub for the sk_hynix sector adapter.
+"""validator for the sk_hynix sector adapter.
 
-Not implemented on purpose: this sector currently has status template_only.
-No fake data may ever be returned from here — only a clearly-labeled
-PipelineStageError so the orchestrator's stage trace shows exactly which
-sector adapter stage was called and why it can't proceed yet.
+Drops any SourceDocument that can't be attributed back to its source or
+carries no substantial content — per the global rule that content with no
+source attribution must not appear in analysis or synthesis output
+(prompts/global_system_prompt.md, principle 2). Does not fetch or rewrite
+content; only filters what the processor already normalized.
 """
 
 from __future__ import annotations
 
-from common.errors import PipelineStageError
+from common.contracts import SourceDocument
+
+_MIN_CONTENT_LENGTH = 200  # below this a page is almost never a real article body
 
 
-def validate(source_documents):
-    raise PipelineStageError(
-        stage="sectors.sk_hynix.adapter.validator",
-        reason="template_only: sector adapter not implemented",
-    )
+def _is_valid(document: SourceDocument) -> bool:
+    if not document.source_id or not document.url:
+        return False
+    if not document.content or len(document.content) < _MIN_CONTENT_LENGTH:
+        return False
+    return True
+
+
+def validate(source_documents: list[SourceDocument]) -> list[SourceDocument]:
+    return [document for document in source_documents if _is_valid(document)]
