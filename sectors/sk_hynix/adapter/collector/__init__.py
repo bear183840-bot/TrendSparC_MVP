@@ -13,6 +13,8 @@ from __future__ import annotations
 
 import hashlib
 import os
+import queue
+import threading
 from datetime import datetime
 
 from firecrawl import Firecrawl
@@ -22,6 +24,7 @@ from common.errors import PipelineStageError
 
 _API_KEY_ENV_VAR = "FIRECRAWL_API_KEY"
 _PAGES_PER_SOURCE = 10
+_CRAWL_TIMEOUT_SECONDS = 20
 _STAGE = "sectors.sk_hynix.adapter.collector"
 
 
@@ -39,16 +42,45 @@ def _parse_published_at(value: str | None):
         return None
 
 
+def _crawl_with_timeout(client: Firecrawl, source: PlannedSource):
+    """Run client.crawl in a daemon thread and give up after _CRAWL_TIMEOUT_SECONDS.
+
+    A daemon thread (rather than concurrent.futures.ThreadPoolExecutor, whose
+    context manager blocks on shutdown) lets us stop waiting on a stuck crawl
+    without blocking process exit — the abandoned thread just gets dropped
+    when the interpreter exits.
+    """
+    result: queue.Queue = queue.Queue(maxsize=1)
+
+    def _run() -> None:
+        try:
+            result.put(("ok", client.crawl(source.url, limit=_PAGES_PER_SOURCE, formats=["markdown"])))
+        except Exception as exc:  # noqa: BLE001 - surfaced to the caller via the queue
+            result.put(("error", exc))
+
+    thread = threading.Thread(target=_run, daemon=True)
+    thread.start()
+    thread.join(timeout=_CRAWL_TIMEOUT_SECONDS)
+
+    if thread.is_alive():
+        return "timeout", None
+
+    return result.get()
+
+
 def _crawl_source(client: Firecrawl, source: PlannedSource) -> list[SourceDocument]:
-    try:
-        job = client.crawl(source.url, limit=_PAGES_PER_SOURCE, formats=["markdown"])
-    except Exception as exc:  # Firecrawl SDK/network failure, not a template_only case
+    status, payload = _crawl_with_timeout(client, source)
+
+    if status == "timeout":
+        return []
+    if status == "error":
         raise PipelineStageError(
             stage=_STAGE,
             reason=f"failed to crawl source '{source.name}'",
-            detail=str(exc),
-        ) from exc
+            detail=str(payload),
+        ) from payload
 
+    job = payload
     documents: list[SourceDocument] = []
     for page in job.data or []:
         page_url = page.metadata.url if page.metadata else None

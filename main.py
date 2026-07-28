@@ -22,6 +22,10 @@ from pathlib import Path
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8")
 
+from dotenv import load_dotenv
+
+load_dotenv()
+
 from common.contracts import UserRequest
 from core.request_pipeline.pipeline import run_pipeline
 
