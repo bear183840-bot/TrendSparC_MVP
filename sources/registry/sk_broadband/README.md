@@ -1,7 +1,49 @@
-# sk_broadband source registry
+# SK Broadband source registry
 
-Empty placeholder. `sources.json` currently contains no registered
-sources — `core/source_planner` reads this file and returns an explicit
-`template_only` note in `SourcePlan.notes` when the list is empty. Do not
-assign an arbitrary reliability tier to a source that hasn't been registered
-here first.
+크롤링 부담을 제한하면서 공식성·신뢰성·분석 활용도를 확보하기 위해
+SK Broadband 섹터의 우선 Source를 4개로 제한한다.
+
+## 주요 Source
+
+| 이름 | URL | 유형 | 활용 목적 |
+|---|---|---|---|
+| 방송통신위원회(KCC) | [kcc.go.kr](https://www.kcc.go.kr/) | 정부기관 | 리스크분석 |
+| 정보통신정책연구원(KISDI) | [kisdi.re.kr](https://www.kisdi.re.kr/) | 국책연구기관 | 산업동향 |
+| SK브로드밴드 뉴스룸 | [news.skbroadband.com](https://news.skbroadband.com/) | 기업 공식 | 산업동향 |
+| 한국콘텐츠진흥원(KOCCA) | [kocca.kr](https://www.kocca.kr/) | 공공기관 | 시장현황 |
+
+## Source 선정 이유
+
+### 방송통신위원회(KCC)
+
+- 방송·통신 정책과 규제에 관한 정부 공식 자료
+- 방송 규제, 개인정보, 플랫폼 정책, 망 사용료 등 리스크 분석에 활용
+
+### 정보통신정책연구원(KISDI)
+
+- 방송·통신·미디어 정책을 연구하는 국책연구기관
+- 산업 구조, 이용 행태, 정책 변화 등 산업동향 분석에 활용
+
+### SK브로드밴드 뉴스룸
+
+- SK브로드밴드의 서비스, 기술, 제휴 관련 공식 1차 자료
+- 신규 서비스, AI 적용 사례, 사업 방향 등 산업동향 분석에 활용
+
+### 한국콘텐츠진흥원(KOCCA)
+
+- 콘텐츠 산업 통계와 시장 자료를 제공하는 공공기관
+- 콘텐츠·미디어 시장 규모와 이용자 현황 분석에 활용
+
+## 활용 목적
+
+- 산업동향: 산업·기술의 최신 변화와 트렌드 파악
+- 시장현황: 시장 규모, 이용자, 통계 등 현재 상황 분석
+- 리스크분석: 규제, 정책, 저작권, 개인정보 등 위험요인 분석
+
+## 등록 원칙
+
+- 실제 실행용 Source 정보는 같은 폴더의 `sources.json`에 등록한다.
+- `sources.json`에는 `sk_hynix`와 동일한 필드 구조만 사용한다.
+- 수집 방식과 갱신 주기는 사이트가 실제로 지원하는 방식을 확인한 후
+  기록한다.
+- 확인되지 않은 신뢰도 등급이나 수집 기능을 임의로 추가하지 않는다.
