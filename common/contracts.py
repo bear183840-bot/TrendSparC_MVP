@@ -70,6 +70,7 @@ class SourcePlan(BaseModel):
     request_id: str
     sector_id: str
     planned_sources: list[PlannedSource] = Field(default_factory=list)
+    question_keywords: list[str] = Field(default_factory=list)
     notes: Optional[str] = None
 
 

@@ -60,7 +60,11 @@ def _load_system_prompt() -> str:
 
 
 def _analyze_document(client: OpenAI, system_prompt: str, document: SourceDocument) -> DocumentAnalysis:
-    user_content = f"Title: {document.title}\nURL: {document.url}\n\n{document.content}"
+    user_content = (
+        f"Title: {document.title}\nURL: {document.url}\n\n{document.content}\n\n"
+        "---\n"
+        "위 문서가 영어 등 외국어라도, summary/key_points는 반드시 한국어로만 작성하세요."
+    )
 
     try:
         response = client.chat.completions.create(

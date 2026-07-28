@@ -15,7 +15,12 @@ from pathlib import Path
 from common.contracts import PlannedSource, SourcePlan
 
 
-def plan_sources(request_id: str, sector_id: str, registry_root: Path) -> SourcePlan:
+def plan_sources(
+    request_id: str,
+    sector_id: str,
+    registry_root: Path,
+    question_keywords: list[str] | None = None,
+) -> SourcePlan:
     sector_registry_dir = registry_root / sector_id
     planned_sources: list[PlannedSource] = []
 
@@ -33,5 +38,6 @@ def plan_sources(request_id: str, sector_id: str, registry_root: Path) -> Source
         request_id=request_id,
         sector_id=sector_id,
         planned_sources=planned_sources,
+        question_keywords=question_keywords or [],
         notes=notes,
     )

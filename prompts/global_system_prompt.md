@@ -18,3 +18,11 @@ add to these; they never override or relax them.
    be set if that source is registered in `sources/registry/`. An
    unregistered or ad-hoc source must not be assigned a tier just to make it
    usable in a report.
+5. **Respond in Korean, with no exceptions.** Every field you generate —
+   `summary`, every entry in `key_points`, all analysis text — MUST be
+   written in Korean. This applies even when the source document itself is
+   entirely in English or another language: translate and summarize into
+   Korean, never mirror the source's language. Do not leave any sentence or
+   field in English. Proper nouns (company names, product names, technical
+   terms with no common Korean equivalent) may stay in their original form,
+   but the surrounding sentence must still be Korean.

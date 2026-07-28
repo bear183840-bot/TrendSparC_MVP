@@ -41,6 +41,7 @@ from common.contracts import (
     UserRequest,
 )
 from common.errors import PipelineStageError, StageStatus, StageTrace
+from core.entity.ai_based import extract_entities_ai
 from core.entity.extractor import extract_entities
 from core.intent.ai_based import classify_intent_ai
 from core.intent.rule_based import classify_intent_rule_based
@@ -115,7 +116,8 @@ def run_pipeline(
     # 2. entity
     try:
         _maybe_force_fail("entity")
-        result.entities = extract_entities(request)
+        rule_based_entities = extract_entities(request)
+        result.entities = extract_entities_ai(request, rule_based_entities)
         result.trace.append(StageTrace(stage="entity", status=StageStatus.OK))
     except PipelineStageError as exc:
         _halt("entity", exc.reason, exc.detail)
@@ -144,7 +146,12 @@ def run_pipeline(
     # 4. source_planner
     try:
         _maybe_force_fail("source_planner")
-        result.source_plan = plan_sources(request.request_id, sector_id, SOURCE_REGISTRY_DIR)
+        search_terms = [
+            *result.entities.organizations,
+            *result.entities.technologies,
+            *result.entities.keywords,
+        ]
+        result.source_plan = plan_sources(request.request_id, sector_id, SOURCE_REGISTRY_DIR, search_terms)
         result.trace.append(StageTrace(stage="source_planner", status=StageStatus.OK))
     except PipelineStageError as exc:
         _halt("source_planner", exc.reason, exc.detail)
