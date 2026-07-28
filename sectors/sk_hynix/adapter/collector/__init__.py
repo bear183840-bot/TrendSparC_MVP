@@ -14,7 +14,9 @@ from __future__ import annotations
 import hashlib
 import os
 import queue
+import sys
 import threading
+import time
 from datetime import datetime
 
 from firecrawl import Firecrawl
@@ -25,6 +27,7 @@ from common.errors import PipelineStageError
 _API_KEY_ENV_VAR = "FIRECRAWL_API_KEY"
 _PAGES_PER_SOURCE = 10
 _CRAWL_TIMEOUT_SECONDS = 20
+_REQUEST_SPACING_SECONDS = 20  # stays under Firecrawl's crawl-start rate limit (3/min)
 _STAGE = "sectors.sk_hynix.adapter.collector"
 
 
@@ -115,9 +118,17 @@ def collect(source_plan: SourcePlan) -> list[SourceDocument]:
 
     client = Firecrawl(api_key=api_key)
     documents: list[SourceDocument] = []
-    for source in source_plan.planned_sources:
+    for index, source in enumerate(source_plan.planned_sources):
         if not source.url:
             continue
-        documents.extend(_crawl_source(client, source))
+        if index > 0:
+            time.sleep(_REQUEST_SPACING_SECONDS)
+        try:
+            documents.extend(_crawl_source(client, source))
+        except PipelineStageError as exc:
+            # One source failing (rate limit, network error, etc.) must not
+            # discard whatever was already collected from the others — skip
+            # it and keep going, regardless of how many sources are registered.
+            print(f"[{_STAGE}] skipping '{source.name}': {exc.reason}", file=sys.stderr)
 
     return documents
