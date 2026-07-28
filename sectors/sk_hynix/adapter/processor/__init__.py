@@ -1,18 +1,31 @@
-"""processor stub for the sk_hynix sector adapter.
+"""processor for the sk_hynix sector adapter.
 
-Not implemented on purpose: this sector currently has status template_only.
-No fake data may ever be returned from here — only a clearly-labeled
-PipelineStageError so the orchestrator's stage trace shows exactly which
-sector adapter stage was called and why it can't proceed yet.
+Normalizes SourceDocument objects fetched by the collector: strips
+whitespace from title/content and drops exact duplicate doc_ids. Does not
+fetch new content or judge document quality — fetching happens in
+collector, and content-quality filtering happens in validator.
 """
 
 from __future__ import annotations
 
-from common.errors import PipelineStageError
+from common.contracts import SourceDocument
 
 
-def process(source_documents):
-    raise PipelineStageError(
-        stage="sectors.sk_hynix.adapter.processor",
-        reason="template_only: sector adapter not implemented",
-    )
+def _normalize(document: SourceDocument) -> SourceDocument:
+    updates = {}
+    if document.title and document.title != document.title.strip():
+        updates["title"] = document.title.strip()
+    if document.content and document.content != document.content.strip():
+        updates["content"] = document.content.strip()
+    return document.model_copy(update=updates) if updates else document
+
+
+def process(source_documents: list[SourceDocument]) -> list[SourceDocument]:
+    seen_doc_ids: set[str] = set()
+    normalized: list[SourceDocument] = []
+    for document in source_documents:
+        if document.doc_id in seen_doc_ids:
+            continue
+        seen_doc_ids.add(document.doc_id)
+        normalized.append(_normalize(document))
+    return normalized
