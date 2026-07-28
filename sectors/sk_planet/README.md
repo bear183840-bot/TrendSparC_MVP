@@ -1,4 +1,4 @@
-# Unassigned Affiliate (name TBD) sector
+# SK플래닛 (SK Planet) sector
 
 Status: `template_only`.
 

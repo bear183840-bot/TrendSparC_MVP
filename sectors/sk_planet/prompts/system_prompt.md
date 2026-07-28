@@ -1,4 +1,4 @@
-# Unassigned Affiliate (name TBD) — sector system prompt (template)
+# SK플래닛 (SK Planet) — sector system prompt (template)
 
 Status: `template_only` — no sector-specific prompt content has been
 authored yet. When this sector becomes active, this file should define:

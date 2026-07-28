@@ -1,4 +1,4 @@
-# unassigned source registry
+# sk_planet source registry
 
 Empty placeholder. `sources.json` currently contains no registered
 sources — `core/source_planner` reads this file and returns an explicit

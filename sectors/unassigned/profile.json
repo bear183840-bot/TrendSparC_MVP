@@ -1,9 +1,0 @@
-{
-  "sector_id": "unassigned",
-  "display_name": "Unassigned Affiliate (name TBD)",
-  "status": "template_only",
-  "aliases": [],
-  "keywords": [],
-  "pipeline_entrypoint": "sectors.unassigned.adapter",
-  "system_prompt_path": "sectors/unassigned/prompts/system_prompt.md"
-}

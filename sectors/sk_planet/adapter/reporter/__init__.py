@@ -1,4 +1,4 @@
-"""reporter stub for the unassigned sector adapter.
+"""reporter stub for the sk_planet sector adapter.
 
 Not implemented on purpose: this sector currently has status template_only.
 No fake data may ever be returned from here — only a clearly-labeled
@@ -13,6 +13,6 @@ from common.errors import PipelineStageError
 
 def report(report_plan, synthesis):
     raise PipelineStageError(
-        stage="sectors.unassigned.adapter.reporter",
+        stage="sectors.sk_planet.adapter.reporter",
         reason="template_only: sector adapter not implemented",
     )

@@ -1,1 +1,44 @@
-{"sources": []}
+{
+  "sources": [
+    {
+      "name": "SK하이닉스 뉴스룸",
+      "country": "KR",
+      "type": "official_newsroom",
+      "url": "https://news.skhynix.co.kr/all/",
+      "collection_method": ["rss", "crawling"],
+      "frequency": "daily",
+      "category": ["투자", "기술"],
+      "reliability_reason": "회사 공식 1차 자료"
+    },
+    {
+      "name": "삼성전자DS 뉴스룸",
+      "country": "KR",
+      "type": "official_newsroom",
+      "url": "https://news.samsungsemiconductor.com/kr/",
+      "collection_method": ["rss", "crawling"],
+      "frequency": "daily",
+      "category": ["투자", "기술"],
+      "reliability_reason": "최대 경쟁사 공식 1차 자료"
+    },
+    {
+      "name": "DART",
+      "country": "KR",
+      "type": "government_api",
+      "url": "https://opendart.fss.or.kr/",
+      "collection_method": ["api"],
+      "frequency": "new_filings_only",
+      "category": ["투자"],
+      "reliability_reason": "전자공시, 정부 공식 API — 실적/M&A/지분투자 등 재무 이벤트의 1차 근거"
+    },
+    {
+      "name": "전자신문(반도체)",
+      "country": "KR",
+      "type": "news_media",
+      "url": "https://www.etnews.com/news/section.html?id2=061",
+      "collection_method": ["rss"],
+      "frequency": "daily",
+      "category": ["전체"],
+      "reliability_reason": "국내 반도체 전문매체, RSS 제공으로 파싱 안정적, 정책·시장 뉴스 커버리지 넓음"
+    }
+  ]
+}

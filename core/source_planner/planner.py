@@ -1,8 +1,10 @@
 """Build a SourcePlan from the sector's source registry.
 
-Registries live under sources/registry/<sector_id>/*.json. In this scaffold
-every registry is empty, so every plan comes back with an explicit
-template_only note rather than pretending sources are configured.
+Registries live under sources/registry/<sector_id>/*.json. Each registered
+source is parsed into a PlannedSource so a sector's adapter/collector can act
+on SourcePlan alone, without re-reading and re-parsing the registry itself.
+Only fields already present in the registry entry are carried over — nothing
+here invents a reliability tier or other field for an unregistered source.
 """
 
 from __future__ import annotations
@@ -10,12 +12,12 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from common.contracts import SourcePlan
+from common.contracts import PlannedSource, SourcePlan
 
 
 def plan_sources(request_id: str, sector_id: str, registry_root: Path) -> SourcePlan:
     sector_registry_dir = registry_root / sector_id
-    planned_sources: list[str] = []
+    planned_sources: list[PlannedSource] = []
 
     if sector_registry_dir.is_dir():
         for registry_file in sorted(sector_registry_dir.glob("*.json")):
@@ -23,7 +25,8 @@ def plan_sources(request_id: str, sector_id: str, registry_root: Path) -> Source
                 data = json.loads(registry_file.read_text(encoding="utf-8"))
             except json.JSONDecodeError:
                 continue
-            planned_sources.extend(data.get("sources", []))
+            for raw_source in data.get("sources", []):
+                planned_sources.append(PlannedSource.model_validate(raw_source))
 
     notes = None if planned_sources else "no sources registered for this sector — template_only"
     return SourcePlan(

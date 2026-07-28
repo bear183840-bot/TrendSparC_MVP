@@ -1,0 +1,9 @@
+{
+  "sector_id": "sk_planet",
+  "display_name": "SK플래닛 (SK Planet)",
+  "status": "template_only",
+  "aliases": ["SK Planet", "SK플래닛", "플래닛"],
+  "keywords": [],
+  "pipeline_entrypoint": "sectors.sk_planet.adapter",
+  "system_prompt_path": "sectors/sk_planet/prompts/system_prompt.md"
+}
