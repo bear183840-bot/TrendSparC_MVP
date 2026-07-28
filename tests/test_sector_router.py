@@ -29,6 +29,14 @@ def test_registered_sector_can_be_routed_explicitly():
     assert route.matched_profile.sector_id == "sk_hynix"
 
 
+def test_sk_planet_is_registered_after_unassigned_rename():
+    profiles = scan_sectors(SECTORS_DIR)
+    route = route_request("req_test_router", _empty_entities(), profiles, requested_sector_id="sk_planet")
+
+    assert route.status == "routed"
+    assert route.matched_profile.sector_id == "sk_planet"
+
+
 def test_adding_and_removing_a_sector_folder_changes_registry_without_core_changes(tmp_path):
     sectors_dir = tmp_path / "sectors"
     sectors_dir.mkdir()

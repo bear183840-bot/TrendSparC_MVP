@@ -55,10 +55,21 @@ class SectorRoute(BaseModel):
     reason: Optional[str] = None
 
 
+class PlannedSource(BaseModel):
+    name: str
+    url: Optional[str] = None
+    country: Optional[str] = None
+    type: Optional[str] = None
+    collection_method: list[str] = Field(default_factory=list)
+    frequency: Optional[str] = None
+    category: list[str] = Field(default_factory=list)
+    reliability_reason: Optional[str] = None
+
+
 class SourcePlan(BaseModel):
     request_id: str
     sector_id: str
-    planned_sources: list[str] = Field(default_factory=list)
+    planned_sources: list[PlannedSource] = Field(default_factory=list)
     notes: Optional[str] = None
 
 

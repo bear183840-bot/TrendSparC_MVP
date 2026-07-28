@@ -1,4 +1,4 @@
-"""processor stub for the unassigned sector adapter.
+"""collector stub for the sk_planet sector adapter.
 
 Not implemented on purpose: this sector currently has status template_only.
 No fake data may ever be returned from here — only a clearly-labeled
@@ -11,8 +11,8 @@ from __future__ import annotations
 from common.errors import PipelineStageError
 
 
-def process(source_documents):
+def collect(source_plan):
     raise PipelineStageError(
-        stage="sectors.unassigned.adapter.processor",
+        stage="sectors.sk_planet.adapter.collector",
         reason="template_only: sector adapter not implemented",
     )

@@ -2,8 +2,18 @@
   "sector_id": "sk_hynix",
   "display_name": "SK hynix",
   "status": "template_only",
-  "aliases": ["SK hynix", "SK하이닉스", "하이닉스"],
-  "keywords": ["HBM", "DRAM", "NAND", "메모리", "반도체"],
+  "aliases": ["SK hynix", "SK하이닉스", "하이닉스", "에스케이하이닉스", "000660"],
+  "keywords": [
+    "HBM", "HBM3E", "HBM4", "DRAM", "D램", "디램", "NAND", "낸드", "낸드플래시",
+    "TSV", "EUV", "CoWoS", "AI Memory", "AI 반도체", "Foundry", "차세대 메모리",
+    "투자", "증설", "CAPEX", "양산", "시설투자", "팹",
+    "실적", "매출", "영업이익", "영업손실", "가이던스",
+    "M&A", "지분투자", "합작법인", "JV", "제휴",
+    "공급망", "밸류체인", "고객사", "공급계약", "물량",
+    "NVIDIA", "TSMC", "Micron", "삼성전자", "시장점유율", "수요", "가격", "고정거래가",
+    "규제", "관세", "보조금", "미국", "중국", "수출통제",
+    "리스크", "기회요인", "로드맵"
+  ],
   "pipeline_entrypoint": "sectors.sk_hynix.adapter",
   "system_prompt_path": "sectors/sk_hynix/prompts/system_prompt.md"
 }

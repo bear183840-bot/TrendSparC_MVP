@@ -1,4 +1,4 @@
-"""validator stub for the unassigned sector adapter.
+"""processor stub for the sk_planet sector adapter.
 
 Not implemented on purpose: this sector currently has status template_only.
 No fake data may ever be returned from here — only a clearly-labeled
@@ -11,8 +11,8 @@ from __future__ import annotations
 from common.errors import PipelineStageError
 
 
-def validate(source_documents):
+def process(source_documents):
     raise PipelineStageError(
-        stage="sectors.unassigned.adapter.validator",
+        stage="sectors.sk_planet.adapter.processor",
         reason="template_only: sector adapter not implemented",
     )
