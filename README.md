@@ -19,7 +19,7 @@ principles (contract isolation, failure traceability).
 |---|---|
 | sk_hynix | `template_only` |
 | sk_broadband | `template_only` |
-| unassigned (3rd affiliate, name TBD) | `template_only` |
+| sk_planet | `template_only` |
 | general (fallback for sector-unspecified questions) | `template_only` |
 
 Adding or removing a folder under `sectors/` changes what `core/sector_router`
