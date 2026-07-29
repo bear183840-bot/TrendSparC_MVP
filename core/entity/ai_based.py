@@ -1,11 +1,13 @@
-"""2nd-pass, AI-based entity/keyword refinement — sector-agnostic.
+"""2nd-pass, AI-based entity/keyword/intent refinement — sector-agnostic.
 
-The 1st-pass rule-based extractor (rule_based imports aside, see
-core/entity/extractor.py) just splits the question on whitespace, so its
-`keywords` rarely appear verbatim in a real headline (e.g. "전망은?" with the
-question mark still attached). This step asks an LLM to turn the raw
-question into clean, natural search terms instead — the kind of words that
-would actually show up in a news article title about the same topic.
+The 1st-pass rule-based extractor (see core/entity/extractor.py) just
+splits the question on whitespace, so its `keywords` rarely appear verbatim
+in a real headline (e.g. "전망은?" with the question mark still attached),
+and its intent classification is simple keyword matching. This step asks an
+LLM to turn the raw question into clean, natural search terms AND a more
+reliable intent classification in the same call — the kind of words that
+would actually show up in a news article title, and the category of
+question this actually is.
 
 No sector name is ever referenced here: the prompt is written to work for
 any sector's questions (semiconductors, broadband, or anything else), and
@@ -34,14 +36,26 @@ _API_KEY_ENV_VAR = "TRENDSPARC_ENTITY_AI_API_KEY"
 _MODEL = "gpt-4o-mini"
 _STAGE = "entity"
 
-_SYSTEM_PROMPT = """You are a search-keyword extraction assistant for TrendSparC, an \
-internal AI trend-intelligence tool used across multiple, unrelated business sectors \
-(e.g. semiconductors, broadband/telecom, or others not yet known to you). You will be \
-given one user question. Your only job is to turn it into clean search terms that a \
-collector can match against real news article titles — never assume a specific \
-industry, and never hardcode behavior for one topic over another.
+_INTENT_CATEGORIES = (
+    "current_status",  # 현황파악
+    "issue_response",  # 이슈대응
+    "future_business",  # 미래사업
+    "root_cause",  # 원인분석
+)
 
-Return three fields:
+_SYSTEM_PROMPT = """You are a search-keyword extraction and intent-classification \
+assistant for TrendSparC, an internal AI trend-intelligence tool used across multiple, \
+unrelated business sectors (e.g. semiconductors, broadband/telecom, or others not yet \
+known to you). You will be given one user question. Your job is to turn it into clean \
+search terms a collector can match against real news article titles, AND classify what \
+kind of question it is — never assume a specific industry, and never hardcode behavior \
+for one topic over another.
+
+Return four fields:
+- primary_intent: exactly one of {intent_categories} — pick whichever best describes \
+what the question is actually asking (current_status = 현황파악, issue_response = \
+이슈대응, future_business = 미래사업, root_cause = 원인분석). Use "current_status" as \
+the default when none of the others clearly apply.
 - organizations: companies, agencies, or institutions actually named or clearly \
 implied by the question. Empty list if none.
 - technologies: products, technologies, or standards actually named or clearly \
@@ -68,16 +82,17 @@ realistically appear in.
 
 Never invent facts, entities, or context that the question does not support. If the \
 question is vague or short, keep your output correspondingly short rather than \
-guessing broadly."""
+guessing broadly.""".format(intent_categories=", ".join(_INTENT_CATEGORIES))
 
 _SCHEMA = {
     "type": "object",
     "properties": {
+        "primary_intent": {"type": "string", "enum": list(_INTENT_CATEGORIES)},
         "organizations": {"type": "array", "items": {"type": "string"}},
         "technologies": {"type": "array", "items": {"type": "string"}},
         "keywords": {"type": "array", "items": {"type": "string"}},
     },
-    "required": ["organizations", "technologies", "keywords"],
+    "required": ["primary_intent", "organizations", "technologies", "keywords"],
     "additionalProperties": False,
 }
 
@@ -113,6 +128,7 @@ def extract_entities_ai(
         data = json.loads(message.content)
         return EntityExtractionResult(
             request_id=request.request_id,
+            primary_intent=data["primary_intent"],
             organizations=data["organizations"],
             technologies=data["technologies"],
             keywords=data["keywords"],

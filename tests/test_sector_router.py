@@ -9,7 +9,9 @@ SECTORS_DIR = PROJECT_ROOT / "sectors"
 
 
 def _empty_entities() -> EntityExtractionResult:
-    return EntityExtractionResult(request_id="req_test_router", organizations=[], technologies=[], keywords=[])
+    return EntityExtractionResult(
+        request_id="req_test_router", primary_intent="current_status", organizations=[], technologies=[], keywords=[]
+    )
 
 
 def test_requesting_unregistered_sector_is_unsupported():

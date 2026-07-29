@@ -14,7 +14,7 @@ adapter, which today always reports itself as template_only since no sector
 is active yet.
 
 `force_fail_stage` is a test hook: pass a stage id exactly as it appears in
-the trace (e.g. "intent", "sector_router", "sector_adapter.collector") to
+the trace (e.g. "entity", "sector_router", "sector_adapter.collector") to
 make that stage raise deliberately, to prove failure traceability.
 """
 
@@ -32,7 +32,6 @@ from common.contracts import (
     DocumentAnalysis,
     DynamicLayout,
     EntityExtractionResult,
-    IntentResult,
     ReportPlan,
     SectorRoute,
     SourceDocument,
@@ -43,8 +42,6 @@ from common.contracts import (
 from common.errors import PipelineStageError, StageStatus, StageTrace
 from core.entity.ai_based import extract_entities_ai
 from core.entity.extractor import extract_entities
-from core.intent.ai_based import classify_intent_ai
-from core.intent.rule_based import classify_intent_rule_based
 from core.layout_generator.generator import generate_layout
 from core.report_planner.planner import plan_report
 from core.sector_router.router import route_request, scan_sectors
@@ -68,7 +65,6 @@ _DEFAULT_AUDIENCE_ID = "practitioner"
 class PipelineResult(BaseModel):
     request_id: str
     trace: list[StageTrace] = []
-    intent: Optional[IntentResult] = None
     entities: Optional[EntityExtractionResult] = None
     sector_route: Optional[SectorRoute] = None
     source_plan: Optional[SourcePlan] = None
@@ -103,17 +99,7 @@ def run_pipeline(
         result.trace.append(StageTrace(stage=stage, status=StageStatus.FAILED, reason=reason, detail=detail))
         result.halted_at_stage = stage
 
-    # 1. intent
-    try:
-        _maybe_force_fail("intent")
-        rule_based = classify_intent_rule_based(request)
-        result.intent = classify_intent_ai(request, rule_based)
-        result.trace.append(StageTrace(stage="intent", status=StageStatus.OK))
-    except PipelineStageError as exc:
-        _halt("intent", exc.reason, exc.detail)
-        return result
-
-    # 2. entity
+    # 1. entity (also classifies primary_intent, see core/entity)
     try:
         _maybe_force_fail("entity")
         rule_based_entities = extract_entities(request)
@@ -123,7 +109,7 @@ def run_pipeline(
         _halt("entity", exc.reason, exc.detail)
         return result
 
-    # 3. sector_router
+    # 2. sector_router
     try:
         _maybe_force_fail("sector_router")
         profiles = scan_sectors(SECTORS_DIR)
@@ -143,7 +129,7 @@ def run_pipeline(
 
     sector_id = result.sector_route.sector_id
 
-    # 4. source_planner
+    # 3. source_planner
     try:
         _maybe_force_fail("source_planner")
         search_terms = [
@@ -157,7 +143,7 @@ def run_pipeline(
         _halt("source_planner", exc.reason, exc.detail)
         return result
 
-    # 5. sector adapter: collector -> processor -> validator -> analyzer
+    # 4. sector adapter: collector -> processor -> validator -> analyzer
     documents: list[SourceDocument] = []
     stopped_at_template_only = False
     for role in _ADAPTER_ROLE_ORDER:
@@ -191,7 +177,7 @@ def run_pipeline(
                 _halt(stage_name, exc.reason, exc.detail)
                 return result
 
-    # 6. synthesis
+    # 5. synthesis
     try:
         _maybe_force_fail("synthesis")
         result.synthesis = synthesize(request.request_id, sector_id, result.document_analyses)
@@ -202,16 +188,16 @@ def run_pipeline(
 
     audience_id = request.target_audience or _DEFAULT_AUDIENCE_ID
 
-    # 7. report_planner
+    # 6. report_planner
     try:
         _maybe_force_fail("report_planner")
-        result.report_plan = plan_report(result.synthesis, audience_id)
+        result.report_plan = plan_report(result.synthesis, audience_id, result.entities.primary_intent)
         result.trace.append(StageTrace(stage="report_planner", status=StageStatus.OK))
     except PipelineStageError as exc:
         _halt("report_planner", exc.reason, exc.detail)
         return result
 
-    # 8. audience_adapter
+    # 7. audience_adapter
     try:
         _maybe_force_fail("audience_adapter")
         result.audience_adaptation = adapt_for_audience(result.synthesis, result.report_plan, audience_id)
@@ -220,7 +206,7 @@ def run_pipeline(
         _halt("audience_adapter", exc.reason, exc.detail)
         return result
 
-    # 9. layout_generator
+    # 8. layout_generator
     try:
         _maybe_force_fail("layout_generator")
         result.layout = generate_layout(result.report_plan, result.audience_adaptation)

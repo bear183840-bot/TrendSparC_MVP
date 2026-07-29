@@ -5,12 +5,12 @@ from core.request_pipeline.pipeline import run_pipeline
 
 def test_forced_failure_names_the_failing_stage():
     request = UserRequest(request_id="req_test_failure", question="SK하이닉스 HBM 시장 전망")
-    result = run_pipeline(request, dry_run=True, force_fail_stage="intent")
+    result = run_pipeline(request, dry_run=True, force_fail_stage="entity")
 
-    assert result.halted_at_stage == "intent"
+    assert result.halted_at_stage == "entity"
     failed_traces = [t for t in result.trace if t.status == StageStatus.FAILED]
     assert len(failed_traces) == 1
-    assert failed_traces[0].stage == "intent"
+    assert failed_traces[0].stage == "entity"
     assert failed_traces[0].reason is not None
 
     # Downstream stages never ran.

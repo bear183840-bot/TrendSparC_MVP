@@ -9,15 +9,23 @@ from core.entity.ai_based import extract_entities_ai
 def _rule_based_result(request_id: str) -> EntityExtractionResult:
     return EntityExtractionResult(
         request_id=request_id,
+        primary_intent="current_status",
         organizations=["rule-based-org"],
         technologies=["rule-based-tech"],
         keywords=["rule-based-keyword"],
     )
 
 
-def _make_response(organizations, technologies, keywords, refusal=None):
+def _make_response(primary_intent, organizations, technologies, keywords, refusal=None):
     message = types.SimpleNamespace(
-        content=json.dumps({"organizations": organizations, "technologies": technologies, "keywords": keywords}),
+        content=json.dumps(
+            {
+                "primary_intent": primary_intent,
+                "organizations": organizations,
+                "technologies": technologies,
+                "keywords": keywords,
+            }
+        ),
         refusal=refusal,
     )
     choice = types.SimpleNamespace(message=message)
@@ -59,7 +67,7 @@ def test_falls_back_to_rule_based_when_no_api_key(monkeypatch):
 
 def test_uses_ai_output_when_api_key_configured(monkeypatch):
     monkeypatch.setenv("TRENDSPARC_ENTITY_AI_API_KEY", "test-key")
-    response = _make_response(["SK하이닉스"], ["HBM"], ["HBM", "메모리 시장", "수요 전망"])
+    response = _make_response("future_business", ["SK하이닉스"], ["HBM"], ["HBM", "메모리 시장", "수요 전망"])
     monkeypatch.setattr(entity_ai_module, "OpenAI", lambda api_key: _FakeOpenAI(response))
 
     request = UserRequest(request_id="req_test", question="SK하이닉스 HBM 시장 전망은?")
@@ -67,6 +75,7 @@ def test_uses_ai_output_when_api_key_configured(monkeypatch):
 
     result = extract_entities_ai(request, rule_based)
 
+    assert result.primary_intent == "future_business"
     assert result.organizations == ["SK하이닉스"]
     assert result.technologies == ["HBM"]
     assert result.keywords == ["HBM", "메모리 시장", "수요 전망"]
@@ -86,7 +95,7 @@ def test_falls_back_to_rule_based_on_api_failure(monkeypatch):
 
 def test_falls_back_to_rule_based_on_refusal(monkeypatch):
     monkeypatch.setenv("TRENDSPARC_ENTITY_AI_API_KEY", "test-key")
-    response = _make_response([], [], [], refusal="cannot help with that")
+    response = _make_response("current_status", [], [], [], refusal="cannot help with that")
     monkeypatch.setattr(entity_ai_module, "OpenAI", lambda api_key: _FakeOpenAI(response))
 
     request = UserRequest(request_id="req_test", question="SK하이닉스 HBM 시장 전망은?")

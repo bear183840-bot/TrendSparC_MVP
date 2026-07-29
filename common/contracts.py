@@ -22,16 +22,9 @@ class UserRequest(BaseModel):
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 
-class IntentResult(BaseModel):
-    request_id: str
-    primary_intent: str
-    confidence: float
-    method: Literal["rule_based", "ai_based"]
-    raw_signal: Optional[dict] = None
-
-
 class EntityExtractionResult(BaseModel):
     request_id: str
+    primary_intent: str
     organizations: list[str] = Field(default_factory=list)
     technologies: list[str] = Field(default_factory=list)
     keywords: list[str] = Field(default_factory=list)
@@ -102,8 +95,10 @@ class TrendSynthesis(BaseModel):
 class ReportPlan(BaseModel):
     request_id: str
     audience_id: str
+    primary_intent: str
     sections: list[str] = Field(default_factory=list)
     format: Literal["dashboard", "html", "pdf"] = "html"
+    intent_emphasis: Optional[str] = None
 
 
 class AudienceAdaptation(BaseModel):
