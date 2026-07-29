@@ -52,3 +52,53 @@ def test_planned_source_has_no_fabricated_reliability_tier():
     from common.contracts import PlannedSource
 
     assert "reliability_tier" not in PlannedSource.model_fields
+
+
+def _write_common_naver_source(registry_root: Path) -> None:
+    common_dir = registry_root / "common"
+    common_dir.mkdir(parents=True)
+    (common_dir / "sources.json").write_text(
+        json.dumps({
+            "sources": [
+                {
+                    "name": "네이버 뉴스",
+                    "country": "KR",
+                    "type": "news_portal",
+                    "url": "https://news.naver.com",
+                    "collection_method": ["crawling"],
+                    "frequency": "daily",
+                    "category": [],
+                    "reliability_reason": "포털 종합 뉴스",
+                }
+            ]
+        }),
+        encoding="utf-8",
+    )
+
+
+def test_common_registry_source_is_merged_into_every_sector(tmp_path):
+    registry_root = tmp_path / "registry"
+    _write_common_naver_source(registry_root)
+    (registry_root / "sk_hynix").mkdir(parents=True)
+    (registry_root / "sk_hynix" / "sources.json").write_text(
+        json.dumps({"sources": [{"name": "SK하이닉스 뉴스룸", "url": "https://news.skhynix.co.kr/all/"}]}),
+        encoding="utf-8",
+    )
+
+    plan = plan_sources("req_test_source_planner", "sk_hynix", registry_root)
+
+    names = {source.name for source in plan.planned_sources}
+    assert names == {"SK하이닉스 뉴스룸", "네이버 뉴스"}
+
+
+def test_common_registry_source_applies_even_with_no_sector_specific_folder(tmp_path):
+    # Mirrors the `general` (fallback/unmatched) sector: no sector-specific
+    # registry folder exists at all, yet the common source still applies.
+    registry_root = tmp_path / "registry"
+    _write_common_naver_source(registry_root)
+
+    plan = plan_sources("req_test_source_planner", "general", registry_root)
+
+    assert plan.notes is None
+    assert len(plan.planned_sources) == 1
+    assert plan.planned_sources[0].name == "네이버 뉴스"
