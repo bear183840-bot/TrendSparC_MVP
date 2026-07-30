@@ -90,6 +90,7 @@ def run_pipeline(
     force_fail_stage: Optional[str] = None,
 ) -> PipelineResult:
     result = PipelineResult(request_id=request.request_id)
+    requested_sector_id = requested_sector_id if requested_sector_id is not None else request.requested_sector_id
 
     def _maybe_force_fail(stage: str) -> None:
         if force_fail_stage == stage:

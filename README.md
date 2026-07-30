@@ -48,6 +48,16 @@ contract object (`IntentResult`, `EntityExtractionResult`, `SectorRoute`,
 `SourcePlan`, `TrendSynthesis`, `ReportPlan`, `AudienceAdaptation`,
 `DynamicLayout`) as JSON.
 
+## Run the Streamlit UI
+
+```bash
+streamlit run reporting/dashboard_streamlit/app.py
+```
+
+Question + attachment + audience/sector intake form, then the pipeline result
+rendered as plain per-section blocks (structure only — see
+`reporting/dashboard_streamlit/app.py`'s docstring).
+
 ## Tests
 
 ```bash

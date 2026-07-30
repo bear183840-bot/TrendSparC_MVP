@@ -14,11 +14,20 @@ from typing import Literal, Optional
 from pydantic import BaseModel, Field
 
 
+class Attachment(BaseModel):
+    attachment_id: str
+    filename: str
+    content_type: Optional[str] = None
+    size_bytes: Optional[int] = None
+
+
 class UserRequest(BaseModel):
     request_id: str
     question: str
     requested_by: Optional[str] = None
     target_audience: Optional[str] = None
+    requested_sector_id: Optional[str] = None
+    attachments: list[Attachment] = Field(default_factory=list)
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 

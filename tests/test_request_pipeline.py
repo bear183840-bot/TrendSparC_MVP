@@ -43,3 +43,19 @@ def test_no_sector_specified_falls_back_to_general():
 
     assert result.sector_route.status == "routed"
     assert result.sector_route.sector_id == "general"
+
+
+def test_request_level_sector_selection_is_honored_when_param_omitted():
+    request = _make_request("오늘 점심 뭐 먹지", requested_sector_id="sk_hynix")
+    result = run_pipeline(request, dry_run=True)
+
+    assert result.sector_route.status == "routed"
+    assert result.sector_route.sector_id == "sk_hynix"
+
+
+def test_explicit_param_overrides_request_level_sector_selection():
+    request = _make_request("오늘 점심 뭐 먹지", requested_sector_id="sk_hynix")
+    result = run_pipeline(request, dry_run=True, requested_sector_id="sk_planet")
+
+    assert result.sector_route.status == "routed"
+    assert result.sector_route.sector_id == "sk_planet"
