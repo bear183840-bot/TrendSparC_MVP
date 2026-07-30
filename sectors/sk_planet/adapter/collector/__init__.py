@@ -10,11 +10,14 @@ This replaced an earlier "scrape the listing page, extract links, keyword
 enough to still be linked from the front page, so a source with no recent
 coverage of the question's topic silently contributed nothing even when
 the site's archive actually had a good match. Search looks across each
-source's whole indexed history instead. A document is only ever produced
-from a real Firecrawl response — nothing here fabricates content, and no
-reliability_tier is invented (the registry only carries a free-text
-reliability_reason, not a tier taxonomy, so the field is left unset until
-one is defined).
+source's whole indexed history instead. Up to 3 documents may come back per
+source (Firecrawl's own relevance order), and if the full-length query finds
+nothing, progressively shorter/looser queries are retried before giving up
+on that source — see _MAX_RESULTS_PER_SOURCE / _query_term_counts. A
+document is only ever produced from a real Firecrawl response — nothing
+here fabricates content, and no reliability_tier is invented (the registry
+only carries a free-text reliability_reason, not a tier taxonomy, so the
+field is left unset until one is defined).
 """
 
 from __future__ import annotations
@@ -37,10 +40,19 @@ _API_KEY_ENV_VAR = "FIRECRAWL_API_KEY"
 _SEARCH_TIMEOUT_SECONDS = 30
 _STAGE = "sectors.sk_planet.adapter.collector"
 
-# Firecrawl의 search는 다중 검색어를 AND 조건으로 처리하는 경향이 있어,
-# 너무 긴 검색어(예: 국문/영문 혼용)는 검색 결과를 내지 못할 수 있습니다.
-# 검색어 상한을 5개로 제한하여 검색 정확도와 범위를 유지합니다.
+# Firecrawl의 search는 다중 검색어를 AND 조건으로 처리하는 경향이 있어, 너무 긴
+# 검색어(예: 국문/영문 혼용, 혹은 브랜드명과 "포인트"/"마케팅"/"현황" 같은 흔한
+# 단어가 섞인 조합)는 검색 결과를 내지 못할 수 있습니다. 검색어가 적을수록 뭔가
+# 매칭될 확률이 높으므로, _query_term_counts()는 짧고 구체적인 조합을 먼저
+# 시도하고(비용도 적고 대체로 성공함), 그래도 안 되면 최후 수단으로 전체 검색어를
+# 시도합니다 — 가장 실패 확률이 높은 긴 검색어를 매번 먼저 시도하면 소스마다
+# 낭비되는 호출이 생기고, Firecrawl의 분당 호출 한도에 걸리기 쉬워집니다.
+_PRIMARY_TERM_COUNT = 2
+_LAST_RESORT_TERM_COUNT = 1
 _MAX_QUERY_TERMS = 5
+# Firecrawl은 이미 관련도 순으로 정렬해서 반환하므로, 1건이 아니라 최대 3건까지
+# 받아오면 1등 결과가 애매하거나 다른 소스가 전부 0건일 때도 뭔가는 건질 수 있음.
+_MAX_RESULTS_PER_SOURCE = 3
 
 
 def _doc_id(source: PlannedSource, url: str) -> str:
@@ -84,23 +96,49 @@ def _run_with_timeout(func, timeout_seconds: int):
     return result.get()
 
 
+def _query_term_counts(available: int) -> list[int]:
+    """짧고 구체적인 검색어부터 시도할 검색어 개수 목록을 반환합니다. 이전 시도
+    (더 짧고 느슨한 검색어)가 0건일 때만 더 긴 검색어로 확대하므로, 짧은
+    검색어에서 이미 성공하면 실패 확률 높은 긴 검색어 호출 비용이 안 듭니다."""
+    candidates = [_PRIMARY_TERM_COUNT, _LAST_RESORT_TERM_COUNT, min(available, _MAX_QUERY_TERMS)]
+    counts: list[int] = []
+    for count in candidates:
+        if 1 <= count <= available and count not in counts:
+            counts.append(count)
+    return counts
+
+
+def _search_source(client: Firecrawl, domain: str, deduped_keywords: list[str]):
+    """결과가 나올 때까지, 혹은 실제 에러/타임아웃이 날 때까지 검색어를 점점
+    줄여가며 재시도합니다. ("ok", 결과리스트) / ("error", 예외) / ("timeout", None)
+    중 하나를 반환 — _run_with_timeout의 상태값 규칙과 동일합니다."""
+    for term_count in _query_term_counts(len(deduped_keywords)):
+        query = " ".join(deduped_keywords[:term_count])
+        status, payload = _run_with_timeout(
+            lambda: client.search(
+                query,
+                include_domains=[domain],
+                limit=_MAX_RESULTS_PER_SOURCE,
+                scrape_options=ScrapeOptions(formats=["markdown"]),
+            ),
+            _SEARCH_TIMEOUT_SECONDS,
+        )
+        if status != "ok":
+            return status, payload
+        results = payload.web or []
+        if results:
+            return "ok", results
+    return "ok", []
+
+
 def _crawl_source(client: Firecrawl, source: PlannedSource, keywords: list[str]) -> list[SourceDocument]:
     if not keywords:
         return []
 
     domain = urlparse(source.url).netloc
     deduped_keywords = list(dict.fromkeys(keywords))  # 중복 제거 및 입력 순서 유지
-    query = " ".join(deduped_keywords[:_MAX_QUERY_TERMS])
 
-    status, payload = _run_with_timeout(
-        lambda: client.search(
-            query,
-            include_domains=[domain],
-            limit=1,
-            scrape_options=ScrapeOptions(formats=["markdown"]),
-        ),
-        _SEARCH_TIMEOUT_SECONDS,
-    )
+    status, payload = _search_source(client, domain, deduped_keywords)
 
     if status == "timeout":
         return []
@@ -111,26 +149,23 @@ def _crawl_source(client: Firecrawl, source: PlannedSource, keywords: list[str])
             detail=str(payload),
         ) from payload
 
-    results = payload.web or []
-    if not results:
-        return []
-
-    best = results[0]
-    if not best.markdown:
-        return []
-
-    metadata = best.metadata
-    article_url = (metadata.url if metadata else None) or best.url
-    return [
-        SourceDocument(
-            doc_id=_doc_id(source, article_url),
-            source_id=source.name,
-            title=(metadata.title if metadata else None) or best.title,
-            url=article_url,
-            published_at=_parse_published_at(metadata.published_time if metadata else None),
-            content=best.markdown,
+    documents: list[SourceDocument] = []
+    for item in payload[:_MAX_RESULTS_PER_SOURCE]:
+        if not item.markdown:
+            continue
+        metadata = item.metadata
+        article_url = (metadata.url if metadata else None) or item.url
+        documents.append(
+            SourceDocument(
+                doc_id=_doc_id(source, article_url),
+                source_id=source.name,
+                title=(metadata.title if metadata else None) or item.title,
+                url=article_url,
+                published_at=_parse_published_at(metadata.published_time if metadata else None),
+                content=item.markdown,
+            )
         )
-    ]
+    return documents
 
 
 def collect(source_plan: SourcePlan) -> list[SourceDocument]:

@@ -93,6 +93,96 @@ def test_crawl_source_still_raises_on_a_real_failure():
         _crawl_source(_ErrorClient(), source, ["HBM4"])
 
 
+class _RetryClient:
+    """Empty results until the query is short enough (<= min_words_for_success words)."""
+
+    def __init__(self, results, min_words_for_success=1):
+        self._results = results
+        self._min_words_for_success = min_words_for_success
+        self.queries: list[str] = []
+
+    def search(self, query, include_domains, limit, scrape_options):
+        self.queries.append(query)
+        if len(query.split()) <= self._min_words_for_success:
+            return _search_data(self._results)
+        return _search_data([])
+
+
+def test_crawl_source_succeeds_on_short_primary_query_without_escalating():
+    """The 2-term primary query is tried first; if it already matches, the
+    longer (more likely to fail) queries are never attempted."""
+    result = _make_result("본문", title="제목", url="https://example.com/a/")
+    source = PlannedSource(name="primary-success source", url="https://example.com/news/")
+    client = _RetryClient([result], min_words_for_success=2)
+
+    documents = _crawl_source(client, source, ["포인트", "마케팅", "시장", "현황"])
+
+    assert len(documents) == 1
+    assert documents[0].url == "https://example.com/a/"
+    assert client.queries == ["포인트 마케팅"]  # succeeded immediately, no escalation needed
+
+
+class _ExactLengthClient:
+    """Only succeeds when the query has exactly `required_words` words."""
+
+    def __init__(self, results, required_words):
+        self._results = results
+        self._required_words = required_words
+        self.queries: list[str] = []
+
+    def search(self, query, include_domains, limit, scrape_options):
+        self.queries.append(query)
+        if len(query.split()) == self._required_words:
+            return _search_data(self._results)
+        return _search_data([])
+
+
+def test_crawl_source_escalates_to_full_query_only_as_a_last_resort():
+    """Both short attempts (2 terms, then 1 term) fail; only the full-length
+    query (tried last, since it's the least likely to match) succeeds."""
+    result = _make_result("본문", title="제목", url="https://example.com/a/")
+    source = PlannedSource(name="last-resort source", url="https://example.com/news/")
+    client = _ExactLengthClient([result], required_words=4)
+
+    documents = _crawl_source(client, source, ["포인트", "마케팅", "시장", "현황"])
+
+    assert len(documents) == 1
+    assert client.queries == ["포인트 마케팅", "포인트", "포인트 마케팅 시장 현황"]
+
+
+def test_crawl_source_gives_up_after_all_term_counts_fail():
+    source = PlannedSource(name="never matches", url="https://example.com/news/")
+    client = _ExactLengthClient([_make_result("본문")], required_words=99)  # nothing ever satisfies this
+
+    documents = _crawl_source(client, source, ["포인트", "마케팅", "시장", "현황"])
+
+    assert documents == []
+    assert client.queries == ["포인트 마케팅", "포인트", "포인트 마케팅 시장 현황"]  # tried short-first, all failed
+
+
+def test_crawl_source_returns_up_to_three_documents_from_search_results():
+    results = [
+        _make_result(f"본문{i}", title=f"제목{i}", url=f"https://example.com/{i}/") for i in range(3)
+    ]
+    source = PlannedSource(name="multi source", url="https://example.com/news/")
+
+    documents = _crawl_source(_FastClient(results), source, ["HBM4"])
+
+    assert len(documents) == 3
+    assert [d.url for d in documents] == [f"https://example.com/{i}/" for i in range(3)]
+
+
+def test_crawl_source_caps_at_three_documents_even_if_more_results_returned():
+    results = [
+        _make_result(f"본문{i}", title=f"제목{i}", url=f"https://example.com/{i}/") for i in range(5)
+    ]
+    source = PlannedSource(name="over source", url="https://example.com/news/")
+
+    documents = _crawl_source(_FastClient(results), source, ["HBM4"])
+
+    assert len(documents) == 3
+
+
 def _make_source_plan(source_count: int, keywords: list[str] | None = None) -> tuple[SourcePlan, list[PlannedSource]]:
     sources = [
         PlannedSource(name=f"source-{i}", url=f"https://example.com/{i}/") for i in range(source_count)

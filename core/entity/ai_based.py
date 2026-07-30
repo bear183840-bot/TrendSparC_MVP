@@ -58,16 +58,21 @@ what the question is actually asking (current_status = 현황파악, issue_respo
 the default when none of the others clearly apply.
 - organizations: companies, agencies, or institutions actually named or clearly \
 implied by the question. Empty list if none.
-- technologies: products, technologies, or standards actually named or clearly \
-implied by the question. Empty list if none.
-- keywords: short, canonical terms in the style of a professionally curated \
-industry keyword glossary — the kind of terse entries a domain analyst would \
-maintain for filtering news (e.g. product/technology codes, company short names, \
-standard terms), not descriptive phrases or sentence fragments. Each entry should be \
-plausible as a standalone glossary entry and likely to appear verbatim in a real news \
-headline about this exact question. Do not just copy tokens from the question's raw \
-text with grammatical particles or punctuation still attached. Keep the list short \
-(typically 3-6 core concepts rather than padding it).
+- technologies: products, technologies, brands, or standards actually named or \
+clearly implied by the question — this includes named consumer/business products \
+and services (e.g. a loyalty program, an app, a platform name), not just technical \
+standards. If the question names a specific product, service, or brand, it belongs \
+here (or in organizations, if it's the name of a company/institution itself), never \
+in the generic keywords list below. Empty list if none.
+- keywords: short, canonical topic/domain terms in the style of a professionally \
+curated industry keyword glossary — the kind of terse entries a domain analyst would \
+maintain for filtering news (e.g. topic areas, business concepts, generic technical \
+terms), not descriptive phrases or sentence fragments, and never a named entity that \
+already belongs in organizations/technologies. Each entry should be plausible as a \
+standalone glossary entry and likely to appear verbatim in a real news headline about \
+this exact question. Do not just copy tokens from the question's raw text with \
+grammatical particles or punctuation still attached. Keep the list short (typically \
+3-6 core concepts rather than padding it).
 
 Language: these terms feed a search engine as one combined query, which \
 generally requires every term to appear together on a matching page — so never \

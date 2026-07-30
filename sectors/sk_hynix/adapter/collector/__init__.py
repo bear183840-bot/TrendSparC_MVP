@@ -10,11 +10,14 @@ This replaced an earlier "scrape the listing page, extract links, keyword
 enough to still be linked from the front page, so a source with no recent
 coverage of the question's topic silently contributed nothing even when
 the site's archive actually had a good match. Search looks across each
-source's whole indexed history instead. A document is only ever produced
-from a real Firecrawl response — nothing here fabricates content, and no
-reliability_tier is invented (the registry only carries a free-text
-reliability_reason, not a tier taxonomy, so the field is left unset until
-one is defined).
+source's whole indexed history instead. Up to 3 documents may come back per
+source (Firecrawl's own relevance order), and if the full-length query finds
+nothing, progressively shorter/looser queries are retried before giving up
+on that source — see _MAX_RESULTS_PER_SOURCE / _query_term_counts. A
+document is only ever produced from a real Firecrawl response — nothing
+here fabricates content, and no reliability_tier is invented (the registry
+only carries a free-text reliability_reason, not a tier taxonomy, so the
+field is left unset until one is defined).
 """
 
 from __future__ import annotations
@@ -38,10 +41,22 @@ _SEARCH_TIMEOUT_SECONDS = 30
 _STAGE = "sectors.sk_hynix.adapter.collector"
 # Firecrawl's search treats a multi-term query as roughly an AND of every
 # term, so a long query (esp. one with redundant Korean+English pairs for
-# the same concept, e.g. "반도체 Semiconductors") can match nothing at all
+# the same concept, e.g. "반도체 Semiconductors", or one mixing specific
+# brand/product terms with generic filler words) can match nothing at all
 # even when a short version of the same query returns good hits — confirmed
-# live. Capping the term count keeps the query from over-constraining itself.
+# live. Fewer terms are strictly more likely to match *something*, so
+# _query_term_counts() below tries the short, specific combination FIRST
+# (cheap and usually succeeds) and only escalates to the full-length query
+# as a last resort if even a single term finds nothing — trying the
+# longest/most-restrictive combination first would waste a call on the
+# attempt least likely to succeed, for every single source, every time.
+_PRIMARY_TERM_COUNT = 2
+_LAST_RESORT_TERM_COUNT = 1
 _MAX_QUERY_TERMS = 5
+# Firecrawl's search already ranks by relevance; taking up to 3 (rather than
+# just the single best) means a source still contributes something even
+# when the top hit isn't a great match, and other sources return nothing.
+_MAX_RESULTS_PER_SOURCE = 3
 
 
 def _doc_id(source: PlannedSource, url: str) -> str:
@@ -85,23 +100,51 @@ def _run_with_timeout(func, timeout_seconds: int):
     return result.get()
 
 
+def _query_term_counts(available: int) -> list[int]:
+    """Term counts to try, short/likely-to-match first, deduped and bounded
+    by what's actually available. Escalating to more terms only happens
+    when the previous (shorter, looser) attempt found zero results, so a
+    query that already succeeds on the short form never pays for the
+    longer, more-likely-to-fail attempt."""
+    candidates = [_PRIMARY_TERM_COUNT, _LAST_RESORT_TERM_COUNT, min(available, _MAX_QUERY_TERMS)]
+    counts: list[int] = []
+    for count in candidates:
+        if 1 <= count <= available and count not in counts:
+            counts.append(count)
+    return counts
+
+
+def _search_source(client: Firecrawl, domain: str, deduped_keywords: list[str]):
+    """Try progressively shorter queries until one returns results, a real
+    error, or a timeout occurs. Returns ("ok", results-list), ("error", exc),
+    or ("timeout", None) — mirrors _run_with_timeout's status values."""
+    for term_count in _query_term_counts(len(deduped_keywords)):
+        query = " ".join(deduped_keywords[:term_count])
+        status, payload = _run_with_timeout(
+            lambda: client.search(
+                query,
+                include_domains=[domain],
+                limit=_MAX_RESULTS_PER_SOURCE,
+                scrape_options=ScrapeOptions(formats=["markdown"]),
+            ),
+            _SEARCH_TIMEOUT_SECONDS,
+        )
+        if status != "ok":
+            return status, payload
+        results = payload.web or []
+        if results:
+            return "ok", results
+    return "ok", []
+
+
 def _crawl_source(client: Firecrawl, source: PlannedSource, keywords: list[str]) -> list[SourceDocument]:
     if not keywords:
         return []
 
     domain = urlparse(source.url).netloc
     deduped_keywords = list(dict.fromkeys(keywords))  # de-dupe, keep first-seen order
-    query = " ".join(deduped_keywords[:_MAX_QUERY_TERMS])
 
-    status, payload = _run_with_timeout(
-        lambda: client.search(
-            query,
-            include_domains=[domain],
-            limit=1,
-            scrape_options=ScrapeOptions(formats=["markdown"]),
-        ),
-        _SEARCH_TIMEOUT_SECONDS,
-    )
+    status, payload = _search_source(client, domain, deduped_keywords)
 
     if status == "timeout":
         return []
@@ -112,26 +155,23 @@ def _crawl_source(client: Firecrawl, source: PlannedSource, keywords: list[str])
             detail=str(payload),
         ) from payload
 
-    results = payload.web or []
-    if not results:
-        return []
-
-    best = results[0]
-    if not best.markdown:
-        return []
-
-    metadata = best.metadata
-    article_url = (metadata.url if metadata else None) or best.url
-    return [
-        SourceDocument(
-            doc_id=_doc_id(source, article_url),
-            source_id=source.name,
-            title=(metadata.title if metadata else None) or best.title,
-            url=article_url,
-            published_at=_parse_published_at(metadata.published_time if metadata else None),
-            content=best.markdown,
+    documents: list[SourceDocument] = []
+    for item in payload[:_MAX_RESULTS_PER_SOURCE]:
+        if not item.markdown:
+            continue
+        metadata = item.metadata
+        article_url = (metadata.url if metadata else None) or item.url
+        documents.append(
+            SourceDocument(
+                doc_id=_doc_id(source, article_url),
+                source_id=source.name,
+                title=(metadata.title if metadata else None) or item.title,
+                url=article_url,
+                published_at=_parse_published_at(metadata.published_time if metadata else None),
+                content=item.markdown,
+            )
         )
-    ]
+    return documents
 
 
 def collect(source_plan: SourcePlan) -> list[SourceDocument]:
