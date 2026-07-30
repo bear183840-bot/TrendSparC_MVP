@@ -46,6 +46,7 @@ from core.layout_generator.generator import generate_layout
 from core.report_planner.planner import plan_report
 from core.sector_router.router import route_request, scan_sectors
 from core.source_planner.planner import plan_sources
+from core.synthesis.ai_based import refine_synthesis_ai
 from core.synthesis.synthesizer import synthesize
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
@@ -178,10 +179,11 @@ def run_pipeline(
                 _halt(stage_name, exc.reason, exc.detail)
                 return result
 
-    # 5. synthesis
+    # 5. synthesis (also de-dupes/ranks/summarizes via AI, see core/synthesis/ai_based.py)
     try:
         _maybe_force_fail("synthesis")
-        result.synthesis = synthesize(request.request_id, sector_id, result.document_analyses)
+        rule_based_synthesis = synthesize(request.request_id, sector_id, result.document_analyses)
+        result.synthesis = refine_synthesis_ai(rule_based_synthesis)
         result.trace.append(StageTrace(stage="synthesis", status=StageStatus.OK))
     except PipelineStageError as exc:
         _halt("synthesis", exc.reason, exc.detail)
