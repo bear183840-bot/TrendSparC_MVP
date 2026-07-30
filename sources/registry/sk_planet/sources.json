@@ -1,1 +1,39 @@
-{"sources": []}
+{
+  "sources": [
+    {
+      "name": "SK플래닛 공식 뉴스룸",
+      "url": "https://www.skplanet.com",
+      "collection_method": ["firecrawl_search"],
+      "frequency": "daily",
+      "reliability_reason": "SK플래닛 공식 보도자료 및 공시 채널로 신뢰도가 매우 높음"
+    },
+    {
+      "name": "전자신문 (IT/데이터/플랫폼)",
+      "url": "https://www.etnews.com",
+      "collection_method": ["firecrawl_search"],
+      "frequency": "daily",
+      "reliability_reason": "국내 대표 IT/테크 전문 매체로 데이터·플랫폼·빅데이터 산업 보도 신뢰성 확보"
+    },
+    {
+      "name": "블로터 (Web3/테크)",
+      "url": "https://www.bloter.net",
+      "collection_method": ["firecrawl_search"],
+      "frequency": "daily",
+      "reliability_reason": "디지털 마케팅, Web3, 블록체인 및 테크 신사업 전문 심층 분석 매체"
+    },
+    {
+      "name": "모바일인덱스 (아이지에이웍스)",
+      "url": "https://www.mobileindex.com",
+      "collection_method": ["firecrawl_search"],
+      "frequency": "weekly",
+      "reliability_reason": "모바일 앱 트래픽, MAU, 사용자 행동 데이터 전문 분석 기관으로 신뢰도 우수"
+    },
+    {
+      "name": "데이터넷 (빅데이터/마케팅)",
+      "url": "https://www.datanet.co.kr",
+      "collection_method": ["firecrawl_search"],
+      "frequency": "daily",
+      "reliability_reason": "B2B IT 솔루션, 빅데이터 마케팅, Ad-Tech 분야 전문 뉴스 매체"
+    }
+  ]
+}
