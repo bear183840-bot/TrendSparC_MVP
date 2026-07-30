@@ -163,6 +163,9 @@ def _crawl_source(client: Firecrawl, source: PlannedSource, keywords: list[str])
                 url=article_url,
                 published_at=_parse_published_at(metadata.published_time if metadata else None),
                 content=item.markdown,
+                # Only carried through when the registry itself sets a tier
+                # (see PlannedSource.reliability_tier) — never invented here.
+                reliability_tier=source.reliability_tier,
             )
         )
     return documents

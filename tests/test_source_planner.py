@@ -48,10 +48,15 @@ def test_structured_registry_sources_parse_without_validation_error(tmp_path):
     assert source.reliability_reason == "회사 공식 1차 자료"
 
 
-def test_planned_source_has_no_fabricated_reliability_tier():
+def test_planned_source_reliability_tier_defaults_to_none_not_fabricated():
+    # reliability_tier exists (a real, domain-expert-defined 3-tier convention —
+    # see common/contracts.py's PlannedSource docstring), but it must never be
+    # auto-populated: a source registered without one stays None, it's not
+    # guessed from the source's name/url/type.
     from common.contracts import PlannedSource
 
-    assert "reliability_tier" not in PlannedSource.model_fields
+    source = PlannedSource(name="untiered source", url="https://example.com")
+    assert source.reliability_tier is None
 
 
 def _write_common_naver_source(registry_root: Path) -> None:

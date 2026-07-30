@@ -66,6 +66,17 @@ class PlannedSource(BaseModel):
     frequency: Optional[str] = None
     category: list[str] = Field(default_factory=list)
     reliability_reason: Optional[str] = None
+    # Optional, free-text but meant to follow a shared 3-tier convention
+    # (confirmed with an SK브로드밴드 domain expert, not invented by us):
+    #   "official"       — government/company's own first-party statements
+    #   "analyst_media"   — industry press or aggregator/database (interprets
+    #                       or curates, doesn't just publish raw fact)
+    #   "user_generated"  — audience reviews/reactions; not fact-checked and
+    #                       not meant to be — it's a signal of sentiment, not
+    #                       a claim to verify. Left unset until a sector
+    #                       defines its own tiering (no sector-name branching
+    #                       on this — each sector's own registry decides).
+    reliability_tier: Optional[str] = None
 
 
 class SourcePlan(BaseModel):
