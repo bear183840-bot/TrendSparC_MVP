@@ -1,15 +1,13 @@
-"""Build a ReportPlan from a TrendSynthesis, the target audience profile,
-and the question's classified intent.
+﻿"""Build a ReportPlan from synthesis, audience, and report purpose.
 
-The section list and output format are derived from the audience profile's
-declared focus/format_preference — no audience-name branching here either.
-`primary_intent` is carried onto the ReportPlan and, if a matching file
-exists under prompts/report_structures/, its (currently template-only)
-content is attached as `intent_emphasis` — this is a structural extension
-point only: no per-intent differentiation logic exists yet. The team will
-design what each report type should actually emphasize and fill in those
-files later; an unrecognized or not-yet-authored intent value is not an
-error, it just means no extra emphasis is attached.
+Report purpose is now an explicit contract produced by
+core/report_purpose/classifier.py. `primary_intent` is still carried for
+backwards compatibility, but new downstream code should read
+`ReportPlan.report_purpose.purpose_id`.
+
+Prompt lookup order:
+1. prompts/report_purposes/<purpose_id>.md  (canonical, new work goes here)
+2. prompts/report_structures/<purpose_id>.md (legacy compatibility)
 """
 
 from __future__ import annotations
@@ -17,28 +15,76 @@ from __future__ import annotations
 from pathlib import Path
 
 from audience.contracts import load_audience_profile
-from common.contracts import ReportPlan, TrendSynthesis
+from common.contracts import ReportPlan, ReportPurposeClassification, TrendSynthesis
 
 _BASE_SECTIONS = ["overview", "key_points"]
-_REPORT_STRUCTURES_DIR = Path(__file__).resolve().parent.parent.parent / "prompts" / "report_structures"
+_PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
+_REPORT_PURPOSES_DIR = _PROJECT_ROOT / "prompts" / "report_purposes"
+_LEGACY_REPORT_STRUCTURES_DIR = _PROJECT_ROOT / "prompts" / "report_structures"
 
 
-def _load_intent_emphasis(primary_intent: str) -> str | None:
-    path = _REPORT_STRUCTURES_DIR / f"{primary_intent}.md"
-    if not path.is_file():
+_PURPOSE_LABELS = {
+    "current_status": "현황 파악",
+    "issue_response": "이슈 대응",
+    "future_business": "미래사업",
+    "root_cause": "문제 분석",
+}
+
+
+def _load_intent_emphasis(purpose_id: str) -> str | None:
+    for directory in (_REPORT_PURPOSES_DIR, _LEGACY_REPORT_STRUCTURES_DIR):
+        path = directory / f"{purpose_id}.md"
+        if path.is_file():
+            return path.read_text(encoding="utf-8")
+    return None
+
+
+def _coerce_report_purpose(
+    synthesis: TrendSynthesis,
+    report_purpose: ReportPurposeClassification | str,
+) -> ReportPurposeClassification | None:
+    if isinstance(report_purpose, ReportPurposeClassification):
+        return report_purpose
+
+    # Backwards-compatible path for older tests/callers that still pass a raw
+    # intent string. Unknown strings are allowed to behave exactly as before:
+    # ReportPlan.primary_intent carries the raw value, intent_emphasis is None,
+    # and the new report_purpose field stays empty.
+    purpose_id = report_purpose
+    if purpose_id not in _PURPOSE_LABELS:
         return None
-    return path.read_text(encoding="utf-8")
+
+    return ReportPurposeClassification(
+        request_id=synthesis.request_id,
+        purpose_id=purpose_id,  # type: ignore[arg-type]
+        display_name=_PURPOSE_LABELS[purpose_id],
+        confidence="low",
+        reason="backwards-compatible raw purpose string passed to plan_report",
+        classifier_version="compat_raw_string",
+        recommended_sections=[],
+        dashboard_block_hints=[],
+    )
 
 
-def plan_report(synthesis: TrendSynthesis, audience_id: str, primary_intent: str) -> ReportPlan:
+def plan_report(
+    synthesis: TrendSynthesis,
+    audience_id: str,
+    report_purpose: ReportPurposeClassification | str,
+) -> ReportPlan:
     profile = load_audience_profile(audience_id)
-    sections = _BASE_SECTIONS + list(profile.focus)
+    purpose = _coerce_report_purpose(synthesis, report_purpose)
+    raw_purpose_id = report_purpose if isinstance(report_purpose, str) else report_purpose.purpose_id
+    purpose_id = purpose.purpose_id if purpose is not None else raw_purpose_id
+    purpose_sections = purpose.recommended_sections if purpose is not None else []
+    sections = _BASE_SECTIONS + list(purpose_sections) + list(profile.focus)
+    sections = list(dict.fromkeys(sections))
 
     return ReportPlan(
         request_id=synthesis.request_id,
         audience_id=profile.audience_id,
-        primary_intent=primary_intent,
+        primary_intent=purpose_id,
+        report_purpose=purpose,
         sections=sections,
         format=profile.format_preference,
-        intent_emphasis=_load_intent_emphasis(primary_intent),
+        intent_emphasis=_load_intent_emphasis(purpose_id),
     )

@@ -18,7 +18,10 @@ def test_dry_run_passes_every_stage_with_valid_contracts():
     assert result.halted_at_stage is None
     assert result.entities is not None
     assert result.entities.primary_intent == "future_business"
+    assert result.report_purpose is not None
+    assert result.report_purpose.purpose_id == "future_business"
     assert result.report_plan.primary_intent == "future_business"
+    assert result.report_plan.report_purpose.purpose_id == "future_business"
     assert result.sector_route is not None
     assert result.sector_route.status == "routed"
     assert result.source_plan is not None
@@ -30,6 +33,7 @@ def test_dry_run_passes_every_stage_with_valid_contracts():
     statuses = {trace.stage: trace.status for trace in result.trace}
     assert statuses["entity"] == StageStatus.OK
     assert statuses["sector_router"] == StageStatus.OK
+    assert statuses["report_purpose"] == StageStatus.OK
     assert statuses["source_planner"] == StageStatus.OK
     assert statuses["synthesis"] == StageStatus.OK
     assert statuses["report_planner"] == StageStatus.OK

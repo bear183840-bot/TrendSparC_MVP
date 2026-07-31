@@ -5,3 +5,4 @@ python-dotenv>=1.0
 firecrawl-py>=1.0
 openai>=1.50
 streamlit>=1.35
+requests>=2.31,<3

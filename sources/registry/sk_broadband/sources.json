@@ -7,7 +7,7 @@
         "firecrawl_search"
       ],
       "frequency": "daily",
-      "reliability_reason": "SK브로드밴드 공식 1차 자료 — SK텔레콤 뉴스룸의 SK브로드밴드 태그 페이지(브로드밴드 현직자 확인). tier: official",
+      "reliability_reason": "SK브로드밴드 관련 공식 발표와 서비스·제휴·기술 적용 내용을 확인하기 위한 1차 공식 자료다.",
       "reliability_tier": "official",
       "content_type": "press_release",
       "role": "official"
@@ -19,7 +19,7 @@
         "firecrawl_search"
       ],
       "frequency": "daily",
-      "reliability_reason": "최대 경쟁사(통신3사) KT 공식 홍보센터 소식 게시판. 실사이트 확인 결과 corp.kt.com > 홍보센터 > KT 소식 섹션 URL 확인함. tier: official",
+      "reliability_reason": "IPTV·통신·미디어 영역의 주요 경쟁사 공식 발표를 비교하기 위한 자료다.",
       "reliability_tier": "official",
       "content_type": "press_release",
       "role": "competitor_official"
@@ -31,7 +31,20 @@
         "firecrawl_search"
       ],
       "frequency": "daily",
-      "reliability_reason": "한국콘텐츠진흥원(KOCCA)은 콘텐츠 산업 통계, 백서, 시장동향 자료를 제공하는 공공기관이다. 규제기관이라기보다 콘텐츠·미디어 산업 현황을 해석하는 근거원이므로 SK브로드밴드의 콘텐츠/미디어 사업 환경 분석용 market_analysis 소스로 분류한다.",
+      "reliability_reason": "콘텐츠산업 통계, 백서, 시장동향 자료를 제공하는 공공기관으로 미디어·콘텐츠 시장 분석의 근거 자료다.",
+      "reliability_tier": "official",
+      "content_type": "analysis",
+      "role": "market_analysis"
+    },
+    {
+      "name": "영화진흥위원회(KOFIC)",
+      "url": "https://www.kofic.or.kr/kofic/business/board/selectBoardList.do?boardNumber=2",
+      "collection_method": [
+        "kofic_pdf_post_download",
+        "firecrawl_parse"
+      ],
+      "frequency": "weekly",
+      "reliability_reason": "영화산업 결산, 박스오피스, 관객수, 매출 등 콘텐츠 소비 흐름을 판단할 수 있는 공공 보고서 자료다. 상세 페이지의 PDF 첨부를 POST 다운로드한 뒤 Firecrawl parse로 본문을 추출한다.",
       "reliability_tier": "official",
       "content_type": "analysis",
       "role": "market_analysis"
@@ -43,7 +56,7 @@
         "firecrawl_search"
       ],
       "frequency": "daily",
-      "reliability_reason": "국내 대표 IT/테크 전문 매체로 통신·네트워크·IPTV 산업 보도 신뢰성 확보. 실사이트 확인 결과 '통신'(id1=03) 섹션 사용. tier: analyst_media (업계 취재·해석 개입)",
+      "reliability_reason": "국내 IT·통신 전문 매체로 통신, IPTV, 네트워크, 미디어 산업 뉴스와 해설을 보완한다.",
       "reliability_tier": "analyst_media",
       "content_type": "analysis",
       "role": "search"
@@ -55,7 +68,7 @@
         "firecrawl_search"
       ],
       "frequency": "weekly",
-      "reliability_reason": "국내 유저 콘텐츠 평점/반응 플랫폼 — 브로드밴드는 유저 반응 자체가 중요한 신호라 등록. 유저 의견이므로 사실 검증 대상이 아니라 여론·반응 데이터로 취급(신뢰성 평가 불필요). tier: user_generated",
+      "reliability_reason": "콘텐츠·OTT 사용자의 반응과 선호를 참고하기 위한 user sentiment 자료다. 사실 검증 출처가 아니라 보조 신호로만 사용한다.",
       "reliability_tier": "user_generated",
       "role": "user_sentiment"
     }

@@ -1,18 +1,18 @@
-"""reporter stub for the sk_broadband sector adapter.
-
-Not implemented on purpose: this sector currently has status template_only.
-No fake data may ever be returned from here — only a clearly-labeled
-PipelineStageError so the orchestrator's stage trace shows exactly which
-sector adapter stage was called and why it can't proceed yet.
-"""
+"""SK Broadband sector reporter helper."""
 
 from __future__ import annotations
 
-from common.errors import PipelineStageError
+from common.contracts import ReportPlan, TrendSynthesis
 
 
-def report(report_plan, synthesis):
-    raise PipelineStageError(
-        stage="sectors.sk_broadband.adapter.reporter",
-        reason="template_only: sector adapter not implemented",
-    )
+def report(report_plan: ReportPlan, synthesis: TrendSynthesis) -> dict:
+    return {
+        "sector_id": synthesis.sector_id,
+        "audience_id": report_plan.audience_id,
+        "primary_intent": report_plan.primary_intent,
+        "report_purpose": report_plan.report_purpose.purpose_id if report_plan.report_purpose else None,
+        "sections": report_plan.sections,
+        "source_count": synthesis.source_count,
+        "synthesis_text": synthesis.synthesis_text,
+        "highlights": synthesis.highlights,
+    }

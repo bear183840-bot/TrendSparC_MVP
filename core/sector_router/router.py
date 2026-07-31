@@ -1,8 +1,9 @@
-"""Dynamic sector registry + routing.
+﻿"""Dynamic sector registry + routing.
 
-The set of known sectors is never hardcoded here. It is discovered at call
-time by scanning `sectors/*/profile.json`. Adding or removing a folder under
-`sectors/` changes routing behavior with zero changes to this file.
+The set of known sectors is discovered by scanning ``sectors/*/profile.json``.
+Routing uses profile aliases/keywords, but avoids routing on one ambiguous
+standalone word such as "Planet", "A.", "011", "투자", or "가격". That keeps the
+router profile-driven while reducing false positives from generic glossary terms.
 """
 
 from __future__ import annotations
@@ -13,15 +14,44 @@ from pathlib import Path
 from common.contracts import EntityExtractionResult, SectorProfile, SectorRoute
 
 FALLBACK_SECTOR_ID = "general"
+_MIN_ROUTE_SCORE = 3
+
+# Cross-sector ambiguous tokens that should never route a question by themselves.
+# They may still contribute weak support when a stronger organization/service/
+# industry signal is also present.
+_AMBIGUOUS_SIGNALS = {
+    "planet",
+    "플래닛",
+    "point",
+    "포인트",
+    "reward",
+    "리워드",
+    "web3",
+    "a.",
+    "011",
+    "d2d",
+    "투자",
+    "실적",
+    "매출",
+    "영업이익",
+    "가격",
+    "수요",
+    "미국",
+    "중국",
+    "규제",
+    "리스크",
+    "전략",
+    "에너지",
+}
+
+
+def _normalize(value: str) -> str:
+    return value.strip().lower()
 
 
 def scan_sectors(sectors_dir: Path) -> dict[str, SectorProfile]:
-    """Read every sectors/*/profile.json into a sector_id -> SectorProfile map.
+    """Read every sectors/*/profile.json into a sector_id -> profile map."""
 
-    Folders without a valid profile.json are skipped rather than failing the
-    whole scan, so a work-in-progress sector folder can't break routing for
-    every other sector.
-    """
     profiles: dict[str, SectorProfile] = {}
     if not sectors_dir.is_dir():
         return profiles
@@ -40,6 +70,44 @@ def scan_sectors(sectors_dir: Path) -> dict[str, SectorProfile]:
     return profiles
 
 
+def _score_profile(entities: EntityExtractionResult, profile: SectorProfile) -> tuple[int, list[str]]:
+    aliases = {_normalize(value) for value in profile.aliases}
+    keywords = {_normalize(value) for value in profile.keywords}
+    market_keywords = {_normalize(value) for value in profile.market_keywords}
+    matched: list[str] = []
+    score = 0
+    strong_match_count = 0
+
+    weighted_terms: list[tuple[str, int, str]] = []
+    weighted_terms.extend((term, 10, "organization") for term in entities.organizations)
+    weighted_terms.extend((term, 5, "technology") for term in entities.technologies)
+    weighted_terms.extend((term, 3, "keyword") for term in entities.keywords)
+
+    for raw_term, base_weight, origin in weighted_terms:
+        term = _normalize(raw_term)
+        if not term:
+            continue
+        is_ambiguous = term in _AMBIGUOUS_SIGNALS
+
+        if term in aliases:
+            weight = 1 if is_ambiguous else base_weight + 3
+        elif term in keywords:
+            weight = 1 if is_ambiguous else base_weight
+        elif term in market_keywords:
+            weight = 1 if is_ambiguous else 2
+        else:
+            continue
+
+        score += weight
+        matched.append(f"{origin}:{raw_term}")
+        if not is_ambiguous and weight >= 2:
+            strong_match_count += 1
+
+    if strong_match_count == 0:
+        return 0, matched
+    return score, matched
+
+
 def route_request(
     request_id: str,
     entities: EntityExtractionResult,
@@ -48,9 +116,11 @@ def route_request(
 ) -> SectorRoute:
     """Match extracted entities/keywords against registered sector profiles.
 
-    If the caller names a sector explicitly and it isn't registered, routing
-    fails clearly as unsupported rather than silently falling back.
+    Explicit sector selection is still honored. Without explicit selection, the
+    router chooses the highest scoring profile and falls back to ``general`` when
+    only weak/generic terms matched.
     """
+
     if requested_sector_id is not None:
         profile = profiles.get(requested_sector_id)
         if profile is None:
@@ -67,16 +137,26 @@ def route_request(
             matched_profile=profile,
         )
 
-    signals = {s.lower() for s in (*entities.organizations, *entities.technologies, *entities.keywords)}
+    best_profile: SectorProfile | None = None
+    best_score = 0
+    best_matches: list[str] = []
     for profile in profiles.values():
-        candidates = {s.lower() for s in (*profile.aliases, *profile.keywords)}
-        if signals & candidates:
-            return SectorRoute(
-                request_id=request_id,
-                sector_id=profile.sector_id,
-                status="routed",
-                matched_profile=profile,
-            )
+        if profile.sector_id == FALLBACK_SECTOR_ID:
+            continue
+        score, matches = _score_profile(entities, profile)
+        if score > best_score:
+            best_profile = profile
+            best_score = score
+            best_matches = matches
+
+    if best_profile is not None and best_score >= _MIN_ROUTE_SCORE:
+        return SectorRoute(
+            request_id=request_id,
+            sector_id=best_profile.sector_id,
+            status="routed",
+            matched_profile=best_profile,
+            reason=f"matched profile signals: {', '.join(best_matches)}; score={best_score}",
+        )
 
     fallback = profiles.get(FALLBACK_SECTOR_ID)
     if fallback is not None:
@@ -85,7 +165,7 @@ def route_request(
             sector_id=fallback.sector_id,
             status="routed",
             matched_profile=fallback,
-            reason="no sector-specific signal matched; routed to fallback sector",
+            reason="no sector-specific strong signal matched; routed to fallback sector",
         )
 
     return SectorRoute(

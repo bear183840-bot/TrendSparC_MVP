@@ -1,14 +1,25 @@
 """Sector-agnostic aggregation of DocumentAnalysis into a TrendSynthesis.
 
-This performs structural aggregation only (counting, concatenating points
-already produced by a sector's analyzer) — it never invents insights. With
-no document analyses (the normal case in this scaffold, since every sector
-adapter is stub-only), it returns an explicitly empty synthesis.
+This performs structural aggregation only. It does not invent insights; it
+collects fields already produced by sector analyzers and tags them so later
+report/layout stages can distinguish key facts from risk, opportunity, impact,
+and recommended actions.
 """
 
 from __future__ import annotations
 
 from common.contracts import DocumentAnalysis, TrendSynthesis
+
+
+def _append_text(highlights: list[str], label: str, value: str | None, doc_id: str) -> None:
+    if value:
+        highlights.append(f"{label}: {value} [doc_id={doc_id}]")
+
+
+def _append_items(highlights: list[str], label: str, values: list[str], doc_id: str) -> None:
+    for value in values:
+        if value:
+            highlights.append(f"{label}: {value} [doc_id={doc_id}]")
 
 
 def synthesize(
@@ -18,7 +29,12 @@ def synthesize(
 ) -> TrendSynthesis:
     highlights: list[str] = []
     for analysis in document_analyses:
-        highlights.extend(analysis.key_points)
+        _append_items(highlights, "Key Point", analysis.key_points, analysis.doc_id)
+        _append_text(highlights, "Business Impact", analysis.business_impact, analysis.doc_id)
+        _append_text(highlights, "Risk", analysis.risk, analysis.doc_id)
+        _append_text(highlights, "Opportunity", analysis.opportunity, analysis.doc_id)
+        _append_items(highlights, "Action", analysis.recommended_actions, analysis.doc_id)
+        _append_items(highlights, "Monitoring", analysis.monitoring_indicators, analysis.doc_id)
 
     return TrendSynthesis(
         request_id=request_id,

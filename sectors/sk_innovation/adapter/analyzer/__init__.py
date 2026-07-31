@@ -51,8 +51,45 @@ _ANALYSIS_SCHEMA = {
             "type": "boolean",
             "description": "true only if this document's content actually addresses the original question above — false if it's off-topic or only superficially shares a keyword with it",
         },
+        "business_impact": {
+            "type": "string",
+            "description": "질문 관점에서 매출, 비용, 투자, 고객, 경쟁력, 운영 중 어떤 영향이 있는지. 근거 부족 시 빈 문자열.",
+        },
+        "risk": {
+            "type": "string",
+            "description": "문서에서 근거가 확인되는 위험 요인. 근거 부족 시 빈 문자열.",
+        },
+        "opportunity": {
+            "type": "string",
+            "description": "문서에서 근거가 확인되는 기회 요인. 근거 부족 시 빈 문자열.",
+        },
+        "recommended_actions": {
+            "type": "array",
+            "items": {"type": "string"},
+            "description": "전략기획팀이 확인, 검토, 준비 또는 실행해야 할 항목. 근거 부족 시 빈 배열.",
+        },
+        "monitoring_indicators": {
+            "type": "array",
+            "items": {"type": "string"},
+            "description": "후속 모니터링 지표와 실제 대응 단계로 넘어갈 조건. 근거 부족 시 빈 배열.",
+        },
+        "evidence": {
+            "type": "array",
+            "items": {"type": "string"},
+            "description": "각 전략 판단의 근거가 된 문서 내용 요약. 문서 전체 복사 금지.",
+        },
+        "action_level": {
+            "type": "string",
+            "enum": ["Monitor", "Review", "Prepare", "Act", "insufficient_data"],
+            "description": "대응 수준. 근거가 부족하면 insufficient_data.",
+        },
+        "analysis_confidence": {
+            "type": "string",
+            "enum": ["low", "medium", "high"],
+            "description": "문서 근거만 기준으로 한 분석 확신도.",
+        },
     },
-    "required": ["summary", "key_points", "sentiment", "relevant_to_question"],
+    "required": ["summary", "key_points", "sentiment", "relevant_to_question", "business_impact", "risk", "opportunity", "recommended_actions", "monitoring_indicators", "evidence", "action_level", "analysis_confidence"],
     "additionalProperties": False,
 }
 

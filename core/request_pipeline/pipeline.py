@@ -34,6 +34,7 @@ from common.contracts import (
     DynamicLayout,
     EntityExtractionResult,
     ReportPlan,
+    ReportPurposeClassification,
     SectorRoute,
     SourceDocument,
     SourcePlan,
@@ -46,6 +47,7 @@ from core.entity.extractor import extract_entities
 from core.entity.search_terms import build_search_terms
 from core.layout_generator.generator import generate_layout
 from core.report_planner.planner import plan_report
+from core.report_purpose.classifier import classify_report_purpose
 from core.sector_router.router import route_request, scan_sectors
 from core.source_planner.planner import plan_sources
 from core.synthesis.ai_based import refine_synthesis_ai
@@ -71,6 +73,7 @@ class PipelineResult(BaseModel):
     entities: Optional[EntityExtractionResult] = None
     sector_route: Optional[SectorRoute] = None
     source_plan: Optional[SourcePlan] = None
+    report_purpose: Optional[ReportPurposeClassification] = None
     document_analyses: list[DocumentAnalysis] = []
     synthesis: Optional[TrendSynthesis] = None
     report_plan: Optional[ReportPlan] = None
@@ -124,7 +127,7 @@ def run_pipeline(
         return result
 
     if result.sector_route.status == "unsupported":
-        for stage in ("source_planner", "sector_adapter", "synthesis", "report_planner", "audience_adapter", "layout_generator"):
+        for stage in ("report_purpose", "source_planner", "sector_adapter", "synthesis", "report_planner", "audience_adapter", "layout_generator"):
             result.trace.append(
                 StageTrace(stage=stage, status=StageStatus.SKIPPED, reason="sector route is unsupported")
             )
@@ -133,7 +136,20 @@ def run_pipeline(
 
     sector_id = result.sector_route.sector_id
 
-    # 3. source_planner
+    # 3. report_purpose
+    try:
+        _maybe_force_fail("report_purpose")
+        result.report_purpose = classify_report_purpose(
+            request.request_id,
+            result.entities,
+            result.sector_route,
+        )
+        result.trace.append(StageTrace(stage="report_purpose", status=StageStatus.OK))
+    except PipelineStageError as exc:
+        _halt("report_purpose", exc.reason, exc.detail)
+        return result
+
+    # 4. source_planner
     try:
         _maybe_force_fail("source_planner")
         search_terms = build_search_terms(result.entities, result.sector_route.matched_profile)
@@ -210,7 +226,7 @@ def run_pipeline(
     # 6. report_planner
     try:
         _maybe_force_fail("report_planner")
-        result.report_plan = plan_report(result.synthesis, audience_id, result.entities.primary_intent)
+        result.report_plan = plan_report(result.synthesis, audience_id, result.report_purpose)
         result.trace.append(StageTrace(stage="report_planner", status=StageStatus.OK))
     except PipelineStageError as exc:
         _halt("report_planner", exc.reason, exc.detail)

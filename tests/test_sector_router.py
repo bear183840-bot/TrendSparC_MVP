@@ -8,20 +8,23 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 SECTORS_DIR = PROJECT_ROOT / "sectors"
 
 
-def _empty_entities() -> EntityExtractionResult:
+def _entities(organizations=None, technologies=None, keywords=None) -> EntityExtractionResult:
     return EntityExtractionResult(
         request_id="req_test_router",
         primary_intent="current_status",
         perspective="company_update",
-        organizations=[],
-        technologies=[],
-        keywords=[],
+        organizations=organizations or [],
+        technologies=technologies or [],
+        keywords=keywords or [],
     )
 
 
+def _route(entities: EntityExtractionResult, requested_sector_id=None):
+    return route_request("req_test_router", entities, scan_sectors(SECTORS_DIR), requested_sector_id)
+
+
 def test_requesting_unregistered_sector_is_unsupported():
-    profiles = scan_sectors(SECTORS_DIR)
-    route = route_request("req_test_router", _empty_entities(), profiles, requested_sector_id="sk_totally_made_up")
+    route = _route(_entities(), requested_sector_id="sk_totally_made_up")
 
     assert route.status == "unsupported"
     assert route.sector_id == "sk_totally_made_up"
@@ -29,19 +32,48 @@ def test_requesting_unregistered_sector_is_unsupported():
 
 
 def test_registered_sector_can_be_routed_explicitly():
-    profiles = scan_sectors(SECTORS_DIR)
-    route = route_request("req_test_router", _empty_entities(), profiles, requested_sector_id="sk_hynix")
+    route = _route(_entities(), requested_sector_id="sk_hynix")
 
     assert route.status == "routed"
     assert route.matched_profile.sector_id == "sk_hynix"
 
 
 def test_sk_planet_is_registered_after_unassigned_rename():
-    profiles = scan_sectors(SECTORS_DIR)
-    route = route_request("req_test_router", _empty_entities(), profiles, requested_sector_id="sk_planet")
+    route = _route(_entities(), requested_sector_id="sk_planet")
 
     assert route.status == "routed"
     assert route.matched_profile.sector_id == "sk_planet"
+
+
+def test_router_routes_strong_sector_signals():
+    cases = [
+        (_entities(organizations=["SK하이닉스"], technologies=["HBM4"], keywords=["양산"]), "sk_hynix"),
+        (_entities(organizations=["SK온"], keywords=["배터리", "북미 공장"]), "sk_innovation"),
+        (_entities(organizations=["SK플래닛"], keywords=["OK캐쉬백", "데이터 마케팅"]), "sk_planet"),
+        (_entities(organizations=["SK텔레콤"], keywords=["AI 데이터센터"]), "sk_telecom"),
+        (_entities(organizations=["SK브로드밴드"], keywords=["OTT", "IPTV"]), "sk_broadband"),
+        (_entities(keywords=["B tv", "AI 추천", "유료방송"]), "sk_broadband"),
+    ]
+
+    for entities, expected_sector in cases:
+        route = _route(entities)
+        assert route.status == "routed"
+        assert route.sector_id == expected_sector
+
+
+def test_router_does_not_route_on_ambiguous_single_terms():
+    cases = [
+        _entities(technologies=["D2D"], keywords=["반도체", "본딩"]),
+        _entities(keywords=["Planet"]),
+        _entities(keywords=["포인트"]),
+        _entities(keywords=["A."]),
+        _entities(keywords=["투자"]),
+    ]
+
+    for entities in cases:
+        route = _route(entities)
+        assert route.status == "routed"
+        assert route.sector_id == "general"
 
 
 def test_adding_and_removing_a_sector_folder_changes_registry_without_core_changes(tmp_path):
@@ -51,11 +83,7 @@ def test_adding_and_removing_a_sector_folder_changes_registry_without_core_chang
     hynix_dir = sectors_dir / "sk_hynix"
     hynix_dir.mkdir()
     (hynix_dir / "profile.json").write_text(
-        json.dumps({
-            "sector_id": "sk_hynix",
-            "display_name": "SK hynix",
-            "status": "template_only",
-        }),
+        json.dumps({"sector_id": "sk_hynix", "display_name": "SK hynix", "status": "template_only"}),
         encoding="utf-8",
     )
 
@@ -65,11 +93,7 @@ def test_adding_and_removing_a_sector_folder_changes_registry_without_core_chang
     new_sector_dir = sectors_dir / "brand_new_sector"
     new_sector_dir.mkdir()
     (new_sector_dir / "profile.json").write_text(
-        json.dumps({
-            "sector_id": "brand_new_sector",
-            "display_name": "Brand New Sector",
-            "status": "template_only",
-        }),
+        json.dumps({"sector_id": "brand_new_sector", "display_name": "Brand New Sector", "status": "template_only"}),
         encoding="utf-8",
     )
 

@@ -3,16 +3,21 @@
     {
       "name": "SK플래닛 공식 뉴스룸",
       "url": "https://www.skplanet.com",
-      "collection_method": ["firecrawl_search"],
+      "collection_method": [
+        "firecrawl_search"
+      ],
       "frequency": "daily",
       "reliability_reason": "SK플래닛 공식 보도자료 및 공시 채널로 신뢰도가 매우 높음. 실사이트 확인 결과 별도 뉴스/보도자료 섹션 URL이 없는 단일 랜딩페이지라 루트 도메인으로 등록함 — 실제 보도자료 채널이 확인되면 갱신 필요",
       "content_type": "press_release",
-      "role": "official"
+      "role": "official",
+      "reliability_tier": "official"
     },
     {
       "name": "전자신문 (IT/데이터/플랫폼)",
       "url": "https://www.etnews.com/news/section.html?id1=04",
-      "collection_method": ["firecrawl_search"],
+      "collection_method": [
+        "firecrawl_search"
+      ],
       "frequency": "daily",
       "reliability_reason": "국내 대표 IT/테크 전문 매체로 데이터·플랫폼·빅데이터 산업 보도 신뢰성 확보. 실사이트 확인 결과 'AI·SW'(id1=04) 섹션이 데이터/플랫폼 뉴스와 가장 근접",
       "content_type": "analysis",
@@ -21,7 +26,9 @@
     {
       "name": "블로터 (Web3/테크)",
       "url": "https://www.bloter.net/news/articleList.html?sc_section_code=S1N4&view_type=sm",
-      "collection_method": ["firecrawl_search"],
+      "collection_method": [
+        "firecrawl_search"
+      ],
       "frequency": "daily",
       "reliability_reason": "디지털 마케팅, Web3, 블록체인 및 테크 신사업 전문 심층 분석 매체. 실사이트 확인 결과 'IT·과학'(S1N4) 섹션 사용 — 사이트가 경제/자본시장 매체로 리브랜딩된 상태라 Web3 전용 섹션은 없음",
       "content_type": "analysis",
@@ -30,7 +37,9 @@
     {
       "name": "모바일인덱스 (아이지에이웍스)",
       "url": "https://www.mobileindex.com",
-      "collection_method": ["firecrawl_search"],
+      "collection_method": [
+        "firecrawl_search"
+      ],
       "frequency": "weekly",
       "reliability_reason": "모바일 앱 트래픽, MAU, 사용자 행동 데이터 전문 분석 기관으로 신뢰도 우수. 실사이트 확인 결과 앱 검색 툴 위주 랜딩페이지라 별도 인사이트/블로그 섹션 URL을 못 찾아 루트 도메인으로 등록함",
       "content_type": "analysis",
@@ -39,7 +48,9 @@
     {
       "name": "데이터넷 (빅데이터/마케팅)",
       "url": "https://www.datanet.co.kr/news/articleList.html?sc_section_code=S1N1&view_type=sm",
-      "collection_method": ["firecrawl_search"],
+      "collection_method": [
+        "firecrawl_search"
+      ],
       "frequency": "daily",
       "reliability_reason": "B2B IT 솔루션, 빅데이터 마케팅, Ad-Tech 분야 전문 뉴스 매체. 실사이트 확인 결과 '뉴스'(S1N1) 섹션 사용",
       "content_type": "analysis",

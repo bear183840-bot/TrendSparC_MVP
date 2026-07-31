@@ -47,6 +47,28 @@ class EntityExtractionResult(BaseModel):
     keywords: list[str] = Field(default_factory=list)
 
 
+class ReportPurposeClassification(BaseModel):
+    """Question-level report purpose contract.
+
+    This is intentionally separate from EntityExtractionResult.primary_intent.
+    Entity extraction answers "what is mentioned in the question?" while report
+    purpose answers "what kind of report should be generated?". Downstream
+    stages should depend on this contract rather than re-reading prompt text or
+    branching on raw user wording.
+    """
+
+    request_id: str
+    purpose_id: Literal["current_status", "issue_response", "future_business", "root_cause"]
+    display_name: str
+    description: Optional[str] = None
+    confidence: Literal["low", "medium", "high"] = "medium"
+    reason: Optional[str] = None
+    classifier_version: str = "rule_based_v1"
+    recommended_sections: list[str] = Field(default_factory=list)
+    dashboard_block_hints: list[str] = Field(default_factory=list)
+    prompt_path: Optional[str] = None
+
+
 class SectorProfile(BaseModel):
     sector_id: str
     display_name: str
@@ -138,6 +160,16 @@ class DocumentAnalysis(BaseModel):
     summary: Optional[str] = None
     key_points: list[str] = Field(default_factory=list)
     sentiment: Optional[str] = None
+    # Strategy fields are optional for backward compatibility, but every
+    # sector analyzer should populate them when enough source evidence exists.
+    business_impact: Optional[str] = None
+    risk: Optional[str] = None
+    opportunity: Optional[str] = None
+    recommended_actions: list[str] = Field(default_factory=list)
+    monitoring_indicators: list[str] = Field(default_factory=list)
+    evidence: list[str] = Field(default_factory=list)
+    action_level: Optional[Literal["Monitor", "Review", "Prepare", "Act", "insufficient_data"]] = None
+    analysis_confidence: Optional[Literal["low", "medium", "high"]] = None
     # None until a question-aware analyzer actually judges this document;
     # True/False once it does. The pipeline drops False entries before they
     # ever reach synthesis — see core/request_pipeline/pipeline.py.
@@ -155,7 +187,10 @@ class TrendSynthesis(BaseModel):
 class ReportPlan(BaseModel):
     request_id: str
     audience_id: str
+    # Kept for backwards compatibility with existing tests/callers. New code
+    # should treat `report_purpose.purpose_id` as the canonical report type.
     primary_intent: str
+    report_purpose: Optional[ReportPurposeClassification] = None
     sections: list[str] = Field(default_factory=list)
     format: Literal["dashboard", "html", "pdf"] = "html"
     intent_emphasis: Optional[str] = None
