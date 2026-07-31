@@ -27,6 +27,16 @@ _INTENT_KEYWORD_RULES: list[tuple[str, tuple[str, ...]]] = [
 ]
 _DEFAULT_INTENT = "current_status"
 
+# perspective is distinct from primary_intent: it's about *what the question
+# is examining* (the whole market vs. one company vs. a comparison vs. a
+# regulation), not *why* it's being asked. See EntityExtractionResult.perspective.
+_PERSPECTIVE_KEYWORD_RULES: list[tuple[str, tuple[str, ...]]] = [
+    ("market_landscape", ("현황", "동향", "점유율", "경쟁 구도", "시장 규모", "트렌드")),
+    ("competitor_comparison", ("비교", "대비", "격차")),
+    ("regulatory_policy", ("규제", "정책", "법")),
+]
+_DEFAULT_PERSPECTIVE = "company_update"
+
 
 def _classify_intent_rule_based(question: str) -> str:
     lowered = question.lower()
@@ -36,15 +46,25 @@ def _classify_intent_rule_based(question: str) -> str:
     return _DEFAULT_INTENT
 
 
+def _classify_perspective_rule_based(question: str) -> str:
+    lowered = question.lower()
+    for perspective, keywords in _PERSPECTIVE_KEYWORD_RULES:
+        if any(keyword.lower() in lowered for keyword in keywords):
+            return perspective
+    return _DEFAULT_PERSPECTIVE
+
+
 def extract_entities(request: UserRequest) -> EntityExtractionResult:
     question = request.question
     organizations = sorted(set(_ORG_PATTERN.findall(question)))
     technologies = sorted({m.upper() for m in _TECH_PATTERN.findall(question)})
     keywords = sorted(set(question.split()))
     primary_intent = _classify_intent_rule_based(question)
+    perspective = _classify_perspective_rule_based(question)
     return EntityExtractionResult(
         request_id=request.request_id,
         primary_intent=primary_intent,
+        perspective=perspective,
         organizations=organizations,
         technologies=technologies,
         keywords=keywords,

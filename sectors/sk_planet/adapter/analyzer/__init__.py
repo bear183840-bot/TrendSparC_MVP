@@ -36,7 +36,7 @@ _ANALYSIS_SCHEMA = {
     "properties": {
         "summary": {
             "type": "string",
-            "description": "1-3 sentence factual summary of the document regarding SK Planet's business, technology, or market context, sourced only from its content",
+            "description": "1-3 sentence factual summary of the document regarding SK Planet's business, technology, or market context, written in relation to the original question, sourced only from its content",
         },
         "key_points": {
             "type": "array",
@@ -47,8 +47,12 @@ _ANALYSIS_SCHEMA = {
             "type": "string",
             "enum": ["positive", "neutral", "negative", "mixed"],
         },
+        "relevant_to_question": {
+            "type": "boolean",
+            "description": "true only if this document's content actually addresses the original question above — false if it's off-topic or only superficially shares a keyword with it",
+        },
     },
-    "required": ["summary", "key_points", "sentiment"],
+    "required": ["summary", "key_points", "sentiment", "relevant_to_question"],
     "additionalProperties": False,
 }
 
@@ -63,11 +67,14 @@ def _load_system_prompt() -> str:
     )
 
 
-def _analyze_document(client: OpenAI, system_prompt: str, document: SourceDocument) -> DocumentAnalysis:
+def _analyze_document(client: OpenAI, system_prompt: str, document: SourceDocument, question: str) -> DocumentAnalysis:
     user_content = (
+        f"조사 중인 질문: {question}\n\n"
         f"Title: {document.title}\nURL: {document.url}\n\n{document.content}\n\n"
         "---\n"
-        "위 문서가 영어 등 외국어라도, summary/key_points는 반드시 한국어로만 작성하세요."
+        "위 문서가 영어 등 외국어라도, summary/key_points는 반드시 한국어로만 작성하세요. "
+        "summary/key_points는 위 질문과 어떻게 관련되는지를 기준으로 작성하고, "
+        "이 문서가 실제로 질문에 답이 되는 내용인지 relevant_to_question에 정직하게 판단하세요."
     )
 
     try:
@@ -107,6 +114,7 @@ def _analyze_document(client: OpenAI, system_prompt: str, document: SourceDocume
         summary = data["summary"]
         key_points = data["key_points"]
         sentiment = data["sentiment"]
+        relevant_to_question = data["relevant_to_question"]
     except (TypeError, json.JSONDecodeError, KeyError) as exc:
         raise PipelineStageError(
             stage=_STAGE,
@@ -119,10 +127,11 @@ def _analyze_document(client: OpenAI, system_prompt: str, document: SourceDocume
         summary=summary,
         key_points=key_points,
         sentiment=sentiment,
+        relevant_to_question=relevant_to_question,
     )
 
 
-def analyze(source_documents: list[SourceDocument]) -> list[DocumentAnalysis]:
+def analyze(source_documents: list[SourceDocument], question: str) -> list[DocumentAnalysis]:
     """입력된 SK플래닛 관련 문서 목록을 분석하여 DocumentAnalysis 리스트로 반환합니다."""
     api_key = os.environ.get(_API_KEY_ENV_VAR)
     if not api_key:
@@ -134,4 +143,4 @@ def analyze(source_documents: list[SourceDocument]) -> list[DocumentAnalysis]:
     client = OpenAI(api_key=api_key)
     system_prompt = _load_system_prompt()
 
-    return [_analyze_document(client, system_prompt, document) for document in source_documents]
+    return [_analyze_document(client, system_prompt, document, question) for document in source_documents]

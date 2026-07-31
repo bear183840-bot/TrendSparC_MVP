@@ -43,6 +43,13 @@ _INTENT_CATEGORIES = (
     "root_cause",  # 원인분석
 )
 
+_PERSPECTIVE_CATEGORIES = (
+    "market_landscape",  # 시장 전체의 현황/동향/경쟁구도/점유율을 묻는 질문
+    "company_update",  # 특정 회사의 서비스/실적/마일스톤을 묻는 질문
+    "competitor_comparison",  # 둘 이상의 대상을 비교하는 질문
+    "regulatory_policy",  # 법/규제/정책 관련 질문
+)
+
 _SYSTEM_PROMPT = """You are a search-keyword extraction and intent-classification \
 assistant for TrendSparC, an internal AI trend-intelligence tool used across multiple, \
 unrelated business sectors (e.g. semiconductors, broadband/telecom, or others not yet \
@@ -51,11 +58,23 @@ search terms a collector can match against real news article titles, AND classif
 kind of question it is — never assume a specific industry, and never hardcode behavior \
 for one topic over another.
 
-Return four fields:
+Return five fields:
 - primary_intent: exactly one of {intent_categories} — pick whichever best describes \
 what the question is actually asking (current_status = 현황파악, issue_response = \
 이슈대응, future_business = 미래사업, root_cause = 원인분석). Use "current_status" as \
 the default when none of the others clearly apply.
+- perspective: exactly one of {perspective_categories} — this is a DIFFERENT axis from \
+primary_intent: it's about what the question is examining, not why it's being asked. \
+market_landscape = the question is about the market/industry as a whole (size, growth, \
+competitive landscape, market share) rather than any one company. company_update = the \
+question is about one specific company's own service, product, results, or milestones. \
+competitor_comparison = the question explicitly compares two or more named entities \
+against each other. regulatory_policy = the question is about a law, regulation, or \
+government policy. This distinction matters a lot: if a question names a specific brand \
+but is really asking about the market that brand competes in (e.g. "OK캐쉬백 포인트 \
+마케팅 시장 현황은?" — the brand is just an example of the market being asked about), \
+classify it as market_landscape, not company_update, even though a brand name appears. \
+Use "company_update" as the default when none of the others clearly apply.
 - organizations: companies, agencies, or institutions actually named or clearly \
 implied by the question. Empty list if none.
 - technologies: products, technologies, brands, or standards actually named or \
@@ -87,17 +106,21 @@ realistically appear in.
 
 Never invent facts, entities, or context that the question does not support. If the \
 question is vague or short, keep your output correspondingly short rather than \
-guessing broadly.""".format(intent_categories=", ".join(_INTENT_CATEGORIES))
+guessing broadly.""".format(
+    intent_categories=", ".join(_INTENT_CATEGORIES),
+    perspective_categories=", ".join(_PERSPECTIVE_CATEGORIES),
+)
 
 _SCHEMA = {
     "type": "object",
     "properties": {
         "primary_intent": {"type": "string", "enum": list(_INTENT_CATEGORIES)},
+        "perspective": {"type": "string", "enum": list(_PERSPECTIVE_CATEGORIES)},
         "organizations": {"type": "array", "items": {"type": "string"}},
         "technologies": {"type": "array", "items": {"type": "string"}},
         "keywords": {"type": "array", "items": {"type": "string"}},
     },
-    "required": ["primary_intent", "organizations", "technologies", "keywords"],
+    "required": ["primary_intent", "perspective", "organizations", "technologies", "keywords"],
     "additionalProperties": False,
 }
 
@@ -134,6 +157,7 @@ def extract_entities_ai(
         return EntityExtractionResult(
             request_id=request.request_id,
             primary_intent=data["primary_intent"],
+            perspective=data["perspective"],
             organizations=data["organizations"],
             technologies=data["technologies"],
             keywords=data["keywords"],

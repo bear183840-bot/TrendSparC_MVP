@@ -1,0 +1,38 @@
+{
+  "sector_id": "sk_innovation",
+  "display_name": "SK이노베이션 (SK Innovation)",
+  "status": "template_only",
+  "aliases": [
+    "SK이노베이션",
+    "SK Innovation",
+    "에스케이이노베이션",
+    "SK온",
+    "SKOn",
+    "SK On",
+    "SK에너지",
+    "SK지오센트릭",
+    "SK엔무브"
+  ],
+  "keywords": [
+    "배터리", "이차전지", "전기차 배터리", "ESS", "에너지저장장치",
+    "리튬", "니켈", "코발트", "망간", "양극재", "음극재", "분리막", "전해질",
+    "LFP", "NCM", "전고체 배터리", "준고체 배터리", "배터리 재활용",
+    "SK온", "북미 공장", "합작법인", "JV", "정유", "원유", "정제마진",
+    "석유화학", "납사", "친환경에너지", "그린수소", "LNG", "도시가스",
+    "SK E&S", "SK이노베이션 E&S", "SK지오센트릭", "폐플라스틱 리사이클링",
+    "SK엔무브", "윤활유", "SK인천석유화학", "SK트레이딩인터내셔널",
+    "SK아이이테크놀로지", "SKIET", "SK어스온", "자원개발", "탄소중립",
+    "넷제로", "ESG", "울산Complex", "실적발표", "영업이익", "재고평가",
+    "LG에너지솔루션", "삼성SDI", "GS칼텍스", "에쓰오일", "S-OIL",
+    "HD현대오일뱅크", "현대오일뱅크", "롯데케미칼",
+    "CATL", "BYD", "Panasonic", "Northvolt", "ExxonMobil", "Shell",
+    "BP", "Saudi Aramco", "Tesla", "Ford", "Honda"
+  ],
+  "market_keywords": [
+    "배터리 시장",
+    "정유 시장",
+    "친환경에너지 시장"
+  ],
+  "pipeline_entrypoint": "sectors.sk_innovation.adapter",
+  "system_prompt_path": "sectors/sk_innovation/prompts/system_prompt.md"
+}

@@ -21,6 +21,7 @@ make that stage raise deliberately, to prove failure traceability.
 from __future__ import annotations
 
 import importlib
+import sys
 from pathlib import Path
 from typing import Optional
 
@@ -42,6 +43,7 @@ from common.contracts import (
 from common.errors import PipelineStageError, StageStatus, StageTrace
 from core.entity.ai_based import extract_entities_ai
 from core.entity.extractor import extract_entities
+from core.entity.search_terms import build_search_terms
 from core.layout_generator.generator import generate_layout
 from core.report_planner.planner import plan_report
 from core.sector_router.router import route_request, scan_sectors
@@ -77,11 +79,11 @@ class PipelineResult(BaseModel):
     halted_at_stage: Optional[str] = None
 
 
-def _call_sector_adapter_stage(sector_route: SectorRoute, role: str, arg):
+def _call_sector_adapter_stage(sector_route: SectorRoute, role: str, *args):
     profile = sector_route.matched_profile
     module = importlib.import_module(f"{profile.pipeline_entrypoint}.{role}")
     func = getattr(module, _ADAPTER_ROLE_FUNCS[role])
-    return func(arg)
+    return func(*args)
 
 
 def run_pipeline(
@@ -134,12 +136,14 @@ def run_pipeline(
     # 3. source_planner
     try:
         _maybe_force_fail("source_planner")
-        search_terms = [
-            *result.entities.organizations,
-            *result.entities.technologies,
-            *result.entities.keywords,
-        ]
-        result.source_plan = plan_sources(request.request_id, sector_id, SOURCE_REGISTRY_DIR, search_terms)
+        search_terms = build_search_terms(result.entities, result.sector_route.matched_profile)
+        result.source_plan = plan_sources(
+            request.request_id,
+            sector_id,
+            SOURCE_REGISTRY_DIR,
+            search_terms,
+            result.entities.perspective,
+        )
         result.trace.append(StageTrace(stage="source_planner", status=StageStatus.OK))
     except PipelineStageError as exc:
         _halt("source_planner", exc.reason, exc.detail)
@@ -164,10 +168,22 @@ def run_pipeline(
 
         try:
             _maybe_force_fail(stage_name)
-            arg = result.source_plan if role == "collector" else documents
-            output = _call_sector_adapter_stage(result.sector_route, role, arg)
+            if role == "collector":
+                args = (result.source_plan,)
+            elif role == "analyzer":
+                args = (documents, request.question)
+            else:
+                args = (documents,)
+            output = _call_sector_adapter_stage(result.sector_route, role, *args)
             if role == "analyzer":
-                result.document_analyses = output
+                relevant = [analysis for analysis in output if analysis.relevant_to_question is not False]
+                for analysis in output:
+                    if analysis.relevant_to_question is False:
+                        print(
+                            f"[synthesis] doc '{analysis.doc_id}' excluded: not relevant to the question",
+                            file=sys.stderr,
+                        )
+                result.document_analyses = relevant
             else:
                 documents = output
             result.trace.append(StageTrace(stage=stage_name, status=StageStatus.OK))
@@ -183,7 +199,7 @@ def run_pipeline(
     try:
         _maybe_force_fail("synthesis")
         rule_based_synthesis = synthesize(request.request_id, sector_id, result.document_analyses)
-        result.synthesis = refine_synthesis_ai(rule_based_synthesis)
+        result.synthesis = refine_synthesis_ai(rule_based_synthesis, request.question)
         result.trace.append(StageTrace(stage="synthesis", status=StageStatus.OK))
     except PipelineStageError as exc:
         _halt("synthesis", exc.reason, exc.detail)

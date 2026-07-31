@@ -34,6 +34,14 @@ class UserRequest(BaseModel):
 class EntityExtractionResult(BaseModel):
     request_id: str
     primary_intent: str
+    # What kind of question this is, distinct from primary_intent: whether it's
+    # asking about the market/industry as a whole (market_landscape), a specific
+    # company's own service/results (company_update), a head-to-head comparison
+    # (competitor_comparison), or law/regulation (regulatory_policy). Used by
+    # core/entity/search_terms.py to decide whether to search with brand names
+    # or sector-level market terms — a brand-name search tends to surface that
+    # brand's own press coverage, which is wrong for a market_landscape question.
+    perspective: str
     organizations: list[str] = Field(default_factory=list)
     technologies: list[str] = Field(default_factory=list)
     keywords: list[str] = Field(default_factory=list)
@@ -45,6 +53,10 @@ class SectorProfile(BaseModel):
     status: Literal["active", "template_only", "unsupported"]
     aliases: list[str] = Field(default_factory=list)
     keywords: list[str] = Field(default_factory=list)
+    # Sector/industry-level terms (e.g. "포인트 마케팅 시장"), distinct from the
+    # brand/product terms in `keywords` above — used as the search anchor for
+    # market_landscape-perspective questions instead of a brand name.
+    market_keywords: list[str] = Field(default_factory=list)
     pipeline_entrypoint: Optional[str] = None
     system_prompt_path: Optional[str] = None
 
@@ -77,6 +89,30 @@ class PlannedSource(BaseModel):
     #                       defines its own tiering (no sector-name branching
     #                       on this — each sector's own registry decides).
     reliability_tier: Optional[str] = None
+    # Optional: whether this source's typical content is a company's own
+    # press_release-style announcement, or analysis (industry press/market
+    # research that interprets the market, not just one company). Left unset
+    # when neither fits (e.g. user-review platforms) — never guessed. Used by
+    # core/source_planner/planner.py to reorder sources per question perspective.
+    content_type: Optional[Literal["press_release", "analysis"]] = None
+    # Optional: this source's role in a per-sector coverage quota, distinct
+    # from content_type above (role is about *why this source is registered*,
+    # not what kind of writing it produces). Free-text, not a fixed enum,
+    # because sectors may need their own roles beyond the three core ones:
+    #   "official"        — the sector's own SK 계열사 official newsroom/press
+    #                       channel (every sector should have >= 1)
+    #   "search"           — general-purpose trade press/news media used for
+    #                       broad info search (every sector should have >= 2)
+    #   "market_analysis"  — market research firms, traffic/data analytics, or
+    #                       deep-analysis trade press that interprets the
+    #                       market/competitive landscape (every sector should
+    #                       have >= 1)
+    # Sector-specific custom roles (e.g. "competitor_official",
+    # "user_sentiment", "commodity_market") are added only when genuinely
+    # meaningful for that sector's registered sources — never invented to
+    # fill a quota. Left unset (not guessed) when a source doesn't clearly
+    # fit any role.
+    role: Optional[str] = None
 
 
 class SourcePlan(BaseModel):
@@ -102,6 +138,10 @@ class DocumentAnalysis(BaseModel):
     summary: Optional[str] = None
     key_points: list[str] = Field(default_factory=list)
     sentiment: Optional[str] = None
+    # None until a question-aware analyzer actually judges this document;
+    # True/False once it does. The pipeline drops False entries before they
+    # ever reach synthesis — see core/request_pipeline/pipeline.py.
+    relevant_to_question: Optional[bool] = None
 
 
 class TrendSynthesis(BaseModel):

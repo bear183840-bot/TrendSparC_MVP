@@ -11,7 +11,7 @@ from __future__ import annotations
 from common.errors import PipelineStageError
 
 
-def analyze(source_documents):
+def analyze(source_documents, question):
     raise PipelineStageError(
         stage="sectors.sk_broadband.adapter.analyzer",
         reason="template_only: sector adapter not implemented",

@@ -34,19 +34,19 @@ _STAGE = "synthesis"
 
 _SYSTEM_PROMPT = """You are a synthesis assistant for TrendSparC, an internal AI \
 trend-intelligence tool used across multiple, unrelated business sectors. You will be \
-given a flat JSON array of key_points already extracted from several source documents \
-about the same question — some may restate the same fact in different words, and they \
-carry no particular order.
+given the original question the user asked, plus a flat JSON array of key_points \
+already extracted from several source documents about that question — some may \
+restate the same fact in different words, and they carry no particular order.
 
 Your job:
 - Remove near-duplicate points (the same fact stated more than once, even if worded \
 differently). Keep whichever phrasing is clearest/most complete, and never merge two \
 genuinely different facts into a single point.
-- Order the remaining points from most to least important/decision-relevant for a \
-business analyst reading this.
-- Write a short (2-4 sentence) synthesis_text paragraph in Korean that ties the \
-remaining points together in plain prose — a "so what" overview, not a bullet-point \
-restatement.
+- Order the remaining points from most to least directly relevant to answering the \
+original question (not just "important in general").
+- Write a short (2-4 sentence) synthesis_text paragraph in Korean that directly \
+answers the original question using the remaining points — a "so what" overview \
+grounded in what was actually asked, not a generic bullet-point restatement.
 
 Never invent a fact, number, or claim that isn't already present in the input points. \
 If the input is very short (1-2 points), it's fine for synthesis_text to be brief and \
@@ -63,19 +63,23 @@ _SCHEMA = {
 }
 
 
-def refine_synthesis_ai(rule_based_result: TrendSynthesis) -> TrendSynthesis:
+def refine_synthesis_ai(rule_based_result: TrendSynthesis, question: str) -> TrendSynthesis:
     api_key = os.environ.get(_API_KEY_ENV_VAR)
     if not api_key or not rule_based_result.highlights:
         return rule_based_result
 
     try:
         client = OpenAI(api_key=api_key)
+        user_content = json.dumps(
+            {"question": question, "key_points": rule_based_result.highlights},
+            ensure_ascii=False,
+        )
         response = client.chat.completions.create(
             model=_MODEL,
             max_tokens=1500,
             messages=[
                 {"role": "system", "content": _SYSTEM_PROMPT},
-                {"role": "user", "content": json.dumps(rule_based_result.highlights, ensure_ascii=False)},
+                {"role": "user", "content": user_content},
             ],
             response_format={
                 "type": "json_schema",

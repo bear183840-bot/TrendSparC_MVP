@@ -1,4 +1,8 @@
-from common.contracts import UserRequest
+import sectors.sk_hynix.adapter.analyzer as sk_hynix_analyzer
+import sectors.sk_hynix.adapter.collector as sk_hynix_collector
+import sectors.sk_hynix.adapter.processor as sk_hynix_processor
+import sectors.sk_hynix.adapter.validator as sk_hynix_validator
+from common.contracts import DocumentAnalysis, SourceDocument, UserRequest
 from common.errors import StageStatus
 from core.request_pipeline.pipeline import run_pipeline
 
@@ -59,3 +63,32 @@ def test_explicit_param_overrides_request_level_sector_selection():
 
     assert result.sector_route.status == "routed"
     assert result.sector_route.sector_id == "sk_planet"
+
+
+def test_analyzer_documents_flagged_irrelevant_are_dropped_before_synthesis(monkeypatch):
+    fake_documents = [
+        SourceDocument(doc_id="d1", source_id="source", title="t1", content="c1"),
+        SourceDocument(doc_id="d2", source_id="source", title="t2", content="c2"),
+    ]
+
+    def fake_analyze(documents, question):
+        assert question == "SK하이닉스 HBM 시장 전망"
+        return [
+            DocumentAnalysis(
+                doc_id="d1", summary="관련", key_points=["포인트 A"], sentiment="neutral", relevant_to_question=True
+            ),
+            DocumentAnalysis(
+                doc_id="d2", summary="무관", key_points=["엉뚱한 포인트"], sentiment="neutral", relevant_to_question=False
+            ),
+        ]
+
+    monkeypatch.setattr(sk_hynix_collector, "collect", lambda source_plan: fake_documents)
+    monkeypatch.setattr(sk_hynix_processor, "process", lambda documents: documents)
+    monkeypatch.setattr(sk_hynix_validator, "validate", lambda documents: documents)
+    monkeypatch.setattr(sk_hynix_analyzer, "analyze", fake_analyze)
+
+    request = _make_request("SK하이닉스 HBM 시장 전망", requested_sector_id="sk_hynix")
+    result = run_pipeline(request, dry_run=False)
+
+    assert result.halted_at_stage is None
+    assert [analysis.doc_id for analysis in result.document_analyses] == ["d1"]

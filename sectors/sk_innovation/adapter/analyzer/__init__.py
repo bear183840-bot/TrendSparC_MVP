@@ -1,6 +1,6 @@
-"""analyzer for the sk_hynix sector adapter.
+"""analyzer for the sk_innovation sector adapter.
 
-Runs each validated SourceDocument through sectors/sk_hynix/prompts/system_prompt.md
+Runs each validated SourceDocument through sectors/sk_innovation/prompts/system_prompt.md
 (layered on prompts/global_system_prompt.md) via the OpenAI API, using structured
 outputs (Structured Outputs / strict JSON schema) so every response is a
 schema-valid DocumentAnalysis payload. No document is analyzed without a real
@@ -19,26 +19,29 @@ from openai import OpenAI
 from common.contracts import DocumentAnalysis, SourceDocument
 from common.errors import PipelineStageError
 
-_API_KEY_ENV_VAR = "TRENDSPARC_SK_HYNIX_ANALYZER_API_KEY"
-_MODEL = "gpt-4o"  # adjust to whichever OpenAI model the paid key should use
-_STAGE = "sectors.sk_hynix.adapter.analyzer"
+# SK이노베이션 전용 환경변수 및 스테이지 설정
+_API_KEY_ENV_VAR = "TRENDSPARC_SK_INNOVATION_ANALYZER_API_KEY"
+_MODEL = "gpt-4o"  # 필요 시 사용 중인 OpenAI 모델로 변경 가능
+_STAGE = "sectors.sk_innovation.adapter.analyzer"
 
+# SK이노베이션 디렉토리 구조 반영
 _SECTOR_ROOT = Path(__file__).resolve().parent.parent.parent
 _PROJECT_ROOT = _SECTOR_ROOT.parent.parent
 _GLOBAL_PROMPT_PATH = _PROJECT_ROOT / "prompts" / "global_system_prompt.md"
 _SECTOR_PROMPT_PATH = _SECTOR_ROOT / "prompts" / "system_prompt.md"
 
+# SK이노베이션 사업 영역(배터리, 정유, 석유화학, 친환경에너지 등) 분석에 최적화된 스키마
 _ANALYSIS_SCHEMA = {
     "type": "object",
     "properties": {
         "summary": {
             "type": "string",
-            "description": "1-3 sentence factual summary of the document, written in relation to the original question, sourced only from its content",
+            "description": "1-3 sentence factual summary of the document regarding SK Innovation's business, technology, or market context, written in relation to the original question, sourced only from its content",
         },
         "key_points": {
             "type": "array",
             "items": {"type": "string"},
-            "description": "Only points tied to an angle explicitly mentioned in the document — never inferred",
+            "description": "Key factual points tied to specific business or technological angles explicitly mentioned in the document — never inferred",
         },
         "sentiment": {
             "type": "string",
@@ -55,6 +58,7 @@ _ANALYSIS_SCHEMA = {
 
 
 def _load_system_prompt() -> str:
+    """글로벌 프롬프트와 SK이노베이션 섹터 전용 프롬프트를 결합하여 로드합니다."""
     return "\n\n".join(
         [
             _GLOBAL_PROMPT_PATH.read_text(encoding="utf-8"),
@@ -90,7 +94,7 @@ def _analyze_document(client: OpenAI, system_prompt: str, document: SourceDocume
                 },
             },
         )
-    except Exception as exc:  # OpenAI API/network failure, not a template_only case
+    except Exception as exc:  # API/네트워크 실패 시 예외 처리
         raise PipelineStageError(
             stage=_STAGE,
             reason=f"analysis API call failed for doc '{document.doc_id}'",
@@ -128,6 +132,7 @@ def _analyze_document(client: OpenAI, system_prompt: str, document: SourceDocume
 
 
 def analyze(source_documents: list[SourceDocument], question: str) -> list[DocumentAnalysis]:
+    """입력된 SK이노베이션 관련 문서 목록을 분석하여 DocumentAnalysis 리스트로 반환합니다."""
     api_key = os.environ.get(_API_KEY_ENV_VAR)
     if not api_key:
         raise PipelineStageError(

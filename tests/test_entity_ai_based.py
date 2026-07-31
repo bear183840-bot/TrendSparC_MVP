@@ -10,17 +10,19 @@ def _rule_based_result(request_id: str) -> EntityExtractionResult:
     return EntityExtractionResult(
         request_id=request_id,
         primary_intent="current_status",
+        perspective="company_update",
         organizations=["rule-based-org"],
         technologies=["rule-based-tech"],
         keywords=["rule-based-keyword"],
     )
 
 
-def _make_response(primary_intent, organizations, technologies, keywords, refusal=None):
+def _make_response(primary_intent, organizations, technologies, keywords, refusal=None, perspective="company_update"):
     message = types.SimpleNamespace(
         content=json.dumps(
             {
                 "primary_intent": primary_intent,
+                "perspective": perspective,
                 "organizations": organizations,
                 "technologies": technologies,
                 "keywords": keywords,
@@ -67,7 +69,9 @@ def test_falls_back_to_rule_based_when_no_api_key(monkeypatch):
 
 def test_uses_ai_output_when_api_key_configured(monkeypatch):
     monkeypatch.setenv("TRENDSPARC_ENTITY_AI_API_KEY", "test-key")
-    response = _make_response("future_business", ["SK하이닉스"], ["HBM"], ["HBM", "메모리 시장", "수요 전망"])
+    response = _make_response(
+        "future_business", ["SK하이닉스"], ["HBM"], ["HBM", "메모리 시장", "수요 전망"], perspective="market_landscape"
+    )
     monkeypatch.setattr(entity_ai_module, "OpenAI", lambda api_key: _FakeOpenAI(response))
 
     request = UserRequest(request_id="req_test", question="SK하이닉스 HBM 시장 전망은?")
@@ -76,6 +80,7 @@ def test_uses_ai_output_when_api_key_configured(monkeypatch):
     result = extract_entities_ai(request, rule_based)
 
     assert result.primary_intent == "future_business"
+    assert result.perspective == "market_landscape"
     assert result.organizations == ["SK하이닉스"]
     assert result.technologies == ["HBM"]
     assert result.keywords == ["HBM", "메모리 시장", "수요 전망"]

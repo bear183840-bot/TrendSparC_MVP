@@ -8,7 +8,9 @@
       "collection_method": ["rss", "crawling"],
       "frequency": "daily",
       "category": ["투자", "기술"],
-      "reliability_reason": "회사 공식 1차 자료"
+      "reliability_reason": "회사 공식 1차 자료",
+      "content_type": "press_release",
+      "role": "official"
     },
     {
       "name": "삼성전자DS 뉴스룸",
@@ -18,7 +20,9 @@
       "collection_method": ["rss", "crawling"],
       "frequency": "daily",
       "category": ["투자", "기술"],
-      "reliability_reason": "최대 경쟁사 공식 1차 자료"
+      "reliability_reason": "최대 경쟁사 공식 1차 자료",
+      "content_type": "press_release",
+      "role": "competitor_official"
     },
     {
       "name": "전자신문(반도체)",
@@ -28,7 +32,9 @@
       "collection_method": ["rss"],
       "frequency": "daily",
       "category": ["시장·경쟁", "정책·리스크"],
-      "reliability_reason": "국내 반도체 전문매체, RSS 제공으로 파싱 안정적, 정책·시장 뉴스 커버리지 넓음"
+      "reliability_reason": "국내 반도체 전문매체, RSS 제공으로 파싱 안정적, 정책·시장 뉴스 커버리지 넓음",
+      "content_type": "analysis",
+      "role": "search"
     },
     {
       "name": "TrendForce Press Center",
@@ -38,7 +44,9 @@
       "collection_method": ["rss", "crawling"],
       "frequency": "daily",
       "category": ["시장·경쟁"],
-      "reliability_reason": "DRAM/NAND 계약가·현물가 및 수급 동향을 정기 발표하는 반도체 시장조사 전문기관, 가격·시장점유율 데이터의 1차 근거"
+      "reliability_reason": "DRAM/NAND 계약가·현물가 및 수급 동향을 정기 발표하는 반도체 시장조사 전문기관, 가격·시장점유율 데이터의 1차 근거",
+      "content_type": "analysis",
+      "role": "market_analysis"
     },
     {
       "name": "BIS (미국 상무부 산업안보국) Newsroom",
@@ -48,7 +56,9 @@
       "collection_method": ["crawling"],
       "frequency": "new_filings_only",
       "category": ["정책·리스크"],
-      "reliability_reason": "대중국 반도체 수출통제 등 규제 발표의 미국 정부 공식 1차 출처, 국내 매체 보도보다 선행 확인 가능"
+      "reliability_reason": "대중국 반도체 수출통제 등 규제 발표의 미국 정부 공식 1차 출처, 국내 매체 보도보다 선행 확인 가능",
+      "content_type": "press_release",
+      "role": "regulatory_official"
     }
   ]
 }

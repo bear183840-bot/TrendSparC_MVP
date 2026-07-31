@@ -8,7 +8,8 @@
       "collection_method": ["crawling"],
       "frequency": "daily",
       "category": [],
-      "reliability_reason": "여러 언론사 기사를 종합하는 포털이며 단일 발행처가 아니므로 개별 기사의 1차 출처는 원 언론사 기준으로 판단할 것"
+      "reliability_reason": "여러 언론사 기사를 종합하는 포털이며 단일 발행처가 아니므로 개별 기사의 1차 출처는 원 언론사 기준으로 판단할 것",
+      "role": "search"
     }
   ]
 }

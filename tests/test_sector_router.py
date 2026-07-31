@@ -10,7 +10,12 @@ SECTORS_DIR = PROJECT_ROOT / "sectors"
 
 def _empty_entities() -> EntityExtractionResult:
     return EntityExtractionResult(
-        request_id="req_test_router", primary_intent="current_status", organizations=[], technologies=[], keywords=[]
+        request_id="req_test_router",
+        primary_intent="current_status",
+        perspective="company_update",
+        organizations=[],
+        technologies=[],
+        keywords=[],
     )
 
 

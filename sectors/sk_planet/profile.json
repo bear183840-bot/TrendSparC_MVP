@@ -67,6 +67,12 @@
     "타깃 마케팅",
     "데이터 제휴"
   ],
+  "market_keywords": [
+    "포인트 마케팅 시장",
+    "리워드 플랫폼 시장",
+    "데이터 마케팅 시장",
+    "Ad-Tech 시장"
+  ],
   "pipeline_entrypoint": "sectors.sk_planet.adapter",
   "system_prompt_path": "sectors/sk_planet/prompts/system_prompt.md"
 }

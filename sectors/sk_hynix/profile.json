@@ -14,6 +14,11 @@
     "규제", "관세", "보조금", "미국", "중국", "수출통제",
     "리스크", "기회요인", "로드맵"
   ],
+  "market_keywords": [
+    "메모리 반도체 시장",
+    "HBM 시장",
+    "반도체 공급망 동향"
+  ],
   "pipeline_entrypoint": "sectors.sk_hynix.adapter",
   "system_prompt_path": "sectors/sk_hynix/prompts/system_prompt.md"
 }

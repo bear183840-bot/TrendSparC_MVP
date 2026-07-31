@@ -1,7 +1,7 @@
 # TrendSparC_MVP
 
-AI Trend Intelligence platform for SK 계열사 staff (SK하이닉스 / SK브로드밴드 /
-SK플래닛). A user submits a question (+ optional attachments, target
+AI Trend Intelligence platform for SK 계열사 staff (SK하이닉스 / SK텔레콤 /
+SK브로드밴드 / SK플래닛 / SK이노베이션). A user submits a question (+ optional attachments, target
 audience, target sector) → the pipeline classifies intent/entities, routes
 to a sector, collects & analyzes real news via that sector's adapter,
 synthesizes across documents, and adapts the result for a target **audience**
@@ -60,13 +60,15 @@ UserRequest
 |---|---|---|---|
 | `sk_hynix` | done | done (8-angle framework) | **real**, implemented |
 | `sk_planet` | done | done (very detailed — scope, glossary, importance tiers, cross-sector table, audience emphasis) | **real**, implemented |
+| `sk_telecom` | done | done (8-section sk_planet-style format) | **real**, implemented |
+| `sk_innovation` | done | done (8-section sk_planet-style format) | **real**, implemented |
 | `sk_broadband` | done (team PR merged) | done (team PR merged) | still stub (`template_only`) |
 | `general` (fallback) | minimal | empty template | still stub — intentionally deferred, not planned yet |
 
-`sk_hynix` and `sk_planet`'s collectors are functionally identical (same
-file, same logic, different `_STAGE`/env var names) — if you fix a bug in
-one, fix it in the other too, or better, consider extracting the shared
-logic.
+`sk_hynix`/`sk_planet`/`sk_telecom`/`sk_innovation`'s collectors are
+functionally identical (same file, same logic, different `_STAGE`/env var
+names) — if you fix a bug in one, fix it in all four, or better, consider
+extracting the shared logic.
 
 ## Known gaps (not obvious from reading the code alone — read this before assuming something works)
 
@@ -104,6 +106,35 @@ logic.
 - **`general` sector is deliberately unimplemented** — only gets the common
   source registry (Naver) wired into its `SourcePlan`; no real
   collector/analyzer. Not currently planned.
+- **`prompts/common/audience_profile.md` is a new, still-empty placeholder.**
+  The team wants ONE shared place defining each of the 4 audiences'
+  tone/format rules, so a sector's `system_prompt.md` "대상별 강조 포인트"
+  section only lists *which of that sector's own data* matters to each
+  audience (short bullets) instead of repeating the full definition —
+  `sk_telecom`/`sk_innovation` already follow this lighter bullet format
+  and point back to this file. `sk_hynix`/`sk_planet` still use the older,
+  heavier per-sector table format (written before this convention existed)
+  — not yet retrofitted, would need doing once the common file has real content.
+- **`PlannedSource.role`** (free-text, distinct from `content_type` above) tags
+  *why* a source is registered for a per-sector coverage quota: `official`
+  (sector's own SK 계열사 newsroom, >=1 required), `search` (general trade
+  press, >=2 required), `market_analysis` (market research/competitive
+  analysis, >=1 required), plus sector-specific custom roles
+  (`competitor_official`, `regulatory_official`, `user_sentiment`, ...) added
+  only when genuinely meaningful — never invented to fill a quota. Left
+  unset (not guessed) when ambiguous — see `한국콘텐츠진흥원(KOCCA)` in
+  `sources/registry/sk_broadband/sources.json` for a real example (flagged
+  with a `role_todo` note instead of a guessed value). `sk_telecom` currently
+  has **zero** `market_analysis`-role sources — a real, unfilled gap, not
+  yet a registered source. No code currently branches on `role` — it's
+  purely descriptive/reporting today, unlike `content_type` which
+  `core/source_planner/planner.py` actually uses to reorder sources.
+- **`PlannedSource.reliability_tier`** (`common/contracts.py`) is a real,
+  domain-expert-confirmed 3-tier convention: `official` (government/company
+  1st-party) / `analyst_media` (industry press, interprets rather than just
+  publishes) / `user_generated` (audience reviews — a sentiment signal, not
+  a fact to verify). Every registered source should set one; never invent a
+  tier for a source that isn't registered.
 
 ## Technical gotchas learned the hard way (live-verified, not guessed)
 
@@ -145,6 +176,44 @@ logic.
   Use the `_html()` helper in `reporting/dashboard_streamlit/app.py`
   (wraps `textwrap.dedent`), don't call `st.markdown` directly with
   indented multi-line f-strings.
+- **Leading a search with a brand name surfaces that brand's own coverage,
+  not market coverage — even after entity+topic pairing.** Live-tested:
+  even pairing "OK캐쉬백" with "포인트 마케팅" still returned OK캐쉬백's own
+  service-description/milestone articles, not market-trend content,
+  because the brand's own indexed coverage dominates regardless of the
+  second term. Fixed by classifying `EntityExtractionResult.perspective`
+  (a DIFFERENT axis from `primary_intent` — `market_landscape` /
+  `company_update` / `competitor_comparison` / `regulatory_policy`,
+  classified in the same existing entity AI call, no new API cost) and, for
+  `market_landscape` questions, anchoring the search on a sector's
+  registered `SectorProfile.market_keywords` (e.g. "포인트 마케팅 시장")
+  instead of a brand name — see `core/entity/search_terms.py`. Sources are
+  also reordered by `PlannedSource.content_type` per perspective in
+  `core/source_planner/planner.py` (`analysis`-tagged sources first for
+  market_landscape, `press_release`-tagged first for company_update) so
+  analytical coverage gets searched before the collector's shared
+  rate-limit budget runs out.
+- **A flat `[*organizations, *technologies, *keywords]` concatenation let
+  `technologies` alone crowd out the actual topic keyword.** Live-tested:
+  for "OK캐쉬백 Syrup 포인트 마케팅 시장 현황은?", `technologies` had 2 items
+  ("OK캐쉬백", "Syrup 포인트"), so the collector's first-2-terms primary
+  search attempt was two near-synonymous brand names — "시장 현황" (the
+  actual topic being asked about) never got used since the entity-only
+  query already succeeded. Fixed by `core/entity/search_terms.py`'s
+  `build_search_terms()`, which always pairs one anchor entity with one
+  anchor topic keyword (falling back to a `primary_intent`-based framing
+  word if no topic keyword exists) as the first two positions, instead of
+  relying on whatever landed there by concatenation order.
+- **The original question now flows to the analyzer and synthesis AI pass, not
+  just the collector.** Every sector's `analyze(source_documents, question)`
+  grounds `summary`/`key_points` in the actual question and returns
+  `DocumentAnalysis.relevant_to_question` (true/false); `pipeline.py` drops any
+  `false` entry before it reaches synthesis (logged to stderr, not silent).
+  `core/synthesis/ai_based.py`'s `refine_synthesis_ai(rule_based_result,
+  question)` also receives the question so `synthesis_text` reads as a direct
+  answer, not a generic summary. This exists because search alone can't
+  guarantee relevance (Firecrawl match ≠ actually on-topic) — this is the
+  real backstop, not the search step.
 - **`.env` needs manual editing** — `load_dotenv()` is called in `main.py`,
   but no code can or should read/write actual key *values* on the user's
   behalf. `.env.example` documents every var; the user edits `.env` by hand.
@@ -152,7 +221,8 @@ logic.
 ## Env vars (see `.env.example` for the authoritative, up-to-date list)
 
 Each sector's analyzer has its own key (`TRENDSPARC_SK_HYNIX_ANALYZER_API_KEY`,
-`TRENDSPARC_SK_PLANET_ANALYZER_API_KEY`, ...). Shared/sector-agnostic AI
+`TRENDSPARC_SK_PLANET_ANALYZER_API_KEY`, `TRENDSPARC_SK_TELECOM_ANALYZER_API_KEY`,
+`TRENDSPARC_SK_INNOVATION_ANALYZER_API_KEY`, ...). Shared/sector-agnostic AI
 passes (`TRENDSPARC_ENTITY_AI_API_KEY`, `TRENDSPARC_SYNTHESIS_AI_API_KEY`)
 and `FIRECRAWL_API_KEY` are shared across all sectors. All of these are
 optional in the sense that missing ones degrade gracefully (rule-based

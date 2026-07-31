@@ -107,3 +107,54 @@ def test_common_registry_source_applies_even_with_no_sector_specific_folder(tmp_
     assert plan.notes is None
     assert len(plan.planned_sources) == 1
     assert plan.planned_sources[0].name == "네이버 뉴스"
+
+
+def _write_mixed_content_type_sources(registry_root: Path) -> None:
+    sector_dir = registry_root / "sk_planet"
+    sector_dir.mkdir(parents=True)
+    (sector_dir / "sources.json").write_text(
+        json.dumps({
+            "sources": [
+                {"name": "공식 뉴스룸", "url": "https://a.example.com", "content_type": "press_release"},
+                {"name": "무태그 소스", "url": "https://b.example.com"},
+                {"name": "전문지 분석", "url": "https://c.example.com", "content_type": "analysis"},
+            ]
+        }),
+        encoding="utf-8",
+    )
+
+
+def test_market_landscape_perspective_reorders_analysis_sources_first(tmp_path):
+    registry_root = tmp_path / "registry"
+    _write_mixed_content_type_sources(registry_root)
+
+    plan = plan_sources("req_test_source_planner", "sk_planet", registry_root, perspective="market_landscape")
+
+    assert [s.name for s in plan.planned_sources] == ["전문지 분석", "무태그 소스", "공식 뉴스룸"]
+
+
+def test_company_update_perspective_reorders_press_release_sources_first(tmp_path):
+    registry_root = tmp_path / "registry"
+    _write_mixed_content_type_sources(registry_root)
+
+    plan = plan_sources("req_test_source_planner", "sk_planet", registry_root, perspective="company_update")
+
+    assert [s.name for s in plan.planned_sources] == ["공식 뉴스룸", "무태그 소스", "전문지 분석"]
+
+
+def test_no_perspective_keeps_registry_order(tmp_path):
+    registry_root = tmp_path / "registry"
+    _write_mixed_content_type_sources(registry_root)
+
+    plan = plan_sources("req_test_source_planner", "sk_planet", registry_root)
+
+    assert [s.name for s in plan.planned_sources] == ["공식 뉴스룸", "무태그 소스", "전문지 분석"]
+
+
+def test_unmapped_perspective_keeps_registry_order(tmp_path):
+    registry_root = tmp_path / "registry"
+    _write_mixed_content_type_sources(registry_root)
+
+    plan = plan_sources("req_test_source_planner", "sk_planet", registry_root, perspective="regulatory_policy")
+
+    assert [s.name for s in plan.planned_sources] == ["공식 뉴스룸", "무태그 소스", "전문지 분석"]
