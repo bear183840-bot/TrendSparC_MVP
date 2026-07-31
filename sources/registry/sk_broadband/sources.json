@@ -3,7 +3,9 @@
     {
       "name": "SK브로드밴드 뉴스룸",
       "url": "https://news.sktelecom.com/tag/sk%EB%B8%8C%EB%A1%9C%EB%93%9C%EB%B0%B4%EB%93%9C",
-      "collection_method": ["firecrawl_search"],
+      "collection_method": [
+        "firecrawl_search"
+      ],
       "frequency": "daily",
       "reliability_reason": "SK브로드밴드 공식 1차 자료 — SK텔레콤 뉴스룸의 SK브로드밴드 태그 페이지(브로드밴드 현직자 확인). tier: official",
       "reliability_tier": "official",
@@ -13,7 +15,9 @@
     {
       "name": "KT 뉴스룸 (경쟁사)",
       "url": "https://corp.kt.com/html/promote/news/report_list.html",
-      "collection_method": ["firecrawl_search"],
+      "collection_method": [
+        "firecrawl_search"
+      ],
       "frequency": "daily",
       "reliability_reason": "최대 경쟁사(통신3사) KT 공식 홍보센터 소식 게시판. 실사이트 확인 결과 corp.kt.com > 홍보센터 > KT 소식 섹션 URL 확인함. tier: official",
       "reliability_tier": "official",
@@ -23,18 +27,21 @@
     {
       "name": "한국콘텐츠진흥원(KOCCA)",
       "url": "https://www.kocca.kr",
-      "collection_method": ["firecrawl_search"],
+      "collection_method": [
+        "firecrawl_search"
+      ],
       "frequency": "daily",
-      "reliability_reason": "콘텐츠 산업 진흥을 담당하는 정부 산하 공공기관 — 브로드밴드 현직자가 미디어 콘텐츠 신뢰성 평가 1티어로 꼽음. 실사이트 확인 결과 메뉴가 JS로 렌더링돼 보도자료 게시판의 정확한 URL을 못 찾아 루트 도메인으로 등록함 — 갱신 필요. tier: official",
+      "reliability_reason": "한국콘텐츠진흥원(KOCCA)은 콘텐츠 산업 통계, 백서, 시장동향 자료를 제공하는 공공기관이다. 규제기관이라기보다 콘텐츠·미디어 산업 현황을 해석하는 근거원이므로 SK브로드밴드의 콘텐츠/미디어 사업 환경 분석용 market_analysis 소스로 분류한다.",
       "reliability_tier": "official",
-      "content_type": "press_release",
-      "role": null,
-      "role_todo": "TODO: role 확인 필요 — 정부 산하 공공기관이라 규제기관(regulatory_official)에 가깝지만, 실제로는 규제 발표가 아니라 콘텐츠 산업 통계/보도자료를 내는 기관이라 official/market_analysis/regulatory_official 중 어느 쪽이 맞는지 확신이 없음. 팀 확인 필요"
+      "content_type": "analysis",
+      "role": "market_analysis"
     },
     {
       "name": "전자신문 (통신)",
       "url": "https://www.etnews.com/news/section.html?id1=03",
-      "collection_method": ["firecrawl_search"],
+      "collection_method": [
+        "firecrawl_search"
+      ],
       "frequency": "daily",
       "reliability_reason": "국내 대표 IT/테크 전문 매체로 통신·네트워크·IPTV 산업 보도 신뢰성 확보. 실사이트 확인 결과 '통신'(id1=03) 섹션 사용. tier: analyst_media (업계 취재·해석 개입)",
       "reliability_tier": "analyst_media",
@@ -44,7 +51,9 @@
     {
       "name": "미디어오늘 (경제/IT)",
       "url": "https://www.mediatoday.co.kr/news/articleList.html?sc_multi_code=S1&view_type=sm",
-      "collection_method": ["firecrawl_search"],
+      "collection_method": [
+        "firecrawl_search"
+      ],
       "frequency": "daily",
       "reliability_reason": "방송·미디어 산업 전문 매체로 OTT·유료방송·미디어 정책 보도 신뢰성 확보. 실사이트 확인 결과 '경제/IT' 섹션 사용. tier: analyst_media",
       "reliability_tier": "analyst_media",
@@ -54,7 +63,9 @@
     {
       "name": "IMDB",
       "url": "https://www.imdb.com",
-      "collection_method": ["firecrawl_search"],
+      "collection_method": [
+        "firecrawl_search"
+      ],
       "frequency": "weekly",
       "reliability_reason": "글로벌 영화·TV 콘텐츠 집계형 데이터베이스 — 브로드밴드 현직자가 미디어 콘텐츠 신뢰성 평가 2티어로 꼽음(공식 발표는 아니지만 업계 표준 집계 데이터). B tv/IPTV 콘텐츠 편성 경쟁력 비교에 참고. tier: analyst_media",
       "reliability_tier": "analyst_media",
@@ -64,7 +75,9 @@
     {
       "name": "왓챠피디아",
       "url": "https://pedia.watcha.com",
-      "collection_method": ["firecrawl_search"],
+      "collection_method": [
+        "firecrawl_search"
+      ],
       "frequency": "weekly",
       "reliability_reason": "국내 유저 콘텐츠 평점/반응 플랫폼 — 브로드밴드는 유저 반응 자체가 중요한 신호라 등록. 유저 의견이므로 사실 검증 대상이 아니라 여론·반응 데이터로 취급(신뢰성 평가 불필요). tier: user_generated",
       "reliability_tier": "user_generated",
@@ -73,7 +86,9 @@
     {
       "name": "JustWatch",
       "url": "https://www.justwatch.com/kr",
-      "collection_method": ["firecrawl_search"],
+      "collection_method": [
+        "firecrawl_search"
+      ],
       "frequency": "weekly",
       "reliability_reason": "국내 OTT/스트리밍 콘텐츠 검색·유저 반응 플랫폼. 왓챠피디아와 마찬가지로 유저 반응 데이터로 취급, 신뢰성 평가 불필요. tier: user_generated",
       "reliability_tier": "user_generated",
