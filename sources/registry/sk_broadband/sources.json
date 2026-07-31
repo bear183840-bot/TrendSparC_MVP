@@ -49,30 +49,6 @@
       "role": "search"
     },
     {
-      "name": "미디어오늘 (경제/IT)",
-      "url": "https://www.mediatoday.co.kr/news/articleList.html?sc_multi_code=S1&view_type=sm",
-      "collection_method": [
-        "firecrawl_search"
-      ],
-      "frequency": "daily",
-      "reliability_reason": "방송·미디어 산업 전문 매체로 OTT·유료방송·미디어 정책 보도 신뢰성 확보. 실사이트 확인 결과 '경제/IT' 섹션 사용. tier: analyst_media",
-      "reliability_tier": "analyst_media",
-      "content_type": "analysis",
-      "role": "search"
-    },
-    {
-      "name": "IMDB",
-      "url": "https://www.imdb.com",
-      "collection_method": [
-        "firecrawl_search"
-      ],
-      "frequency": "weekly",
-      "reliability_reason": "글로벌 영화·TV 콘텐츠 집계형 데이터베이스 — 브로드밴드 현직자가 미디어 콘텐츠 신뢰성 평가 2티어로 꼽음(공식 발표는 아니지만 업계 표준 집계 데이터). B tv/IPTV 콘텐츠 편성 경쟁력 비교에 참고. tier: analyst_media",
-      "reliability_tier": "analyst_media",
-      "content_type": "analysis",
-      "role": "market_analysis"
-    },
-    {
       "name": "왓챠피디아",
       "url": "https://pedia.watcha.com",
       "collection_method": [
@@ -80,17 +56,6 @@
       ],
       "frequency": "weekly",
       "reliability_reason": "국내 유저 콘텐츠 평점/반응 플랫폼 — 브로드밴드는 유저 반응 자체가 중요한 신호라 등록. 유저 의견이므로 사실 검증 대상이 아니라 여론·반응 데이터로 취급(신뢰성 평가 불필요). tier: user_generated",
-      "reliability_tier": "user_generated",
-      "role": "user_sentiment"
-    },
-    {
-      "name": "JustWatch",
-      "url": "https://www.justwatch.com/kr",
-      "collection_method": [
-        "firecrawl_search"
-      ],
-      "frequency": "weekly",
-      "reliability_reason": "국내 OTT/스트리밍 콘텐츠 검색·유저 반응 플랫폼. 왓챠피디아와 마찬가지로 유저 반응 데이터로 취급, 신뢰성 평가 불필요. tier: user_generated",
       "reliability_tier": "user_generated",
       "role": "user_sentiment"
     }
