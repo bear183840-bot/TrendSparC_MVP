@@ -1,19 +1,17 @@
-# sk_hynix source registry
+# SK hynix source registry
 
-`sources.json` has 5 registered sources, each read by `core/source_planner`
-into a `PlannedSource` — only fields already present in the entry below are
-carried over, so nothing here invents a reliability tier for an
-unregistered source.
+SK hynix 섹터의 실행용 Source를 관리한다. 현재 전용 Source 5개가 등록되어 있으며, 공통 네이버 뉴스는 `sources/registry/common/`에서 자동 병합된다.
 
-| Name | Type | Collection method | Frequency |
-|---|---|---|---|
-| SK하이닉스 뉴스룸 | official_newsroom | rss, crawling | daily |
-| 삼성전자DS 뉴스룸 | official_newsroom | rss, crawling | daily |
-| 전자신문(반도체) | news_media | rss | daily |
-| TrendForce Press Center | market_research | rss, crawling | daily |
-| BIS (미국 상무부 산업안보국) Newsroom | government_newsroom | crawling | new_filings_only |
+| 이름 | role | content_type | 수집 방식 | 갱신 주기 |
+|---|---|---|---|---|
+| SK하이닉스 뉴스룸 | `official` | `press_release` | rss, crawling | daily |
+| 삼성전자DS 뉴스룸 | `competitor_official` | `press_release` | rss, crawling | daily |
+| 전자신문(반도체) | `search` | `analysis` | rss | daily |
+| TrendForce Press Center | `market_analysis` | `analysis` | rss, crawling | daily |
+| BIS 미국 상무부 산업안보국 Newsroom | `regulatory_official` | `press_release` | crawling | new_filings_only |
 
-Each entry's `reliability_reason` is documented directly in `sources.json`.
-Do not assign an arbitrary reliability tier to a source that hasn't been
-registered here first — adding a new source means adding it to
-`sources.json`, not inferring one at analysis time.
+## 등록 원칙
+
+- 실제 실행용 Source 정보는 같은 폴더의 `sources.json`을 기준으로 한다.
+- 등록되지 않은 Source에는 임의로 신뢰도나 역할을 부여하지 않는다.
+- 새로운 Source를 추가할 때는 `role`, `content_type`, `collection_method`, `frequency`, `reliability_reason`을 함께 확인한다.

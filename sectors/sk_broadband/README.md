@@ -127,16 +127,25 @@ SK Broadband 섹터의 범위, 라우팅 용어, 분석 기준과 대상별 강�
 
 ## 3. 주요 Source
 
-크롤링 범위와 신뢰성을 고려해 다음 4개 Source를 우선 사용한다.
+현재 실행용 Source Registry는 크롤링 부담과 분석 목적을 고려해 **섹터 전용 5개 Source**로 제한한다.
+공통 Source인 네이버 뉴스 1개는 `sources/registry/common/`에서 자동 병합되므로, 실제 SourcePlan 기준으로는 **최대 6개 Source**가 사용된다.
 
-- 방송통신위원회(KCC)
-- 정보통신정책연구원(KISDI)
+### 현재 등록 Source
+
 - SK브로드밴드 뉴스룸
+- KT 뉴스룸 (경쟁사 공식 자료)
 - 한국콘텐츠진흥원(KOCCA)
+- 전자신문 (통신)
+- 왓챠피디아
+- 공통 Source: 네이버 뉴스
 
-URL, 유형, 활용 목적은
+URL, 유형, role, content_type, 활용 목적은
 [SK Broadband Source Registry](../../sources/registry/sk_broadband/README.md)를
 참고한다.
+
+### 향후 검토 Source
+
+기존 후보였던 방송통신위원회(KCC), 정보통신정책연구원(KISDI)은 정책·규제·통신시장 분석에 의미가 있으므로 후보로 보존한다. 다만 현재 `sources.json`에는 등록하지 않았고, 팀 회의에서 실제 수집 범위가 확정되면 추가 여부를 결정한다.
 
 ## 4. 분석 시 주의사항
 

@@ -1,11 +1,6 @@
 # SK플래닛 (SK Planet) sector
 
-Status: `template_only` — routing metadata, source registry, and system
-prompt are filled in, but `adapter/{collector,processor,validator,analyzer,
-reporter}` are still stub functions. Every function under `adapter/` raises a
-`PipelineStageError` explaining that it is not implemented yet. Do not add
-fake/simulated data here — implement the adapter for real using the scope
-and sources already defined below.
+Status: `template_only` profile로 유지 중. routing metadata, source registry, system prompt는 채워져 있고, collector/processor/validator/analyzer 구현 구조도 준비되어 있다. 다만 실제 운영 전환은 API Key, 비용, 품질 검증 후 진행한다.
 
 SK플래닛 섹터 - OK캐쉬백, Syrup 중심의 포인트/마케팅 플랫폼, Target Intelligence
 기반 AI/빅데이터 솔루션, Web3/블록체인 로열티 생태계 및 모바일 커머스/Ad-Tech
@@ -18,8 +13,8 @@ SK플래닛 섹터 - OK캐쉬백, Syrup 중심의 포인트/마케팅 플랫폼,
   `profile.json` 참고)
 
 ## 소스 레지스트리 (`sources/registry/sk_planet/sources.json`)
-5개 등록: SK플래닛 공식 뉴스룸, 전자신문(IT/데이터/플랫폼), 블로터(Web3/테크),
-모바일인덱스(아이지에이웍스, 앱/트래픽 분석), 데이터넷(빅데이터/마케팅).
+전용 Source 5개 등록: SK플래닛 공식 뉴스룸, 전자신문(IT/데이터/플랫폼), 블로터(Web3/테크),
+모바일인덱스(아이지에이웍스, 앱/트래픽 분석), 데이터넷(빅데이터/마케팅). 공통 Source인 네이버 뉴스는 `sources/registry/common/`에서 자동 병합됩니다.
 각 소스의 `collection_method`/`frequency`/`reliability_reason`은 registry 파일에
 그대로 명시되어 있으며, 등록되지 않은 소스에는 임의로 신뢰도를 부여하지 않습니다.
 
@@ -30,5 +25,7 @@ SK플래닛 섹터 - OK캐쉬백, Syrup 중심의 포인트/마케팅 플랫폼,
 정의되어 있음.
 
 ## 아직 안 된 것
-`adapter/collector`부터 `adapter/analyzer`까지 — 위 레지스트리/프롬프트를 실제로
-사용해 수집·분석하는 로직은 아직 구현되지 않았습니다.
+
+- `profile.json.status`는 아직 `template_only`이다.
+- 실제 운영 전환 전 `.env`에 `FIRECRAWL_API_KEY`와 `TRENDSPARC_SK_PLANET_ANALYZER_API_KEY`를 채워야 한다.
+- sector reporter 단계는 공통 report planner와 역할을 분리해 추후 정리한다.

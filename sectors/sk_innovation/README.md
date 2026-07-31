@@ -1,8 +1,6 @@
 # SK이노베이션 (SK Innovation) sector
 
-Status: `active` — routing metadata, source registry, system prompt, and a
-real adapter (`collector`/`processor`/`validator`/`analyzer`) are all
-implemented, following the exact same pattern as `sk_hynix`/`sk_planet`.
+Status: `template_only` profile로 유지 중. 다만 routing metadata, source registry, system prompt, collector/processor/validator/analyzer 구현 구조는 준비되어 있다. 실제 운영 전환 여부는 API Key, 비용, 품질 검증 후 결정한다.
 
 SK이노베이션 섹터 - 배터리(SK온)·정유(SK에너지)·석유화학(SK지오센트릭)·
 윤활유(SK엔무브) 등 에너지 밸류체인 전반과 SK이노베이션-SK E&S 합병 이후
@@ -15,8 +13,8 @@ SK이노베이션 섹터 - 배터리(SK온)·정유(SK에너지)·석유화학(S
   (전체 목록은 `profile.json` 참고)
 
 ## 소스 레지스트리 (`sources/registry/sk_innovation/sources.json`)
-4개 등록: SK이노베이션 공식 뉴스룸(SKinno News), 전기신문(배터리·ESS 섹션),
-디일렉(배터리 섹션), 이투뉴스(산업 섹션). 각 소스의
+전용 Source 4개 등록: SK이노베이션 공식 뉴스룸(SKinno News), 전기신문(배터리·ESS 섹션),
+디일렉(배터리 섹션), 이투뉴스(산업 섹션). 공통 Source인 네이버 뉴스는 `sources/registry/common/`에서 자동 병합됩니다. 각 소스의
 `collection_method`/`frequency`/`reliability_reason`/`reliability_tier`는
 registry 파일에 명시되어 있으며, 등록되지 않은 소스에는 임의로 신뢰도를
 부여하지 않습니다. 전기신문/디일렉/이투뉴스는 이번 구현 단계에서 실제 방문으로
@@ -31,6 +29,7 @@ registry 파일에 명시되어 있으며, 등록되지 않은 소스에는 임�
 강조 포인트까지 정의되어 있습니다.
 
 ## 아직 안 된 것
-없음 — collector부터 analyzer까지 sk_hynix/sk_planet과 동일한 패턴으로
-구현되어 있습니다. 실제 사용 전 `.env`에 `FIRECRAWL_API_KEY`와
-`TRENDSPARC_SK_INNOVATION_ANALYZER_API_KEY`를 채워야 합니다.
+
+- `profile.json.status`는 아직 `template_only`이다.
+- 실제 운영 전환 전 `.env`에 `FIRECRAWL_API_KEY`와 `TRENDSPARC_SK_INNOVATION_ANALYZER_API_KEY`를 채워야 한다.
+- sector reporter 단계는 공통 report planner와 역할을 분리해 추후 정리한다.
