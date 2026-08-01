@@ -36,6 +36,7 @@ from firecrawl.v2.types import ScrapeOptions
 from common.contracts import PlannedSource, SourceDocument, SourcePlan
 from common.errors import PipelineStageError
 from core.source_planner.query_strategy import build_search_queries, build_source_search_terms
+from sources.collectors.firecrawl_web import response_markdown
 
 _API_KEY_ENV_VAR = "FIRECRAWL_API_KEY"
 _SEARCH_TIMEOUT_SECONDS = 30
@@ -125,7 +126,8 @@ def _search_source(client: Firecrawl, domain: str, deduped_keywords: list[str]):
     """Try progressively shorter queries until one returns results, a real
     error, or a timeout occurs. Returns ("ok", results-list), ("error", exc),
     or ("timeout", None) — mirrors _run_with_timeout's status values."""
-    for query in build_search_queries(deduped_keywords):
+    queries = build_search_queries(deduped_keywords)
+    for query in queries:
         status, payload = _run_with_timeout(
             lambda: client.search(
                 query,
@@ -138,6 +140,23 @@ def _search_source(client: Firecrawl, domain: str, deduped_keywords: list[str]):
         if status != "ok":
             return status, payload
         results = payload.web or []
+        if results:
+            return "ok", results
+    if queries:
+        status, payload = _run_with_timeout(
+            lambda: client.search(
+                f"site:{domain} {queries[0]}", include_domains=[], limit=_MAX_RESULTS_PER_SOURCE,
+                scrape_options=ScrapeOptions(formats=["markdown"]),
+            ),
+            _SEARCH_TIMEOUT_SECONDS,
+        )
+        if status != "ok":
+            return status, payload
+        results = [
+            item for item in (payload.web or [])
+            if (((item.metadata.url if item.metadata else None) or item.url)
+                and urlparse((item.metadata.url if item.metadata else None) or item.url).netloc.endswith(domain))
+        ]
         if results:
             return "ok", results
     return "ok", []
@@ -163,10 +182,18 @@ def _crawl_source(client: Firecrawl, source: PlannedSource, keywords: list[str])
 
     documents: list[SourceDocument] = []
     for item in payload[:_MAX_RESULTS_PER_SOURCE]:
-        if not item.markdown:
-            continue
         metadata = item.metadata
         article_url = (metadata.url if metadata else None) or item.url
+        markdown = item.markdown
+        if not markdown and article_url:
+            scrape_status, scrape_payload = _run_with_timeout(
+                lambda: client.scrape(article_url, formats=["markdown"]),
+                _SEARCH_TIMEOUT_SECONDS,
+            )
+            if scrape_status == "ok":
+                markdown = response_markdown(scrape_payload)
+        if not markdown or not article_url:
+            continue
         documents.append(
             SourceDocument(
                 doc_id=_doc_id(source, article_url),
@@ -174,7 +201,7 @@ def _crawl_source(client: Firecrawl, source: PlannedSource, keywords: list[str])
                 title=(metadata.title if metadata else None) or item.title,
                 url=article_url,
                 published_at=_parse_published_at(metadata.published_time if metadata else None),
-                content=item.markdown,
+                content=markdown,
                 # Only carried through when the registry itself sets a tier
                 # (see PlannedSource.reliability_tier) — never invented here.
                 reliability_tier=source.reliability_tier,

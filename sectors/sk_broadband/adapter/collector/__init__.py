@@ -24,6 +24,7 @@ from common.contracts import PlannedSource, SourceDocument, SourcePlan
 from common.errors import PipelineStageError
 from core.source_planner.query_strategy import build_search_queries, build_source_search_terms
 from sources.collectors.kofic_pdf import collect_pdf_markdown_from_detail_url
+from sources.collectors.firecrawl_web import response_markdown
 
 _API_KEY_ENV_VAR = "FIRECRAWL_API_KEY"
 _SEARCH_TIMEOUT_SECONDS = 30
@@ -83,7 +84,8 @@ def _query_term_counts(available: int) -> list[int]:
 
 
 def _search_source(client: Firecrawl, domain: str, deduped_keywords: list[str]):
-    for query in build_search_queries(deduped_keywords):
+    queries = build_search_queries(deduped_keywords)
+    for query in queries:
         status, payload = _run_with_timeout(
             lambda: client.search(
                 query,
@@ -96,6 +98,24 @@ def _search_source(client: Firecrawl, domain: str, deduped_keywords: list[str]):
         if status != "ok":
             return status, payload
         results = payload.web or []
+        if results:
+            return "ok", results
+    if queries:
+        status, payload = _run_with_timeout(
+            lambda: client.search(
+                f"site:{domain} {queries[0]}",
+                include_domains=[],
+                limit=_MAX_RESULTS_PER_SOURCE,
+                scrape_options=ScrapeOptions(formats=["markdown"]),
+            ),
+            _SEARCH_TIMEOUT_SECONDS,
+        )
+        if status != "ok":
+            return status, payload
+        results = [
+            item for item in (payload.web or [])
+            if _item_url(item) and urlparse(_item_url(item)).netloc.endswith(domain)
+        ]
         if results:
             return "ok", results
     return "ok", []
@@ -136,7 +156,16 @@ def _crawl_web_source(client: Firecrawl, source: PlannedSource, keywords: list[s
     for item in payload[:_MAX_RESULTS_PER_SOURCE]:
         markdown = getattr(item, "markdown", None)
         url = _item_url(item)
-        if not markdown or not url:
+        if not url:
+            continue
+        if not markdown:
+            scrape_status, scrape_payload = _run_with_timeout(
+                lambda: client.scrape(url, formats=["markdown"]),
+                _SEARCH_TIMEOUT_SECONDS,
+            )
+            if scrape_status == "ok":
+                markdown = response_markdown(scrape_payload)
+        if not markdown:
             continue
         documents.append(
             SourceDocument(

@@ -216,6 +216,21 @@ def run_pipeline(
                 args = (documents,)
             output = _call_sector_adapter_stage(result.sector_route, role, *args)
             if role == "analyzer":
+                document_by_id = {document.doc_id: document for document in [*documents, *attachment_documents]}
+                enriched_output = []
+                for analysis in output:
+                    document = document_by_id.get(analysis.doc_id)
+                    if document is not None:
+                        analysis = analysis.model_copy(
+                            update={
+                                "source_id": document.source_id,
+                                "source_title": document.title,
+                                "source_url": document.url,
+                                "reliability_tier": document.reliability_tier,
+                            }
+                        )
+                    enriched_output.append(analysis)
+                output = enriched_output
                 relevant = [analysis for analysis in output if analysis.relevant_to_question is not False]
                 for analysis in output:
                     if analysis.relevant_to_question is False:
@@ -268,7 +283,13 @@ def run_pipeline(
     # 7. report_generator
     try:
         _maybe_force_fail("report_generator")
-        result.generated_report = generate_report(request.question, result.synthesis, result.report_plan, audience_id)
+        result.generated_report = generate_report(
+            request.question,
+            result.synthesis,
+            result.report_plan,
+            audience_id,
+            canonical_entities=[*result.entities.organizations, *result.entities.technologies],
+        )
         result.trace.append(StageTrace(stage="report_generator", status=StageStatus.OK))
     except PipelineStageError as exc:
         _halt("report_generator", exc.reason, exc.detail)

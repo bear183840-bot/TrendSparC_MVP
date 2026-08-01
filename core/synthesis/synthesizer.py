@@ -31,6 +31,12 @@ def synthesize(
     sector_id: str,
     document_analyses: list[DocumentAnalysis],
 ) -> TrendSynthesis:
+    source_ids = list(
+        dict.fromkeys(
+            analysis.source_id or analysis.doc_id.split(":", 1)[0]
+            for analysis in document_analyses
+        )
+    )
     highlights: list[str] = []
     key_points: list[str] = []
     business_impacts: list[str] = []
@@ -66,6 +72,8 @@ def synthesize(
         highlights=highlights,
         synthesis_text=None,
         source_count=len(document_analyses),
+        unique_source_count=len(source_ids),
+        source_ids=source_ids,
         key_points=key_points,
         business_impacts=business_impacts,
         risks=risks,
