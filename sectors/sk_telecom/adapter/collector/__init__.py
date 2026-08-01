@@ -10,7 +10,7 @@ This replaced an earlier "scrape the listing page, extract links, keyword
 enough to still be linked from the front page, so a source with no recent
 coverage of the question's topic silently contributed nothing even when
 the site's archive actually had a good match. Search looks across each
-source's whole indexed history instead. Up to 3 documents may come back per
+source's whole indexed history instead. Up to 2 documents may come back per
 source (Firecrawl's own relevance order), and if the full-length query finds
 nothing, progressively shorter/looser queries are retried before giving up
 on that source — see _MAX_RESULTS_PER_SOURCE / _query_term_counts. A
@@ -49,9 +49,10 @@ _STAGE = "sectors.sk_telecom.adapter.collector"
 _PRIMARY_TERM_COUNT = 2
 _LAST_RESORT_TERM_COUNT = 1
 _MAX_QUERY_TERMS = 5
-# Firecrawl은 이미 관련도 순으로 정렬해서 반환하므로, 1건이 아니라 최대 3건까지
+# Firecrawl은 이미 관련도 순으로 정렬해서 반환하므로, 1건이 아니라 최대 2건까지
 # 받아오면 1등 결과가 애매하거나 다른 소스가 전부 0건일 때도 뭔가는 건질 수 있음.
-_MAX_RESULTS_PER_SOURCE = 3
+_MAX_RESULTS_PER_SOURCE = 2
+_MAX_COLLECTED_DOCUMENTS = 12
 
 
 def _doc_id(source: PlannedSource, url: str) -> str:
@@ -199,5 +200,7 @@ def collect(source_plan: SourcePlan) -> list[SourceDocument]:
         except PipelineStageError as exc:
             # 특정 소스에서 수집 오류가 발생하더라도 다른 소스 수집에 영향을 주지 않도록 개별 스킵 처리
             print(f"[{index + 1}/{total}] {source.name} 실패: {exc.reason}", file=sys.stderr)
+        if len(documents) >= _MAX_COLLECTED_DOCUMENTS:
+            break
 
-    return documents
+    return documents[:_MAX_COLLECTED_DOCUMENTS]
