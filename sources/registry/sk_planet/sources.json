@@ -141,6 +141,50 @@
       "content_type": "analysis",
       "role": "search",
       "topics": ["IT 비즈니스", "데이터 플랫폼 동향"]
+    },
+    {
+      "name": "카카오페이 보도자료",
+      "url": "https://www.kakaopay.com/news/pr?page=1",
+      "collection_method": ["firecrawl_search"],
+      "frequency": "daily",
+      "reliability_reason": "카카오페이 공식 보도자료 목록으로 결제·핀테크·멤버십 및 데이터 제휴 동향을 비교하기 위한 1차 출처. 2026-08-01 실제 공개 페이지 접속과 최신 게시물 노출을 확인함.",
+      "reliability_tier": "official",
+      "content_type": "press_release",
+      "role": "competitor_official",
+      "topics": ["카카오페이", "핀테크", "멤버십", "데이터 제휴"]
+    },
+    {
+      "name": "쿠팡 뉴스룸",
+      "url": "https://news.coupang.com/",
+      "collection_method": ["firecrawl_search"],
+      "frequency": "daily",
+      "reliability_reason": "쿠팡 공식 뉴스룸으로 와우 멤버십·모바일 커머스·고객 기술 동향을 비교하기 위한 1차 출처. 2026-08-01 실제 공개 페이지 접속과 보도자료·최신 소식 섹션을 확인함.",
+      "reliability_tier": "official",
+      "content_type": "press_release",
+      "role": "competitor_official",
+      "topics": ["쿠팡", "와우 멤버십", "모바일 커머스", "고객 경험"]
+    },
+    {
+      "name": "과학기술정보통신부 보도자료",
+      "url": "https://www.msit.go.kr/bbs/list.do?mId=307&mPid=208&sCode=user",
+      "collection_method": ["firecrawl_search"],
+      "frequency": "daily",
+      "reliability_reason": "AI·데이터 산업·플랫폼 정책과 마이데이터 관련 정부 공식 1차 출처. 2026-08-01 실제 공개 게시판 접속과 보도자료 목록·RSS 제공을 확인함.",
+      "reliability_tier": "official",
+      "content_type": "press_release",
+      "role": "regulatory_official",
+      "topics": ["AI 정책", "데이터 산업", "플랫폼 정책", "마이데이터"]
+    },
+    {
+      "name": "나스미디어 정기보고서",
+      "url": "https://www.nasmedia.co.kr/%EB%82%98%EC%8A%A4%EB%A6%AC%ED%8F%AC%ED%8A%B8/%EC%A0%95%EA%B8%B0%EB%B3%B4%EA%B3%A0%EC%84%9C/",
+      "collection_method": ["firecrawl_search"],
+      "frequency": "monthly",
+      "reliability_reason": "디지털 미디어·광고·마케팅 시장을 분석하는 나스미디어의 공식 정기보고서 목록. 2026-08-01 실제 공개 페이지 접속과 752건의 보고서 및 최신 월간 자료 노출을 확인함.",
+      "reliability_tier": "analyst_media",
+      "content_type": "analysis",
+      "role": "market_analysis",
+      "topics": ["디지털 광고", "Ad-tech", "미디어 트렌드", "타겟 마케팅"]
     }
   ]
 }

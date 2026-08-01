@@ -39,6 +39,94 @@
       "reliability_tier": "analyst_media",
       "content_type": "analysis",
       "role": "search"
+    },
+    {
+      "name": "삼성SDI 뉴스",
+      "url": "https://samsungsdi.co.kr/sdi-now/sdi-news/list.html",
+      "collection_method": ["firecrawl_search"],
+      "frequency": "weekly",
+      "reliability_reason": "삼성SDI 공식 뉴스 목록. 2026-08-01 공개 페이지에서 배터리 공급·기술·실적 게시물과 목록을 확인함.",
+      "reliability_tier": "official",
+      "content_type": "press_release",
+      "role": "competitor_official",
+      "topics": ["삼성SDI", "배터리 수주", "전고체 배터리", "실적"]
+    },
+    {
+      "name": "GS칼텍스 미디어허브",
+      "url": "https://gscaltexmediahub.com/",
+      "collection_method": ["firecrawl_search"],
+      "frequency": "daily",
+      "reliability_reason": "GS칼텍스 공식 미디어허브. 2026-08-01 공개 페이지에서 보도자료·에너지·ESG 섹션과 최신 게시물을 확인함.",
+      "reliability_tier": "official",
+      "content_type": "press_release",
+      "role": "competitor_official",
+      "topics": ["정유", "석유화학", "SAF", "에너지 전환"]
+    },
+    {
+      "name": "CATL News",
+      "url": "https://www.catl.com/en/news/",
+      "collection_method": ["firecrawl_search"],
+      "frequency": "weekly",
+      "reliability_reason": "CATL 공식 글로벌 뉴스 목록. 2026-08-01 공개 페이지와 최신 배터리·ESS 게시물을 확인함.",
+      "reliability_tier": "official",
+      "content_type": "press_release",
+      "role": "competitor_official",
+      "topics": ["CATL", "글로벌 배터리", "ESS", "배터리 재활용"]
+    },
+    {
+      "name": "산업통상자원부 보도·참고자료",
+      "url": "https://www.motie.go.kr/kor/article/ATCL3f49a5a8c/list",
+      "collection_method": ["firecrawl_search"],
+      "frequency": "daily",
+      "reliability_reason": "에너지·배터리·공급망 정책의 정부 공식 1차 출처. 2026-08-01 공개 상세 자료와 첨부 PDF의 검색 수집 가능성을 확인함.",
+      "reliability_tier": "official",
+      "content_type": "press_release",
+      "role": "regulatory_official",
+      "topics": ["에너지 정책", "배터리 산업", "핵심광물", "자원개발"]
+    },
+    {
+      "name": "SNE리서치 Press Release",
+      "url": "https://www.sneresearch.com/kr/insight/release/",
+      "collection_method": ["firecrawl_search"],
+      "frequency": "daily",
+      "reliability_reason": "배터리·소재·EV 시장 전문 분석기관의 공개 인사이트. 2026-08-01 공개 목록에서 최신 시장 점유율·소재 적재량 자료를 확인함.",
+      "reliability_tier": "analyst_media",
+      "content_type": "analysis",
+      "role": "market_analysis",
+      "topics": ["배터리 점유율", "배터리 소재", "EV 수요", "ESS"]
+    },
+    {
+      "name": "지디넷코리아 카테크",
+      "url": "https://zdnet.co.kr/news/?from=Mobile&lstcode=0057",
+      "collection_method": ["firecrawl_search"],
+      "frequency": "daily",
+      "reliability_reason": "전기차·배터리·모빌리티 기술을 다루는 공개 전문 뉴스 목록. 2026-08-01 배터리 구독과 전기차 관련 최신 목록의 검색 수집 가능성을 확인함.",
+      "reliability_tier": "analyst_media",
+      "content_type": "analysis",
+      "role": "search",
+      "topics": ["전기차", "배터리", "모빌리티 밸류체인"]
+    },
+    {
+      "name": "환경일보 환경뉴스",
+      "url": "https://www.hkbs.co.kr/news/articleList.html?sc_section_code=S1N1",
+      "collection_method": ["firecrawl_search"],
+      "frequency": "daily",
+      "reliability_reason": "탄소중립·에너지전환·환경규제를 다루는 공개 전문매체. 2026-08-01 관련 공개 기사와 검색 수집 가능성을 확인함.",
+      "reliability_tier": "analyst_media",
+      "content_type": "analysis",
+      "role": "search",
+      "topics": ["탄소중립", "에너지전환", "환경 규제", "재활용"]
+    },
+    {
+      "name": "아이뉴스24 산업",
+      "url": "https://www.inews24.com/list/industry",
+      "collection_method": ["firecrawl_search"],
+      "frequency": "daily",
+      "reliability_reason": "배터리·정유·석유화학 기업 실적과 산업 동향을 보완하는 공개 산업 뉴스 목록.",
+      "reliability_tier": "analyst_media",
+      "content_type": "analysis",
+      "role": "search",
+      "topics": ["배터리 기업", "정유", "석유화학", "실적"]
     }
   ]
 }
