@@ -31,7 +31,7 @@ Report Generator는 `summary`, `key_points`, `business_impact`, `risk`, `opportu
 | Sector | 상태 | 전용 Source | 범위 |
 |---|---|---:|---|
 | `sk_hynix` | active | 14 | 메모리·HBM·반도체 시장 |
-| `sk_broadband` | active | 13 | IPTV·OTT·미디어·네트워크 |
+| `sk_broadband` | active | 12 | IPTV·OTT·미디어·네트워크 |
 | `sk_planet` | active | 16 | 포인트·데이터마케팅·Ad-Tech·Web3 |
 | `sk_telecom` | active | 13 | 이동통신·AI·데이터센터·6G |
 | `sk_innovation` | active | 12 | 배터리·정유·에너지·친환경 |
