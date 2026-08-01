@@ -160,19 +160,19 @@ def test_crawl_source_gives_up_after_all_term_counts_fail():
     assert client.queries == ["포인트 마케팅", "포인트", "포인트 마케팅 시장 현황"]  # tried short-first, all failed
 
 
-def test_crawl_source_returns_up_to_three_documents_from_search_results():
+def test_crawl_source_returns_up_to_two_documents_from_search_results():
     results = [
-        _make_result(f"본문{i}", title=f"제목{i}", url=f"https://example.com/{i}/") for i in range(3)
+        _make_result(f"본문{i}", title=f"제목{i}", url=f"https://example.com/{i}/") for i in range(2)
     ]
     source = PlannedSource(name="multi source", url="https://example.com/news/")
 
     documents = _crawl_source(_FastClient(results), source, ["HBM4"])
 
-    assert len(documents) == 3
-    assert [d.url for d in documents] == [f"https://example.com/{i}/" for i in range(3)]
+    assert len(documents) == 2
+    assert [d.url for d in documents] == [f"https://example.com/{i}/" for i in range(2)]
 
 
-def test_crawl_source_caps_at_three_documents_even_if_more_results_returned():
+def test_crawl_source_caps_at_two_documents_even_if_more_results_returned():
     results = [
         _make_result(f"본문{i}", title=f"제목{i}", url=f"https://example.com/{i}/") for i in range(5)
     ]
@@ -180,7 +180,7 @@ def test_crawl_source_caps_at_three_documents_even_if_more_results_returned():
 
     documents = _crawl_source(_FastClient(results), source, ["HBM4"])
 
-    assert len(documents) == 3
+    assert len(documents) == 2
 
 
 def _make_source_plan(source_count: int, keywords: list[str] | None = None) -> tuple[SourcePlan, list[PlannedSource]]:
@@ -236,3 +236,30 @@ def test_collect_continues_past_one_failed_source_regardless_of_source_count(mon
     failing_source_id = sources[1].name
     assert len(documents) == source_count - 1
     assert all(doc.source_id != failing_source_id for doc in documents)
+
+
+def test_collect_caps_total_documents_at_twelve(monkeypatch):
+    # 8 sources * 2 results each (_MAX_RESULTS_PER_SOURCE) would be 16 raw
+    # documents; collect() must stop at _MAX_COLLECTED_DOCUMENTS (12) so the
+    # validator/analyzer never see an unbounded set.
+    monkeypatch.setenv("FIRECRAWL_API_KEY", "test-key")
+    source_count = 8
+    sources = [
+        PlannedSource(name=f"source-{i}", url=f"https://{i}.example.com/") for i in range(source_count)
+    ]
+    plan = SourcePlan(
+        request_id="req_test", sector_id="sk_hynix", planned_sources=sources, question_keywords=["HBM4"]
+    )
+
+    behavior_by_domain = {
+        f"{i}.example.com": [
+            _make_result("content-a", title=f"title-{i}-a", url=f"https://{i}.example.com/a"),
+            _make_result("content-b", title=f"title-{i}-b", url=f"https://{i}.example.com/b"),
+        ]
+        for i in range(source_count)
+    }
+    monkeypatch.setattr(collector_module, "Firecrawl", lambda api_key: _PerSourceClient(behavior_by_domain))
+
+    documents = collect(plan)
+
+    assert len(documents) == 12

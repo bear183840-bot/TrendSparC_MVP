@@ -49,7 +49,7 @@ from core.layout_generator.generator import generate_layout
 from core.report_planner.planner import plan_report
 from core.report_purpose.classifier import classify_report_purpose
 from core.sector_router.router import route_request, scan_sectors
-from core.source_planner.planner import plan_sources
+from core.source_planner.planner import plan_sources, select_top_sources
 from core.synthesis.ai_based import refine_synthesis_ai
 from core.synthesis.synthesizer import synthesize
 
@@ -160,6 +160,7 @@ def run_pipeline(
             search_terms,
             result.entities.perspective,
         )
+        result.source_plan = select_top_sources(result.source_plan, result.entities.perspective)
         result.trace.append(StageTrace(stage="source_planner", status=StageStatus.OK))
     except PipelineStageError as exc:
         _halt("source_planner", exc.reason, exc.detail)

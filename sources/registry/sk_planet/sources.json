@@ -10,7 +10,8 @@
       "reliability_reason": "SK플래닛 공식 보도자료 및 공시 채널로 신뢰도가 매우 높음. 실사이트 확인 결과 별도 뉴스/보도자료 섹션 URL이 없는 단일 랜딩페이지라 루트 도메인으로 등록함 — 실제 보도자료 채널이 확인되면 갱신 필요",
       "content_type": "press_release",
       "role": "official",
-      "reliability_tier": "official"
+      "reliability_tier": "official",
+      "topics": ["SK플래닛", "OK캐쉬백", "시럽", "모바일 커머스"]
     },
     {
       "name": "전자신문 (IT/데이터/플랫폼)",
@@ -21,7 +22,9 @@
       "frequency": "daily",
       "reliability_reason": "국내 대표 IT/테크 전문 매체로 데이터·플랫폼·빅데이터 산업 보도 신뢰성 확보. 실사이트 확인 결과 'AI·SW'(id1=04) 섹션이 데이터/플랫폼 뉴스와 가장 근접",
       "content_type": "analysis",
-      "role": "search"
+      "role": "search",
+      "reliability_tier": "analyst_media",
+      "topics": ["데이터 플랫폼", "IT 마케팅", "모바일 O2O"]
     },
     {
       "name": "블로터 (Web3/테크)",
@@ -32,7 +35,9 @@
       "frequency": "daily",
       "reliability_reason": "디지털 마케팅, Web3, 블록체인 및 테크 신사업 전문 심층 분석 매체. 실사이트 확인 결과 'IT·과학'(S1N4) 섹션 사용 — 사이트가 경제/자본시장 매체로 리브랜딩된 상태라 Web3 전용 섹션은 없음",
       "content_type": "analysis",
-      "role": "market_analysis"
+      "role": "market_analysis",
+      "reliability_tier": "analyst_media",
+      "topics": ["Web3", "블록체인 로열티", "플랫폼 생태계"]
     },
     {
       "name": "모바일인덱스 (아이지에이웍스)",
@@ -43,7 +48,9 @@
       "frequency": "weekly",
       "reliability_reason": "모바일 앱 트래픽, MAU, 사용자 행동 데이터 전문 분석 기관으로 신뢰도 우수. 실사이트 확인 결과 앱 검색 툴 위주 랜딩페이지라 별도 인사이트/블로그 섹션 URL을 못 찾아 루트 도메인으로 등록함",
       "content_type": "analysis",
-      "role": "market_analysis"
+      "role": "market_analysis",
+      "reliability_tier": "analyst_media",
+      "topics": ["앱 트래픽", "사용자 행동 데이터", "모바일 커머스 트렌드"]
     },
     {
       "name": "데이터넷 (빅데이터/마케팅)",
@@ -54,7 +61,86 @@
       "frequency": "daily",
       "reliability_reason": "B2B IT 솔루션, 빅데이터 마케팅, Ad-Tech 분야 전문 뉴스 매체. 실사이트 확인 결과 '뉴스'(S1N1) 섹션 사용",
       "content_type": "analysis",
-      "role": "search"
+      "role": "search",
+      "reliability_tier": "analyst_media",
+      "topics": ["빅데이터 솔루션", "AI 마케팅", "데이터 플랫폼"]
+    },
+    {
+      "name": "개인정보보호위원회 보도자료",
+      "url": "https://www.pipc.go.kr/np/cop/bbs/selectBoardList.do?bbsId=BS074",
+      "collection_method": ["firecrawl_search"],
+      "frequency": "weekly",
+      "reliability_reason": "개인정보보호법·데이터 규제·마이데이터 정책의 정부 공식 1차 출처. 2026-08-01 실제 접속 확인 — 1,289건 게시된 정식 보도자료 게시판임을 확인함.",
+      "reliability_tier": "official",
+      "content_type": "press_release",
+      "role": "regulatory_official",
+      "topics": ["개인정보보호법", "데이터 규제", "마이데이터 정책"]
+    },
+    {
+      "name": "금융위원회 보도자료",
+      "url": "https://www.fsc.go.kr/no010101",
+      "collection_method": ["firecrawl_search"],
+      "frequency": "weekly",
+      "reliability_reason": "금융 마이데이터·데이터 산업 규제의 정부 공식 1차 출처. 2026-08-01 실제 접속 확인 — 15,269건 게시된 정식 보도자료 게시판임을 확인함.",
+      "reliability_tier": "official",
+      "content_type": "press_release",
+      "role": "regulatory_official",
+      "topics": ["금융 마이데이터", "데이터 산업 규제"]
+    },
+    {
+      "name": "디지털데일리 (IT/플랫폼)",
+      "url": "https://www.ddaily.co.kr/page/news/2",
+      "collection_method": ["firecrawl_search"],
+      "frequency": "daily",
+      "reliability_reason": "ICT 전문지로 IT 트렌드·데이터 비즈니스·플랫폼 경쟁 동향을 상시 보도. 2026-08-01 실제 접속 확인.",
+      "reliability_tier": "analyst_media",
+      "content_type": "analysis",
+      "role": "search",
+      "topics": ["IT 트렌드", "데이터 비즈니스", "플랫폼 경쟁"]
+    },
+    {
+      "name": "지디넷코리아 (Computing)",
+      "url": "https://zdnet.co.kr/news/?ct=2",
+      "collection_method": ["firecrawl_search"],
+      "frequency": "daily",
+      "reliability_reason": "국내 IT 전문매체의 Computing 섹션 — 모바일 커머스·IT 솔루션·마이데이터 뉴스 보완. 2026-08-01 실제 접속 확인 — ct=2가 'Computing' 카테고리에 해당함을 확인함.",
+      "reliability_tier": "analyst_media",
+      "content_type": "analysis",
+      "role": "search",
+      "topics": ["모바일 커머스", "IT 솔루션", "마이데이터"]
+    },
+    {
+      "name": "매드타임스 (마케팅/애드테크)",
+      "url": "http://www.madtimes.co.kr/",
+      "collection_method": ["firecrawl_search"],
+      "frequency": "daily",
+      "reliability_reason": "마케팅·광고 전문지로 Ad-tech·모바일 광고 생태계·타겟 마케팅을 상시 보도. 2026-08-01 실제 접속 확인 — 원래 제시된 URL(madtimes.org)이 madtimes.co.kr로 리다이렉트됨, 실제 도메인으로 등록.",
+      "reliability_tier": "analyst_media",
+      "content_type": "analysis",
+      "role": "search",
+      "topics": ["Ad-tech", "모바일 광고 생태계", "타겟 마케팅"]
+    },
+    {
+      "name": "모비인사이드 (마케팅/플랫폼)",
+      "url": "https://www.mobiinside.co.kr/",
+      "collection_method": ["firecrawl_search"],
+      "frequency": "daily",
+      "reliability_reason": "모바일 시대 마케팅·플랫폼·비즈니스 트렌드를 다루는 전문 미디어. 2026-08-01 실제 접속 확인.",
+      "reliability_tier": "analyst_media",
+      "content_type": "analysis",
+      "role": "search",
+      "topics": ["앱 마케팅 트렌드", "Ad-tech 동향", "O2O"]
+    },
+    {
+      "name": "아이뉴스24 (IT)",
+      "url": "https://www.inews24.com/list/it",
+      "collection_method": ["firecrawl_search"],
+      "frequency": "daily",
+      "reliability_reason": "종합 IT 전문매체 — 데이터 플랫폼·핀테크 관련 기사 보완. 2026-08-01 실제 접속 확인.",
+      "reliability_tier": "analyst_media",
+      "content_type": "analysis",
+      "role": "search",
+      "topics": ["IT 비즈니스", "데이터 플랫폼 동향"]
     }
   ]
 }

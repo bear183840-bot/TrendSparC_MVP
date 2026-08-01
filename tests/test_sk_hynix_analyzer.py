@@ -19,7 +19,26 @@ def _document() -> SourceDocument:
     )
 
 
-def _make_response(summary, key_points, sentiment, relevant_to_question, refusal=None):
+def _make_response(
+    summary,
+    key_points,
+    sentiment,
+    relevant_to_question,
+    refusal=None,
+    business_impact="",
+    risk="",
+    opportunity="",
+    recommended_actions=None,
+    monitoring_indicators=None,
+    evidence=None,
+    action_level="insufficient_data",
+    analysis_confidence="low",
+):
+    # Mirrors the real OpenAI Structured Outputs contract: _ANALYSIS_SCHEMA
+    # marks all 12 fields "required" with strict=True, so a real response
+    # always includes them — the test fixture must too, or _analyze_document's
+    # data["field"] indexing raises KeyError before the test's actual
+    # assertion is even reached.
     message = types.SimpleNamespace(
         content=json.dumps(
             {
@@ -27,6 +46,14 @@ def _make_response(summary, key_points, sentiment, relevant_to_question, refusal
                 "key_points": key_points,
                 "sentiment": sentiment,
                 "relevant_to_question": relevant_to_question,
+                "business_impact": business_impact,
+                "risk": risk,
+                "opportunity": opportunity,
+                "recommended_actions": recommended_actions or [],
+                "monitoring_indicators": monitoring_indicators or [],
+                "evidence": evidence or [],
+                "action_level": action_level,
+                "analysis_confidence": analysis_confidence,
             }
         ),
         refusal=refusal,

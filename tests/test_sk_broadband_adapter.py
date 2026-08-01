@@ -93,6 +93,32 @@ def test_broadband_collect_continues_when_one_source_fails(monkeypatch):
     assert docs[0].source_id == "ok"
 
 
+def test_broadband_collect_caps_total_documents_at_twelve(monkeypatch):
+    # 8 sources * 2 results each (_MAX_RESULTS_PER_SOURCE) would be 16 raw
+    # documents; collect() must stop at _MAX_COLLECTED_DOCUMENTS (12) so the
+    # validator/analyzer never see an unbounded set.
+    monkeypatch.setenv("FIRECRAWL_API_KEY", "test-key")
+    sources = [
+        PlannedSource(name=f"source{i}", url=f"https://s{i}.example.com", collection_method=["firecrawl_search"])
+        for i in range(8)
+    ]
+    plan = SourcePlan(request_id="req", sector_id="sk_broadband", planned_sources=sources, question_keywords=["OTT"])
+
+    class _TwoResultsClient:
+        def search(self, query, include_domains, limit, scrape_options):
+            domain = include_domains[0]
+            return _search_data([
+                _make_result("본문" * 200, url=f"https://{domain}/a"),
+                _make_result("본문" * 200, url=f"https://{domain}/b"),
+            ])
+
+    monkeypatch.setattr(collector_module, "Firecrawl", lambda api_key: _TwoResultsClient())
+
+    docs = collect(plan)
+
+    assert len(docs) == 12
+
+
 def test_broadband_processor_strips_boilerplate_and_deduplicates():
     doc = SourceDocument(
         doc_id="doc1",
@@ -116,6 +142,64 @@ def test_broadband_validator_filters_short_or_unattributed_documents():
     no_url = SourceDocument(doc_id="3", source_id="source", title="title", content="가" * 300)
 
     assert validate([valid, short, no_url]) == [valid]
+
+
+def test_broadband_validator_rejects_stale_documents_but_keeps_undated_ones():
+    from datetime import datetime, timedelta, timezone
+
+    stale = SourceDocument(
+        doc_id="1", source_id="source", title="옛날 기사", url="https://example.com/old",
+        content="가" * 300, published_at=datetime.now(timezone.utc) - timedelta(days=800),
+    )
+    fresh = SourceDocument(
+        doc_id="2", source_id="source", title="최근 기사", url="https://example.com/new",
+        content="나" * 300, published_at=datetime.now(timezone.utc) - timedelta(days=10),
+    )
+    undated = SourceDocument(
+        doc_id="3", source_id="source", title="날짜 없는 기사", url="https://example.com/undated", content="다" * 300,
+    )
+
+    result = validate([stale, fresh, undated])
+
+    assert stale not in result
+    assert fresh in result
+    assert undated in result
+
+
+def test_broadband_validator_drops_cross_source_title_duplicates():
+    original = SourceDocument(
+        doc_id="1", source_id="전자신문", title="SK브로드밴드 AI 서비스 출시", url="https://etnews.example.com/a", content="가" * 300,
+    )
+    syndicated = SourceDocument(
+        doc_id="2", source_id="디지털데일리", title="  SK브로드밴드   AI 서비스 출시  ", url="https://ddaily.example.com/b", content="나" * 300,
+    )
+
+    result = validate([original, syndicated])
+
+    assert len(result) == 1
+    assert result[0].doc_id == "1"
+
+
+def test_broadband_validator_caps_at_eight_and_prefers_official_sources():
+    documents = []
+    for i in range(10):
+        documents.append(
+            SourceDocument(
+                doc_id=str(i),
+                source_id="source",
+                title=f"기사 제목 {i}",
+                url=f"https://example.com/{i}",
+                content=f"본문 {i} " * 100,
+                reliability_tier="user_generated" if i < 9 else "official",
+            )
+        )
+
+    result = validate(documents)
+
+    assert len(result) == 8
+    # the single official-tier document must survive the cap even though it
+    # was the last one appended, since ranking runs before trimming.
+    assert any(doc.reliability_tier == "official" for doc in result)
 
 
 def _document():

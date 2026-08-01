@@ -17,7 +17,8 @@
       "reliability_reason": "회사 공식 1차 자료",
       "content_type": "press_release",
       "role": "official",
-      "reliability_tier": "official"
+      "reliability_tier": "official",
+      "topics": ["SK하이닉스 투자", "HBM 시장 동향", "실적"]
     },
     {
       "name": "삼성전자DS 뉴스룸",
@@ -36,7 +37,8 @@
       "reliability_reason": "최대 경쟁사 공식 1차 자료",
       "content_type": "press_release",
       "role": "competitor_official",
-      "reliability_tier": "official"
+      "reliability_tier": "official",
+      "topics": ["삼성전자", "경쟁사 투자·수율", "DRAM/NAND"]
     },
     {
       "name": "전자신문(반도체)",
@@ -54,7 +56,8 @@
       "reliability_reason": "국내 반도체 전문매체, RSS 제공으로 파싱 안정적, 정책·시장 뉴스 커버리지 넓음",
       "content_type": "analysis",
       "role": "search",
-      "reliability_tier": "analyst_media"
+      "reliability_tier": "analyst_media",
+      "topics": ["반도체 산업 동향", "팹 증설", "공급망 리스크"]
     },
     {
       "name": "TrendForce Press Center",
@@ -72,7 +75,8 @@
       "reliability_reason": "DRAM/NAND 계약가·현물가 및 수급 동향을 정기 발표하는 반도체 시장조사 전문기관, 가격·시장점유율 데이터의 1차 근거",
       "content_type": "analysis",
       "role": "market_analysis",
-      "reliability_tier": "analyst_media"
+      "reliability_tier": "analyst_media",
+      "topics": ["DRAM/NAND/HBM 가격", "수급", "시장 점유율"]
     },
     {
       "name": "BIS (미국 상무부 산업안보국) Newsroom",
@@ -88,7 +92,107 @@
       ],
       "reliability_reason": "대중국 반도체 수출통제 등 규제 발표의 미국 정부 공식 1차 출처, 국내 매체 보도보다 선행 확인 가능",
       "content_type": "press_release",
-      "role": "regulatory_official"
+      "role": "regulatory_official",
+      "topics": ["미국 수출통제", "제재", "관세"]
+    },
+    {
+      "name": "TSMC Newsroom",
+      "url": "https://pr.tsmc.com/english/latest-news",
+      "collection_method": ["firecrawl_search"],
+      "frequency": "weekly",
+      "reliability_reason": "파운드리·패키징(CoWoS) 공급이 SK하이닉스 HBM 생산에 미치는 영향을 확인하기 위한 공식 자료. 2026-08-01 실제 접속 확인 — 원래 제시된 URL(/english/news)은 404, 실제 뉴스 경로는 /english/latest-news.",
+      "reliability_tier": "official",
+      "content_type": "press_release",
+      "role": "competitor_official",
+      "topics": ["TSMC", "파운드리·패키징(CoWoS)", "공급망"]
+    },
+    {
+      "name": "NVIDIA Newsroom",
+      "url": "https://nvidianews.nvidia.com/",
+      "collection_method": ["firecrawl_search"],
+      "frequency": "weekly",
+      "reliability_reason": "HBM 최대 고객사인 NVIDIA의 AI 반도체·제품 발표를 확인하기 위한 공식 자료. 2026-08-01 실제 접속 확인 — 최신 뉴스·멀티미디어가 게시되는 정식 뉴스룸임을 확인함.",
+      "reliability_tier": "official",
+      "content_type": "press_release",
+      "role": "competitor_official",
+      "topics": ["NVIDIA", "HBM 고객사 동향", "AI 반도체 수요"]
+    },
+    {
+      "name": "디일렉 (반도체)",
+      "url": "https://www.thelec.kr/news/articleList.html?sc_section_code=S1N2",
+      "collection_method": ["firecrawl_search"],
+      "frequency": "daily",
+      "reliability_reason": "반도체 팹 증설, 패키징, CAPEX 등 산업 동향을 다루는 전문매체. 2026-08-01 실제 접속 확인 — 원래 제시된 URL(sc_section_code=S1N1)은 '중국산업동향' 섹션이었음, 실제 '반도체' 섹션 코드(S1N2)로 수정.",
+      "reliability_tier": "analyst_media",
+      "content_type": "analysis",
+      "role": "search",
+      "topics": ["반도체 팹 증설", "패키징 동향", "CAPEX"]
+    },
+    {
+      "name": "디지털데일리 (반도체/디스플레이)",
+      "url": "https://www.ddaily.co.kr/page/news/5",
+      "collection_method": ["firecrawl_search"],
+      "frequency": "daily",
+      "reliability_reason": "ICT 전문지로 메모리 반도체·경쟁사 동향을 상시 보도. 2026-08-01 실제 접속 확인 — 반도체·AI 관련 최신 기사가 다수 게재됨을 확인함.",
+      "reliability_tier": "analyst_media",
+      "content_type": "analysis",
+      "role": "search",
+      "topics": ["메모리 반도체 동향", "경쟁사 동향"]
+    },
+    {
+      "name": "지디넷코리아 (반도체/디스플레이)",
+      "url": "https://zdnet.co.kr/news/?lstcode=0050",
+      "collection_method": ["firecrawl_search"],
+      "frequency": "daily",
+      "reliability_reason": "국내 IT 전문매체의 반도체/디스플레이 섹션. 2026-08-01 실제 접속 확인 — 원래 제시된 URL(ct=7)은 존재하지 않는 파라미터였음, 실제 반도체/디스플레이 섹션 코드(lstcode=0050)로 수정.",
+      "reliability_tier": "analyst_media",
+      "content_type": "analysis",
+      "role": "search",
+      "topics": ["SK하이닉스 실적", "수급 전망"]
+    },
+    {
+      "name": "아이뉴스24 (IT)",
+      "url": "https://www.inews24.com/list/it",
+      "collection_method": ["firecrawl_search"],
+      "frequency": "daily",
+      "reliability_reason": "종합 IT 전문매체 — 반도체 전용 섹션은 아니며 게임·가전·통신 등을 폭넓게 다루지만 반도체 가격·실적 기사도 다수 포함. 2026-08-01 실제 접속 확인.",
+      "reliability_tier": "analyst_media",
+      "content_type": "analysis",
+      "role": "search",
+      "topics": ["HBM 시장", "정책 및 규제"]
+    },
+    {
+      "name": "산업통상자원부 보도자료",
+      "url": "https://www.motir.go.kr/kor/article/ATCL3f49a5a8c/list",
+      "collection_method": ["firecrawl_search"],
+      "frequency": "weekly",
+      "reliability_reason": "반도체 산업 정책·보조금·수출 규제의 정부 공식 1차 출처. 2026-08-01 실제 접속 확인 — 원래 알려진 도메인(motie.go.kr)이 motir.go.kr로 이동됨(기관명/도메인 변경으로 추정), 보도·참고자료 게시판이 실제로 운영 중임을 확인함.",
+      "reliability_tier": "official",
+      "content_type": "press_release",
+      "role": "regulatory_official",
+      "topics": ["반도체 산업 정책", "보조금", "수출 규제"]
+    },
+    {
+      "name": "카운터포인트리서치 (반도체)",
+      "url": "https://www.counterpointresearch.com/coverage/semiconductors/",
+      "collection_method": ["firecrawl_search"],
+      "frequency": "weekly",
+      "reliability_reason": "파운드리·메모리·스마트폰 SoC 등을 트래킹하는 시장조사 전문기관. 2026-08-01 실제 접속 확인 — 원래 제시된 URL(/semiconductors/)은 404, 실제 반도체 섹션 경로(/coverage/semiconductors/)로 수정. TrendForce와 마찬가지로 시장을 해석·트래킹하는 기관이라 analyst_media로 분류.",
+      "reliability_tier": "analyst_media",
+      "content_type": "analysis",
+      "role": "market_analysis",
+      "topics": ["글로벌 D램 동향", "메모리 시장 점유율"]
+    },
+    {
+      "name": "SK하이닉스 IR 자료실",
+      "url": "https://news.skhynix.co.kr/category/ir",
+      "collection_method": ["firecrawl_search"],
+      "frequency": "quarterly",
+      "reliability_reason": "실적 발표, 가이던스, CAPEX 등 회사 공식 IR 자료. 2026-08-01 실제 접속 확인 — 원래 제시된 도메인(pr.skhynix.com)은 존재하지 않았음, 실제로는 뉴스룸(news.skhynix.co.kr) 내 IR 카테고리로 운영됨.",
+      "reliability_tier": "official",
+      "content_type": "press_release",
+      "role": "official",
+      "topics": ["실적 발표(가이던스)", "CAPEX"]
     }
   ]
 }

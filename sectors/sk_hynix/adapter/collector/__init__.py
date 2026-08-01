@@ -53,10 +53,16 @@ _STAGE = "sectors.sk_hynix.adapter.collector"
 _PRIMARY_TERM_COUNT = 2
 _LAST_RESORT_TERM_COUNT = 1
 _MAX_QUERY_TERMS = 5
-# Firecrawl's search already ranks by relevance; taking up to 3 (rather than
+# Firecrawl's search already ranks by relevance; taking up to 2 (rather than
 # just the single best) means a source still contributes something even
 # when the top hit isn't a great match, and other sources return nothing.
-_MAX_RESULTS_PER_SOURCE = 3
+_MAX_RESULTS_PER_SOURCE = 2
+# Defensive cap on top of source_planner.select_top_sources()'s 6-source
+# selection (6 sources * _MAX_RESULTS_PER_SOURCE = 12) — stops collection
+# once reached even if a future config change lets more sources or results
+# through, so the collector never hands the validator/analyzer an unbounded
+# document set.
+_MAX_COLLECTED_DOCUMENTS = 12
 
 
 def _doc_id(source: PlannedSource, url: str) -> str:
@@ -207,5 +213,7 @@ def collect(source_plan: SourcePlan) -> list[SourceDocument]:
             # discard whatever was already collected from the others — skip
             # it and keep going, regardless of how many sources are registered.
             print(f"[{index + 1}/{total}] {source.name} 실패: {exc.reason}", file=sys.stderr)
+        if len(documents) >= _MAX_COLLECTED_DOCUMENTS:
+            break
 
-    return documents
+    return documents[:_MAX_COLLECTED_DOCUMENTS]
