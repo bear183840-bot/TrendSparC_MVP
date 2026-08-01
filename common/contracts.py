@@ -19,6 +19,17 @@ class Attachment(BaseModel):
     filename: str
     content_type: Optional[str] = None
     size_bytes: Optional[int] = None
+    source_path: Optional[str] = None
+    content_base64: Optional[str] = Field(default=None, exclude=True, repr=False)
+
+
+class AttachmentExtraction(BaseModel):
+    attachment_id: str
+    filename: str
+    status: Literal["extracted", "empty", "unsupported", "failed"]
+    character_count: int = 0
+    truncated: bool = False
+    error: Optional[str] = None
 
 
 class UserRequest(BaseModel):
@@ -191,6 +202,14 @@ class TrendSynthesis(BaseModel):
     highlights: list[str] = Field(default_factory=list)
     synthesis_text: Optional[str] = None
     source_count: int = 0
+    key_points: list[str] = Field(default_factory=list)
+    business_impacts: list[str] = Field(default_factory=list)
+    risks: list[str] = Field(default_factory=list)
+    opportunities: list[str] = Field(default_factory=list)
+    recommended_actions: list[str] = Field(default_factory=list)
+    monitoring_indicators: list[str] = Field(default_factory=list)
+    evidence: list[str] = Field(default_factory=list)
+    confidence_labels: list[str] = Field(default_factory=list)
 
 
 class ReportPlan(BaseModel):
@@ -210,6 +229,32 @@ class AudienceAdaptation(BaseModel):
     audience_id: str
     tone: Optional[str] = None
     adapted_sections: dict = Field(default_factory=dict)
+
+
+class GeneratedReportSection(BaseModel):
+    section_id: str
+    title: str
+    summary: str = ""
+    key_points: list[str] = Field(default_factory=list)
+    evidence: list[str] = Field(default_factory=list)
+    risks: list[str] = Field(default_factory=list)
+    opportunities: list[str] = Field(default_factory=list)
+    actions: list[str] = Field(default_factory=list)
+    monitoring_indicators: list[str] = Field(default_factory=list)
+    confidence: Optional[str] = None
+
+
+class GeneratedReport(BaseModel):
+    request_id: str
+    sector_id: str
+    audience_id: str
+    purpose_id: str
+    title: str
+    executive_summary: str = ""
+    sections: list[GeneratedReportSection] = Field(default_factory=list)
+    source_count: int = 0
+    limitations: list[str] = Field(default_factory=list)
+    generation_mode: Literal["rule_based", "openai"] = "rule_based"
 
 
 class DynamicLayout(BaseModel):

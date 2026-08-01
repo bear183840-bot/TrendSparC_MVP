@@ -1,7 +1,7 @@
 {
   "sector_id": "sk_hynix",
   "display_name": "SK hynix",
-  "status": "template_only",
+  "status": "active",
   "aliases": ["SK hynix", "SK하이닉스", "하이닉스", "에스케이하이닉스", "000660"],
   "keywords": [
     "HBM", "HBM3E", "HBM4", "DRAM", "D램", "디램", "NAND", "낸드", "낸드플래시",

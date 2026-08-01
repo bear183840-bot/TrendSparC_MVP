@@ -29,10 +29,12 @@ from pydantic import BaseModel
 
 from audience.adapter import adapt_for_audience
 from common.contracts import (
+    AttachmentExtraction,
     AudienceAdaptation,
     DocumentAnalysis,
     DynamicLayout,
     EntityExtractionResult,
+    GeneratedReport,
     ReportPlan,
     ReportPurposeClassification,
     SectorRoute,
@@ -42,11 +44,13 @@ from common.contracts import (
     UserRequest,
 )
 from common.errors import PipelineStageError, StageStatus, StageTrace
+from core.attachments.extractor import build_question_context, extract_attachments
 from core.entity.ai_based import extract_entities_ai
 from core.entity.extractor import extract_entities
 from core.entity.search_terms import build_search_terms
 from core.layout_generator.generator import generate_layout
 from core.report_planner.planner import plan_report
+from core.report_generator.generator import generate_report
 from core.report_purpose.classifier import classify_report_purpose
 from core.sector_router.router import route_request, scan_sectors
 from core.source_planner.planner import plan_sources, select_top_sources
@@ -70,6 +74,7 @@ _DEFAULT_AUDIENCE_ID = "practitioner"
 class PipelineResult(BaseModel):
     request_id: str
     trace: list[StageTrace] = []
+    attachment_extractions: list[AttachmentExtraction] = []
     entities: Optional[EntityExtractionResult] = None
     sector_route: Optional[SectorRoute] = None
     source_plan: Optional[SourcePlan] = None
@@ -77,6 +82,7 @@ class PipelineResult(BaseModel):
     document_analyses: list[DocumentAnalysis] = []
     synthesis: Optional[TrendSynthesis] = None
     report_plan: Optional[ReportPlan] = None
+    generated_report: Optional[GeneratedReport] = None
     audience_adaptation: Optional[AudienceAdaptation] = None
     layout: Optional[DynamicLayout] = None
     halted_at_stage: Optional[str] = None
@@ -106,11 +112,23 @@ def run_pipeline(
         result.trace.append(StageTrace(stage=stage, status=StageStatus.FAILED, reason=reason, detail=detail))
         result.halted_at_stage = stage
 
+    # Attachments are first-class evidence: extract them before entity and intent
+    # classification, then analyze them beside collected web documents.
+    try:
+        _maybe_force_fail("attachment_extractor")
+        attachment_documents, result.attachment_extractions = extract_attachments(request.attachments)
+        question_with_context = build_question_context(request.question, attachment_documents)
+        contextual_request = request.model_copy(update={"question": question_with_context})
+        result.trace.append(StageTrace(stage="attachment_extractor", status=StageStatus.OK))
+    except PipelineStageError as exc:
+        _halt("attachment_extractor", exc.reason, exc.detail)
+        return result
+
     # 1. entity (also classifies primary_intent, see core/entity)
     try:
         _maybe_force_fail("entity")
-        rule_based_entities = extract_entities(request)
-        result.entities = extract_entities_ai(request, rule_based_entities)
+        rule_based_entities = extract_entities(contextual_request)
+        result.entities = extract_entities_ai(contextual_request, rule_based_entities)
         result.trace.append(StageTrace(stage="entity", status=StageStatus.OK))
     except PipelineStageError as exc:
         _halt("entity", exc.reason, exc.detail)
@@ -127,7 +145,7 @@ def run_pipeline(
         return result
 
     if result.sector_route.status == "unsupported":
-        for stage in ("report_purpose", "source_planner", "sector_adapter", "synthesis", "report_planner", "audience_adapter", "layout_generator"):
+        for stage in ("report_purpose", "source_planner", "sector_adapter", "synthesis", "report_planner", "report_generator", "audience_adapter", "layout_generator"):
             result.trace.append(
                 StageTrace(stage=stage, status=StageStatus.SKIPPED, reason="sector route is unsupported")
             )
@@ -188,7 +206,7 @@ def run_pipeline(
             if role == "collector":
                 args = (result.source_plan,)
             elif role == "analyzer":
-                args = (documents, request.question)
+                args = ([*documents, *attachment_documents], question_with_context)
             else:
                 args = (documents,)
             output = _call_sector_adapter_stage(result.sector_route, role, *args)
@@ -206,8 +224,17 @@ def run_pipeline(
             result.trace.append(StageTrace(stage=stage_name, status=StageStatus.OK))
         except PipelineStageError as exc:
             if exc.reason.startswith("template_only"):
-                result.trace.append(StageTrace(stage=stage_name, status=StageStatus.TEMPLATE_ONLY, reason=exc.reason))
-                stopped_at_template_only = True
+                if role == "collector" and attachment_documents:
+                    result.trace.append(
+                        StageTrace(
+                            stage=stage_name,
+                            status=StageStatus.SKIPPED,
+                            reason="collector unavailable; continuing with extracted attachment evidence",
+                        )
+                    )
+                else:
+                    result.trace.append(StageTrace(stage=stage_name, status=StageStatus.TEMPLATE_ONLY, reason=exc.reason))
+                    stopped_at_template_only = True
             else:
                 _halt(stage_name, exc.reason, exc.detail)
                 return result
@@ -216,7 +243,7 @@ def run_pipeline(
     try:
         _maybe_force_fail("synthesis")
         rule_based_synthesis = synthesize(request.request_id, sector_id, result.document_analyses)
-        result.synthesis = refine_synthesis_ai(rule_based_synthesis, request.question)
+        result.synthesis = refine_synthesis_ai(rule_based_synthesis, question_with_context)
         result.trace.append(StageTrace(stage="synthesis", status=StageStatus.OK))
     except PipelineStageError as exc:
         _halt("synthesis", exc.reason, exc.detail)
@@ -233,16 +260,30 @@ def run_pipeline(
         _halt("report_planner", exc.reason, exc.detail)
         return result
 
-    # 7. audience_adapter
+    # 7. report_generator
+    try:
+        _maybe_force_fail("report_generator")
+        result.generated_report = generate_report(request.question, result.synthesis, result.report_plan, audience_id)
+        result.trace.append(StageTrace(stage="report_generator", status=StageStatus.OK))
+    except PipelineStageError as exc:
+        _halt("report_generator", exc.reason, exc.detail)
+        return result
+
+    # 8. audience_adapter
     try:
         _maybe_force_fail("audience_adapter")
-        result.audience_adaptation = adapt_for_audience(result.synthesis, result.report_plan, audience_id)
+        result.audience_adaptation = adapt_for_audience(
+            result.synthesis,
+            result.report_plan,
+            audience_id,
+            result.generated_report,
+        )
         result.trace.append(StageTrace(stage="audience_adapter", status=StageStatus.OK))
     except PipelineStageError as exc:
         _halt("audience_adapter", exc.reason, exc.detail)
         return result
 
-    # 8. layout_generator
+    # 9. layout_generator
     try:
         _maybe_force_fail("layout_generator")
         result.layout = generate_layout(result.report_plan, result.audience_adaptation)

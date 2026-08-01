@@ -7,7 +7,7 @@ audience_id against a literal name.
 from __future__ import annotations
 
 from audience.contracts import load_audience_profile
-from common.contracts import AudienceAdaptation, ReportPlan, TrendSynthesis
+from common.contracts import AudienceAdaptation, GeneratedReport, ReportPlan, TrendSynthesis
 
 _DETAIL_LIMITS = {
     "highlight_only": 2,
@@ -43,10 +43,29 @@ def adapt_for_audience(
     synthesis: TrendSynthesis,
     report_plan: ReportPlan,
     audience_id: str,
+    generated_report: GeneratedReport | None = None,
 ) -> AudienceAdaptation:
     profile = load_audience_profile(audience_id)
 
     purpose = report_plan.report_purpose
+    if generated_report is not None:
+        adapted_sections = {
+            "executive_summary": {
+                "title": generated_report.title,
+                "summary": generated_report.executive_summary,
+                "source_count": generated_report.source_count,
+                "limitations": generated_report.limitations,
+                "generation_mode": generated_report.generation_mode,
+            }
+        }
+        adapted_sections.update({section.section_id: section.model_dump() for section in generated_report.sections})
+        return AudienceAdaptation(
+            request_id=report_plan.request_id,
+            audience_id=profile.audience_id,
+            tone=profile.tone,
+            adapted_sections=adapted_sections,
+        )
+
     visible_highlights = _visible_highlights(synthesis.highlights, profile.detail_level)
     adapted_sections = {}
     for section in report_plan.sections:

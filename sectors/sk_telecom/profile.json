@@ -1,7 +1,7 @@
 {
   "sector_id": "sk_telecom",
   "display_name": "SK텔레콤 (SK Telecom)",
-  "status": "template_only",
+  "status": "active",
   "aliases": [
     "SK텔레콤",
     "SKT",
