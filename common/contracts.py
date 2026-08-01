@@ -135,6 +135,15 @@ class PlannedSource(BaseModel):
     # fill a quota. Left unset (not guessed) when a source doesn't clearly
     # fit any role.
     role: Optional[str] = None
+    # Free-text subject tags describing what this specific source tends to
+    # cover (e.g. ["망 사용료", "AI 미디어"]) — distinct from a sector's own
+    # profile.json keywords/market_keywords, which describe the sector as a
+    # whole. Used by core/source_planner/planner.py to score a source's
+    # topical match against a question's extracted keywords/organizations/
+    # technologies when selecting the top sources for a given question.
+    # Left empty when a source's coverage is too broad/general to tag
+    # meaningfully — never guessed.
+    topics: list[str] = Field(default_factory=list)
 
 
 class SourcePlan(BaseModel):

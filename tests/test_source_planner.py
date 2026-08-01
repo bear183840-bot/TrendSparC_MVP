@@ -1,7 +1,7 @@
 import json
 from pathlib import Path
 
-from core.source_planner.planner import plan_sources
+from core.source_planner.planner import plan_sources, select_top_sources
 
 
 def test_empty_registry_returns_template_only_note(tmp_path):
@@ -158,3 +158,82 @@ def test_unmapped_perspective_keeps_registry_order(tmp_path):
     plan = plan_sources("req_test_source_planner", "sk_planet", registry_root, perspective="regulatory_policy")
 
     assert [s.name for s in plan.planned_sources] == ["공식 뉴스룸", "무태그 소스", "전문지 분석"]
+
+
+def test_select_top_sources_keeps_everything_when_registry_is_small(tmp_path):
+    # Opt-in narrowing: plan_sources() itself never trims, and select_top_sources()
+    # only trims once a sector's registry actually exceeds the cap — a 3-source
+    # registry gets all 3 back either way.
+    registry_root = tmp_path / "registry"
+    _write_mixed_content_type_sources(registry_root)
+
+    plan = plan_sources("req_test_source_planner", "sk_planet", registry_root, perspective="market_landscape")
+    narrowed = select_top_sources(plan, perspective="market_landscape")
+
+    assert len(narrowed.planned_sources) == 3
+    assert [s.name for s in narrowed.planned_sources] == ["전문지 분석", "무태그 소스", "공식 뉴스룸"]
+
+
+def test_select_top_sources_enforces_role_quota(tmp_path):
+    # Four sources share role="competitor_official"; the quota caps that role
+    # at 1, so only the highest-scoring one should survive even though the
+    # total pool (4) is under the overall selection cap (6).
+    registry_root = tmp_path / "registry"
+    sector_dir = registry_root / "sk_broadband"
+    sector_dir.mkdir(parents=True)
+    (sector_dir / "sources.json").write_text(
+        json.dumps({
+            "sources": [
+                {"name": "경쟁사 A", "url": "https://a.example.com", "role": "competitor_official", "frequency": "daily"},
+                {"name": "경쟁사 B", "url": "https://b.example.com", "role": "competitor_official", "frequency": "weekly"},
+                {"name": "경쟁사 C", "url": "https://c.example.com", "role": "competitor_official", "frequency": "weekly"},
+                {"name": "경쟁사 D", "url": "https://d.example.com", "role": "competitor_official", "frequency": "weekly"},
+            ]
+        }),
+        encoding="utf-8",
+    )
+
+    plan = plan_sources("req_test_source_planner", "sk_broadband", registry_root)
+    narrowed = select_top_sources(plan)
+
+    assert [s.name for s in narrowed.planned_sources] == ["경쟁사 A"]
+
+
+def test_select_top_sources_narrows_broadband_registry_to_six(tmp_path):
+    # A registry bigger than the cap should actually get trimmed, unlike
+    # plan_sources() alone.
+    registry_root = tmp_path / "registry"
+    sector_dir = registry_root / "sk_broadband"
+    sector_dir.mkdir(parents=True)
+    sources = [{"name": f"소스 {i}", "url": f"https://{i}.example.com"} for i in range(9)]
+    (sector_dir / "sources.json").write_text(json.dumps({"sources": sources}), encoding="utf-8")
+
+    plan = plan_sources("req_test_source_planner", "sk_broadband", registry_root)
+    assert len(plan.planned_sources) == 9
+
+    narrowed = select_top_sources(plan)
+    assert len(narrowed.planned_sources) == 6
+
+
+def test_real_broadband_registry_select_top_sources_respects_quotas():
+    project_root = Path(__file__).resolve().parent.parent
+    registry_root = project_root / "sources" / "registry"
+
+    plan = plan_sources(
+        "req_test_source_planner",
+        "sk_broadband",
+        registry_root,
+        question_keywords=["OTT", "IPTV"],
+        perspective="market_landscape",
+    )
+    narrowed = select_top_sources(plan, perspective="market_landscape")
+
+    assert len(narrowed.planned_sources) == 6
+    role_counts: dict[str | None, int] = {}
+    for source in narrowed.planned_sources:
+        role_counts[source.role] = role_counts.get(source.role, 0) + 1
+    # competitor_official has 4 registered candidates (KT, LG유플러스, Netflix, Disney+)
+    # but the quota caps that role at 1.
+    assert role_counts.get("competitor_official", 0) <= 1
+    assert role_counts.get("market_analysis", 0) <= 2
+    assert role_counts.get("search", 0) <= 2
