@@ -1,16 +1,17 @@
-# Common source registry
+# Common Source Registry
 
-모든 섹터의 `SourcePlan`에 자동 병합되는 공통 Source를 관리한다.
+모든 섹터의 `SourcePlan`에 자동 병합되는 공통 핵심 소스를 관리한다.
 
-## 현재 등록 Source
+## 현재 등록 소스
 
-| 이름 | role | 용도 |
-|---|---|---|
-| 네이버 뉴스 | `search` | 섹터별 전용 Source에서 놓칠 수 있는 일반 뉴스 보완 |
+| 이름 | role | planning_priority | 용도 |
+|---|---|---|---|
+| 네이버 뉴스 | `search` | `core` | 여러 언론사의 최신 기사, 산업 동향, 경쟁 현황, 리스크·대응 이슈를 폭넓게 탐색 |
 
-## 사용 원칙
+## 운영 원칙
 
-- 특정 계열사 전용 Source는 `sources/registry/<sector_id>/`에 둔다.
-- 모든 섹터에서 공통으로 쓸 수 있는 Source만 여기에 둔다.
-- 공통 Source는 섹터별 Source 개수 산정에 포함된다.
-- 예: SK Broadband는 전용 5개 + 공통 네이버 1개 = SourcePlan 최대 6개.
+- 네이버 뉴스는 섹터 전용 소스의 빈자리를 채우는 보조 채널이 아니라 모든 섹터의 핵심 검색 채널이다.
+- `select_top_sources()`는 `planning_priority: core` 소스의 Top 6 포함을 보장한다.
+- 네이버는 기사 집계 채널이므로 신뢰도는 네이버 자체가 아니라 각 기사의 원 발행처와 본문 근거를 기준으로 검증한다.
+- 질문 전체의 앞·중간·뒤 검색어를 사용하는 공통 쿼리 전략을 적용한다.
+- 향후 다른 공통 핵심 채널도 이름 하드코딩 없이 `planning_priority: core`로 등록할 수 있다.

@@ -57,10 +57,18 @@ _ROLE_MAX_QUOTA: dict[str, int] = {
 _RELIABILITY_SCORE: dict[str, float] = {"official": 1.0, "analyst_media": 0.7, "user_generated": 0.4}
 _FREQUENCY_SCORE: dict[str, float] = {"daily": 1.0, "weekly": 0.7, "monthly": 0.4}
 
+_ROLE_SCORE_BY_REPORT_PURPOSE: dict[str, dict[str, float]] = {
+    "current_status": {"market_analysis": 1.0, "search": 0.9, "official": 0.8, "competitor_official": 0.8},
+    "issue_response": {"regulatory_official": 1.0, "search": 0.9, "official": 0.9, "market_analysis": 0.8},
+    "future_business": {"market_analysis": 1.0, "official": 0.9, "competitor_official": 0.8, "search": 0.7},
+    "root_cause": {"market_analysis": 1.0, "search": 0.9, "regulatory_official": 0.8, "official": 0.7},
+}
+
 # Neutral score used whenever a factor's underlying field isn't set on a
 # source (or no question context is available for it) — an unset field must
 # not be penalized relative to sources that do have it set.
 _NEUTRAL_SCORE = 0.5
+_PLANNING_PRIORITY_BONUS = {"core": 0.25, "standard": 0.0, "supporting": -0.05}
 
 
 def _topic_match_score(source: PlannedSource, question_keywords: list[str]) -> float:
@@ -83,7 +91,12 @@ def _purpose_match_score(source: PlannedSource, perspective: str | None) -> floa
     return 1.0 - (priority / max_priority) if max_priority else 1.0
 
 
-def _score_source(source: PlannedSource, question_keywords: list[str], perspective: str | None) -> float:
+def _score_source(
+    source: PlannedSource,
+    question_keywords: list[str],
+    perspective: str | None,
+    report_purpose_id: str | None = None,
+) -> float:
     # Weights follow the agreed source-registry redesign: topic match 35%,
     # question-purpose match 20%, reliability 20%, recency 15%, role-known 10%.
     topic_score = _topic_match_score(source, question_keywords)
@@ -91,16 +104,27 @@ def _score_source(source: PlannedSource, question_keywords: list[str], perspecti
     reliability_score = _RELIABILITY_SCORE.get(source.reliability_tier, _NEUTRAL_SCORE)
     recency_score = _FREQUENCY_SCORE.get(source.frequency, _NEUTRAL_SCORE)
     role_known_score = 1.0 if source.role else _NEUTRAL_SCORE
-    return (
+    base_score = (
         0.35 * topic_score
         + 0.20 * purpose_score
         + 0.20 * reliability_score
         + 0.15 * recency_score
         + 0.10 * role_known_score
     )
+    purpose_roles = _ROLE_SCORE_BY_REPORT_PURPOSE.get(report_purpose_id, {})
+    purpose_role_score = purpose_roles.get(source.role, _NEUTRAL_SCORE)
+    return (
+        base_score
+        + 0.12 * purpose_role_score
+        + _PLANNING_PRIORITY_BONUS.get(source.planning_priority, 0.0)
+    )
 
 
-def select_top_sources(source_plan: SourcePlan, perspective: str | None = None) -> SourcePlan:
+def select_top_sources(
+    source_plan: SourcePlan,
+    perspective: str | None = None,
+    report_purpose_id: str | None = None,
+) -> SourcePlan:
     """Narrow an already-built SourcePlan to the top-scoring sources.
 
     Opt-in on purpose: plan_sources() keeps returning every registered
@@ -116,7 +140,12 @@ def select_top_sources(source_plan: SourcePlan, perspective: str | None = None) 
     """
     ranked = sorted(
         source_plan.planned_sources,
-        key=lambda source: _score_source(source, source_plan.question_keywords, perspective),
+        key=lambda source: _score_source(
+            source,
+            source_plan.question_keywords,
+            perspective,
+            report_purpose_id,
+        ),
         reverse=True,
     )
 
@@ -126,7 +155,18 @@ def select_top_sources(source_plan: SourcePlan, perspective: str | None = None) 
     selected: list[PlannedSource] = []
     skipped_by_quota: list[PlannedSource] = []
     role_counts: dict[str | None, int] = {}
+    # A registry can explicitly designate cross-sector discovery channels as
+    # core. Reserve their place before applying role-diversity quotas.
     for source in ranked:
+        if source.planning_priority != "core":
+            continue
+        selected.append(source)
+        role_counts[source.role] = role_counts.get(source.role, 0) + 1
+        if len(selected) >= _MAX_SELECTED_SOURCES:
+            break
+    for source in ranked:
+        if source in selected:
+            continue
         quota = _ROLE_MAX_QUOTA.get(source.role)
         used = role_counts.get(source.role, 0)
         if quota is not None and used >= quota:
@@ -141,7 +181,8 @@ def select_top_sources(source_plan: SourcePlan, perspective: str | None = None) 
     # sparse. Backfill any open slots with the best sources skipped above.
     if len(selected) < _MAX_SELECTED_SOURCES:
         for source in skipped_by_quota:
-            selected.append(source)
+            if source not in selected:
+                selected.append(source)
             if len(selected) >= _MAX_SELECTED_SOURCES:
                 break
 

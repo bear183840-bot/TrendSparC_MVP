@@ -19,7 +19,7 @@ from common.contracts import EntityExtractionResult, ReportPurposeClassification
 
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 _REPORT_PURPOSE_PROMPT_DIR = _PROJECT_ROOT / "prompts" / "report_purposes"
-_CLASSIFIER_VERSION = "rule_based_v1"
+_CLASSIFIER_VERSION = "rule_based_v2"
 
 _PURPOSE_DEFINITIONS: dict[str, dict] = {
     "current_status": {
@@ -75,6 +75,14 @@ _KEYWORD_FALLBACKS: list[tuple[str, tuple[str, ...]]] = [
 # can mention risks and actions without asking why a problem happened.
 _EXPLICIT_ISSUE_RESPONSE_SIGNALS = ("이슈", "리스크", "위험", "대응", "조치", "issue", "risk", "response")
 
+_PURPOSE_SIGNALS: dict[str, tuple[str, ...]] = {
+    "issue_response": ("이슈", "리스크", "위험", "대응", "조치", "완화", "규제 대응", "issue", "risk", "response"),
+    "future_business": ("미래", "전망", "신사업", "투자", "기회", "성장", "로드맵", "future", "outlook", "forecast", "opportunity"),
+    "root_cause": ("원인", "왜", "이유", "근본", "병목", "하락 원인", "감소 원인", "root cause", "why"),
+    "current_status": ("현황", "현재", "동향", "시장", "경쟁 구도", "점유율", "실적", "추이", "status", "trend"),
+}
+_PURPOSE_TIE_PRIORITY = ("issue_response", "root_cause", "future_business", "current_status")
+
 
 def _prompt_path_for(purpose_id: str) -> str | None:
     path = _REPORT_PURPOSE_PROMPT_DIR / f"{purpose_id}.md"
@@ -97,6 +105,7 @@ def classify_report_purpose(
     request_id: str,
     entities: EntityExtractionResult,
     sector_route: SectorRoute | None = None,
+    question: str | None = None,
 ) -> ReportPurposeClassification:
     """Return a stable report-purpose contract for downstream planning.
 
@@ -104,26 +113,37 @@ def classify_report_purpose(
     context. The current rule-based skeleton does not branch on sector name.
     """
 
-    terms = " ".join([*entities.keywords, *entities.technologies, *entities.organizations]).lower()
-    explicit_issue_response = any(signal.lower() in terms for signal in _EXPLICIT_ISSUE_RESPONSE_SIGNALS)
+    terms = " ".join([question or "", *entities.keywords, *entities.technologies, *entities.organizations]).lower()
     mapped_primary_purpose = _PRIMARY_INTENT_TO_PURPOSE.get(entities.primary_intent)
-    purpose_id = "issue_response" if explicit_issue_response else mapped_primary_purpose
-    reason = f"mapped from entity primary_intent='{entities.primary_intent}'"
-    confidence = "high"
+    scores = {purpose_id: 0 for purpose_id in _PURPOSE_DEFINITIONS}
+    matched_signals: dict[str, list[str]] = {purpose_id: [] for purpose_id in _PURPOSE_DEFINITIONS}
+    if mapped_primary_purpose:
+        scores[mapped_primary_purpose] += 4
+    for purpose_id, signals in _PURPOSE_SIGNALS.items():
+        for signal in signals:
+            if signal.lower() in terms:
+                scores[purpose_id] += 2
+                matched_signals[purpose_id].append(signal)
+    # An explicit response or causal request is more decisive than a broad AI
+    # label. This is generic across sectors and question subjects.
+    if any(signal.lower() in terms for signal in _EXPLICIT_ISSUE_RESPONSE_SIGNALS):
+        scores["issue_response"] += 3
+    if any(signal.lower() in terms for signal in ("원인", "왜", "이유", "근본", "root cause", "why")):
+        scores["root_cause"] += 3
 
-    if explicit_issue_response:
-        reason = "explicit issue/risk response signal found in question terms"
-        confidence = "high" if mapped_primary_purpose is not None else "medium"
-
-    if purpose_id is None:
-        purpose_id = _infer_from_question_terms(entities)
-        reason = "inferred from extracted question terms"
-        confidence = "medium"
-
-    if purpose_id is None:
+    purpose_id = max(_PURPOSE_TIE_PRIORITY, key=lambda candidate: scores[candidate])
+    top_score = scores[purpose_id]
+    runner_up = max(score for candidate, score in scores.items() if candidate != purpose_id)
+    if top_score == 0:
         purpose_id = "current_status"
         reason = "fallback to current_status because no report purpose signal matched"
         confidence = "low"
+    else:
+        reason = (
+            f"scored from primary_intent='{entities.primary_intent}' and signals="
+            f"{matched_signals[purpose_id]}; scores={scores}"
+        )
+        confidence = "high" if top_score >= 4 and top_score - runner_up >= 2 else "medium"
 
     definition = _PURPOSE_DEFINITIONS[purpose_id]
     return ReportPurposeClassification(

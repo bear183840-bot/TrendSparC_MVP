@@ -5,10 +5,11 @@ import pytest
 
 from common.contracts import PlannedSource, SourceDocument, SourcePlan
 from common.errors import PipelineStageError
+from core.source_planner.query_strategy import build_source_search_terms
 from sectors.sk_broadband.adapter import analyzer as analyzer_module
 from sectors.sk_broadband.adapter import collector as collector_module
 from sectors.sk_broadband.adapter.analyzer import analyze
-from sectors.sk_broadband.adapter.collector import _crawl_source, _search_keywords_for_source, collect
+from sectors.sk_broadband.adapter.collector import _crawl_source, collect
 from sectors.sk_broadband.adapter.processor import process
 from sectors.sk_broadband.adapter.validator import validate
 
@@ -62,8 +63,8 @@ def test_competitor_and_regulatory_searches_put_registry_topics_first():
     )
     question_terms = ["SK브로드밴드", "경쟁 현황", "IPTV"]
 
-    assert _search_keywords_for_source(competitor, question_terms)[:2] == ["KT 지니TV", "IPTV"]
-    assert _search_keywords_for_source(official, question_terms)[:2] == ["SK브로드밴드", "경쟁 현황"]
+    assert build_source_search_terms(competitor, question_terms)[:2] == ["IPTV", "KT 지니TV"]
+    assert build_source_search_terms(official, question_terms)[:2] == ["SK브로드밴드", "경쟁 현황"]
 
 
 def test_broadband_kofic_source_uses_pdf_helper(monkeypatch):

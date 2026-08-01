@@ -31,7 +31,7 @@ def test_classify_report_purpose_infers_from_terms_when_primary_intent_unknown()
     )
 
     assert result.purpose_id == "issue_response"
-    assert result.confidence == "medium"
+    assert result.confidence == "high"
 
 
 def test_classify_report_purpose_falls_back_to_current_status():
@@ -48,4 +48,21 @@ def test_explicit_risk_response_overrides_broad_root_cause_intent():
     )
 
     assert result.purpose_id == "issue_response"
-    assert "explicit" in result.reason
+    assert result.confidence == "high"
+
+
+def test_report_purpose_scores_full_question_across_all_purpose_types():
+    cases = [
+        ("시장 경쟁 현황과 점유율 추이를 정리해줘", "current_status"),
+        ("주요 위험과 고객 영향, 대응 조치를 제안해줘", "issue_response"),
+        ("향후 성장 전망과 신사업 투자 기회를 분석해줘", "future_business"),
+        ("실적 하락 원인이 무엇인지 근본 이유를 분석해줘", "root_cause"),
+    ]
+
+    for question, expected in cases:
+        result = classify_report_purpose(
+            "req_test_report_purpose",
+            _entities("current_status"),
+            question=question,
+        )
+        assert result.purpose_id == expected

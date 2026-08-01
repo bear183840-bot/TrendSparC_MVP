@@ -258,3 +258,51 @@ def test_real_broadband_registry_select_top_sources_respects_quotas():
     assert role_counts.get("competitor_official", 0) <= 1
     assert role_counts.get("market_analysis", 0) <= 2
     assert role_counts.get("search", 0) <= 2
+
+
+def test_core_common_source_is_guaranteed_a_top_six_slot(tmp_path):
+    registry_root = tmp_path / "registry"
+    sector_dir = registry_root / "sk_planet"
+    common_dir = registry_root / "common"
+    sector_dir.mkdir(parents=True)
+    common_dir.mkdir(parents=True)
+    sector_sources = [
+        {
+            "name": f"high-score-{index}",
+            "url": f"https://{index}.example.com",
+            "role": "market_analysis",
+            "reliability_tier": "official",
+            "frequency": "daily",
+            "topics": ["정확한 질문 주제"],
+        }
+        for index in range(8)
+    ]
+    (sector_dir / "sources.json").write_text(json.dumps({"sources": sector_sources}), encoding="utf-8")
+    (common_dir / "sources.json").write_text(
+        json.dumps(
+            {
+                "sources": [
+                    {
+                        "name": "core-news-search",
+                        "url": "https://news.example.com",
+                        "role": "search",
+                        "planning_priority": "core",
+                        "frequency": "monthly",
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    plan = plan_sources(
+        "req_core_source",
+        "sk_planet",
+        registry_root,
+        question_keywords=["정확한 질문 주제"],
+        perspective="market_landscape",
+    )
+    narrowed = select_top_sources(plan, "market_landscape", "current_status")
+
+    assert len(narrowed.planned_sources) == 6
+    assert "core-news-search" in [source.name for source in narrowed.planned_sources]

@@ -155,6 +155,9 @@ class PlannedSource(BaseModel):
     # Left empty when a source's coverage is too broad/general to tag
     # meaningfully — never guessed.
     topics: list[str] = Field(default_factory=list)
+    # Registry-driven planning importance. "core" sources receive a reserved
+    # Top-N slot but still pass the same document relevance/quality validation.
+    planning_priority: Optional[Literal["core", "standard", "supporting"]] = None
 
 
 class SourcePlan(BaseModel):

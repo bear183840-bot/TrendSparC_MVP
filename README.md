@@ -26,7 +26,7 @@ Report Generator는 `summary`, `key_points`, `business_impact`, `risk`, `opportu
 
 ## 섹터와 소스 현황
 
-모든 등록 섹터의 Collector / Processor / Validator / Analyzer가 구현되어 있으며 `profile.json.status`는 `active`입니다. 아래 숫자는 섹터 전용 소스 수이며 실행 시 공통 네이버 뉴스 소스 1개가 추가됩니다.
+모든 등록 섹터의 Collector / Processor / Validator / Analyzer가 구현되어 있으며 `profile.json.status`는 `active`입니다. 아래 숫자는 섹터 전용 소스 수입니다. 실행 시 `planning_priority: core`로 등록된 공통 네이버 뉴스가 Top 6 핵심 소스로 포함됩니다.
 
 | Sector | 상태 | 전용 Source | 범위 |
 |---|---|---:|---|
