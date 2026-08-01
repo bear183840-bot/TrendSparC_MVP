@@ -7,20 +7,29 @@ reporting/{dashboard_streamlit,html,pdf}.
 
 from __future__ import annotations
 
-from common.contracts import AudienceAdaptation, DynamicLayout, ReportPlan
+from common.contracts import AudienceAdaptation, DashboardBlock, DynamicLayout, ReportPlan
+
+
+def _block_title(section: str, content: dict) -> str:
+    return content.get("title") or section.replace("_", " ").title()
 
 
 def generate_layout(report_plan: ReportPlan, adaptation: AudienceAdaptation) -> DynamicLayout:
     section_order = list(report_plan.sections)
     if "executive_summary" in adaptation.adapted_sections:
         section_order.insert(0, "executive_summary")
-    blocks = [
-        {
-            "section": section,
-            "content": adaptation.adapted_sections.get(section, {}),
-        }
-        for section in section_order
-    ]
+    blocks = []
+    for index, section in enumerate(section_order):
+        content = adaptation.adapted_sections.get(section, {})
+        blocks.append(
+            DashboardBlock(
+                block_id=f"{index + 1:02d}_{section}",
+                section=section,
+                title=_block_title(section, content),
+                block_type="auto",
+                content=content,
+            )
+        )
 
     return DynamicLayout(
         request_id=report_plan.request_id,
