@@ -87,7 +87,7 @@ def test_report_generator_openai_path_receives_full_synthesis(monkeypatch):
                     "monitoring_indicators": [],
                     "confidence": "high",
                 }
-                for section_id in plan.sections
+                for section_id in plan.sections[:-1]
             ]
             payload = {
                 "title": "완성 보고서",
@@ -112,3 +112,5 @@ def test_report_generator_openai_path_receives_full_synthesis(monkeypatch):
     assert user_payload["synthesis"]["recommended_actions"] == synthesis.recommended_actions
     assert report.generation_mode == "openai"
     assert report.executive_summary == "경영진 요약"
+    assert [section.section_id for section in report.sections] == plan.sections
+    assert any("누락한 섹션" in limitation for limitation in report.limitations)

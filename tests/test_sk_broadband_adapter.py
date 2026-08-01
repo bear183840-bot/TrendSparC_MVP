@@ -8,7 +8,7 @@ from common.errors import PipelineStageError
 from sectors.sk_broadband.adapter import analyzer as analyzer_module
 from sectors.sk_broadband.adapter import collector as collector_module
 from sectors.sk_broadband.adapter.analyzer import analyze
-from sectors.sk_broadband.adapter.collector import _crawl_source, collect
+from sectors.sk_broadband.adapter.collector import _crawl_source, _search_keywords_for_source, collect
 from sectors.sk_broadband.adapter.processor import process
 from sectors.sk_broadband.adapter.validator import validate
 
@@ -45,6 +45,25 @@ def test_broadband_web_source_collects_real_search_result():
     assert docs[0].source_id == "전자신문 (통신)"
     assert docs[0].reliability_tier == "analyst_media"
     assert docs[0].url == "https://www.etnews.com/a"
+
+
+def test_competitor_and_regulatory_searches_put_registry_topics_first():
+    competitor = PlannedSource(
+        name="KT 뉴스룸",
+        url="https://corp.kt.com/news",
+        role="competitor_official",
+        topics=["KT 지니TV", "IPTV"],
+    )
+    official = PlannedSource(
+        name="SK브로드밴드 뉴스룸",
+        url="https://news.sktelecom.com/skb",
+        role="official",
+        topics=["B tv"],
+    )
+    question_terms = ["SK브로드밴드", "경쟁 현황", "IPTV"]
+
+    assert _search_keywords_for_source(competitor, question_terms)[:2] == ["KT 지니TV", "IPTV"]
+    assert _search_keywords_for_source(official, question_terms)[:2] == ["SK브로드밴드", "경쟁 현황"]
 
 
 def test_broadband_kofic_source_uses_pdf_helper(monkeypatch):

@@ -39,3 +39,13 @@ def test_classify_report_purpose_falls_back_to_current_status():
 
     assert result.purpose_id == "current_status"
     assert result.confidence == "low"
+
+
+def test_explicit_risk_response_overrides_broad_root_cause_intent():
+    result = classify_report_purpose(
+        "req_test_report_purpose",
+        _entities("root_cause", keywords=["경쟁 현황", "주요 리스크", "대응 전략"]),
+    )
+
+    assert result.purpose_id == "issue_response"
+    assert "explicit" in result.reason
