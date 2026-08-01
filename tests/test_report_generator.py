@@ -34,6 +34,19 @@ def test_synthesis_preserves_strategy_fields_with_document_traceability():
     assert synthesis.evidence and synthesis.monitoring_indicators
 
 
+def test_synthesis_distinguishes_documents_from_unique_sources():
+    analyses = [
+        DocumentAnalysis(doc_id="kocca:1", source_id="KOCCA", key_points=["A"]),
+        DocumentAnalysis(doc_id="kocca:2", source_id="KOCCA", key_points=["B"]),
+    ]
+
+    synthesis = synthesize("req", "sk_broadband", analyses)
+
+    assert synthesis.source_count == 2
+    assert synthesis.unique_source_count == 1
+    assert synthesis.source_ids == ["KOCCA"]
+
+
 def test_report_generator_creates_distinct_issue_impact_action_sections(monkeypatch):
     monkeypatch.delenv("TRENDSPARC_REPORT_GENERATOR_API_KEY", raising=False)
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
@@ -46,6 +59,8 @@ def test_report_generator_creates_distinct_issue_impact_action_sections(monkeypa
     )
     plan = plan_report(synthesis, "executive", purpose)
 
+    assert plan.sections == ["overview", "issue", "impact", "response_actions"]
+
     report = generate_report("어떻게 대응해야 하나?", synthesis, plan, "executive")
     sections = {section.section_id: section for section in report.sections}
 
@@ -55,6 +70,22 @@ def test_report_generator_creates_distinct_issue_impact_action_sections(monkeypa
     assert sections["response_actions"].actions
     assert sections["issue"].summary != sections["response_actions"].summary
     assert report.generation_mode == "rule_based"
+    assert report.unique_source_count == 1
+    assert any("고유 출처" in limitation for limitation in report.limitations)
+
+
+def test_report_planner_keeps_problem_and_root_cause_but_removes_audience_aliases():
+    synthesis = _synthesis()
+    purpose = ReportPurposeClassification(
+        request_id="req_report",
+        purpose_id="root_cause",
+        display_name="문제 분석",
+        recommended_sections=["problem", "root_cause", "improvement_plan"],
+    )
+
+    plan = plan_report(synthesis, "executive", purpose)
+
+    assert plan.sections == ["overview", "problem", "root_cause", "improvement_plan"]
 
 
 def test_report_generator_openai_path_receives_full_synthesis(monkeypatch):

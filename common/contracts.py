@@ -180,6 +180,10 @@ class SourceDocument(BaseModel):
 
 class DocumentAnalysis(BaseModel):
     doc_id: str
+    source_id: Optional[str] = None
+    source_title: Optional[str] = None
+    source_url: Optional[str] = None
+    reliability_tier: Optional[str] = None
     summary: Optional[str] = None
     key_points: list[str] = Field(default_factory=list)
     sentiment: Optional[str] = None
@@ -205,6 +209,8 @@ class TrendSynthesis(BaseModel):
     highlights: list[str] = Field(default_factory=list)
     synthesis_text: Optional[str] = None
     source_count: int = 0
+    unique_source_count: int = 0
+    source_ids: list[str] = Field(default_factory=list)
     key_points: list[str] = Field(default_factory=list)
     business_impacts: list[str] = Field(default_factory=list)
     risks: list[str] = Field(default_factory=list)
@@ -256,6 +262,7 @@ class GeneratedReport(BaseModel):
     executive_summary: str = ""
     sections: list[GeneratedReportSection] = Field(default_factory=list)
     source_count: int = 0
+    unique_source_count: int = 0
     limitations: list[str] = Field(default_factory=list)
     generation_mode: Literal["rule_based", "openai"] = "rule_based"
 

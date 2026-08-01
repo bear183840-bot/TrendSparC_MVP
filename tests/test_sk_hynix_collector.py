@@ -164,6 +164,7 @@ def test_crawl_source_gives_up_after_all_term_counts_fail():
         "포인트 마케팅 시장",
         "마케팅 시장 현황",
         "포인트",
+        "site:example.com 포인트 마케팅 시장 현황",
     ]
 
 

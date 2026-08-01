@@ -54,6 +54,7 @@ def adapt_for_audience(
                 "title": generated_report.title,
                 "summary": generated_report.executive_summary,
                 "source_count": generated_report.source_count,
+                "unique_source_count": generated_report.unique_source_count,
                 "limitations": generated_report.limitations,
                 "generation_mode": generated_report.generation_mode,
             }
@@ -80,6 +81,7 @@ def adapt_for_audience(
             "summary": synthesis.synthesis_text,
             "highlights": list(visible_highlights),
             "source_count": synthesis.source_count,
+            "unique_source_count": synthesis.unique_source_count,
         }
 
     return AudienceAdaptation(

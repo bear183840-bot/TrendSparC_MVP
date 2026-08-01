@@ -30,6 +30,9 @@ class _FastClient:
     def search(self, query, include_domains, limit, scrape_options):
         return _search_data(self._results)
 
+    def scrape(self, url, formats):
+        return types.SimpleNamespace(markdown="직접 스크랩 본문" * 100)
+
 
 def test_broadband_web_source_collects_real_search_result():
     source = PlannedSource(
@@ -46,6 +49,36 @@ def test_broadband_web_source_collects_real_search_result():
     assert docs[0].source_id == "전자신문 (통신)"
     assert docs[0].reliability_tier == "analyst_media"
     assert docs[0].url == "https://www.etnews.com/a"
+
+
+def test_broadband_web_source_scrapes_search_result_url_when_markdown_is_missing():
+    source = PlannedSource(
+        name="네이버 뉴스",
+        url="https://news.naver.com",
+        collection_method=["crawling"],
+        planning_priority="core",
+    )
+    result = _make_result(None, title="검색 결과", url="https://n.news.naver.com/article/001/1")
+
+    docs = _crawl_source(_FastClient([result]), source, "test-key", ["IPTV", "OTT"])
+
+    assert len(docs) == 1
+    assert docs[0].source_id == "네이버 뉴스"
+    assert docs[0].content.startswith("직접 스크랩 본문")
+
+
+def test_broadband_web_source_uses_site_query_after_domain_search_is_empty():
+    source = PlannedSource(name="네이버 뉴스", url="https://news.naver.com", planning_priority="core")
+    result = _make_result("네이버 기사 본문" * 100, url="https://news.naver.com/main/read.naver?id=1")
+
+    class _SiteFallbackClient:
+        def search(self, query, include_domains, limit, scrape_options):
+            return _search_data([result] if include_domains == [] and query.startswith("site:news.naver.com") else [])
+
+    docs = _crawl_source(_SiteFallbackClient(), source, "test-key", ["IPTV", "OTT"])
+
+    assert len(docs) == 1
+    assert docs[0].url.startswith("https://news.naver.com/")
 
 
 def test_competitor_and_regulatory_searches_put_registry_topics_first():

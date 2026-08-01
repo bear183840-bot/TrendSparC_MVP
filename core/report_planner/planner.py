@@ -17,7 +17,7 @@ from pathlib import Path
 from audience.contracts import load_audience_profile
 from common.contracts import ReportPlan, ReportPurposeClassification, TrendSynthesis
 
-_BASE_SECTIONS = ["overview", "key_points"]
+_BASE_SECTIONS = ["overview"]
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 _REPORT_PURPOSES_DIR = _PROJECT_ROOT / "prompts" / "report_purposes"
 _LEGACY_REPORT_STRUCTURES_DIR = _PROJECT_ROOT / "prompts" / "report_structures"
@@ -29,6 +29,33 @@ _PURPOSE_LABELS = {
     "future_business": "미래사업",
     "root_cause": "문제 분석",
 }
+
+_SECTION_GROUPS = {
+    "overview": "overview",
+    "key_implication": "overview",
+    "issue": "risk",
+    "problem": "risk",
+    "root_cause": "cause",
+    "risk_and_opportunity": "risk",
+    "impact": "impact",
+    "response_actions": "action",
+    "recommended_action": "action",
+    "strategic_recommendation": "action",
+    "improvement_plan": "action",
+}
+
+
+def _dedupe_semantic_sections(sections: list[str]) -> list[str]:
+    """Keep purpose-specific sections ahead of overlapping audience aliases."""
+    selected: list[str] = []
+    groups: set[str] = set()
+    for section in sections:
+        group = _SECTION_GROUPS.get(section, section)
+        if group in groups:
+            continue
+        groups.add(group)
+        selected.append(section)
+    return selected
 
 
 def _load_intent_emphasis(purpose_id: str) -> str | None:
@@ -76,8 +103,7 @@ def plan_report(
     raw_purpose_id = report_purpose if isinstance(report_purpose, str) else report_purpose.purpose_id
     purpose_id = purpose.purpose_id if purpose is not None else raw_purpose_id
     purpose_sections = purpose.recommended_sections if purpose is not None else []
-    sections = _BASE_SECTIONS + list(purpose_sections) + list(profile.focus)
-    sections = list(dict.fromkeys(sections))
+    sections = _dedupe_semantic_sections(_BASE_SECTIONS + list(purpose_sections) + list(profile.focus))
 
     return ReportPlan(
         request_id=synthesis.request_id,
