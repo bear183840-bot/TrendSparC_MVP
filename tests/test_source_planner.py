@@ -174,10 +174,9 @@ def test_select_top_sources_keeps_everything_when_registry_is_small(tmp_path):
     assert [s.name for s in narrowed.planned_sources] == ["전문지 분석", "무태그 소스", "공식 뉴스룸"]
 
 
-def test_select_top_sources_enforces_role_quota(tmp_path):
-    # Four sources share role="competitor_official"; the quota caps that role
-    # at 1, so only the highest-scoring one should survive even though the
-    # total pool (4) is under the overall selection cap (6).
+def test_select_top_sources_keeps_small_same_role_registry_intact(tmp_path):
+    # Role quotas only diversify an oversized candidate pool. A registry that
+    # already fits under the overall cap must not lose otherwise valid sources.
     registry_root = tmp_path / "registry"
     sector_dir = registry_root / "sk_broadband"
     sector_dir.mkdir(parents=True)
@@ -196,7 +195,29 @@ def test_select_top_sources_enforces_role_quota(tmp_path):
     plan = plan_sources("req_test_source_planner", "sk_broadband", registry_root)
     narrowed = select_top_sources(plan)
 
-    assert [s.name for s in narrowed.planned_sources] == ["경쟁사 A"]
+    assert [s.name for s in narrowed.planned_sources] == ["경쟁사 A", "경쟁사 B", "경쟁사 C", "경쟁사 D"]
+
+
+def test_select_top_sources_backfills_when_role_quotas_leave_open_slots(tmp_path):
+    registry_root = tmp_path / "registry"
+    sector_dir = registry_root / "sk_broadband"
+    sector_dir.mkdir(parents=True)
+    sources = [
+        {
+            "name": f"경쟁사 {i}",
+            "url": f"https://{i}.example.com",
+            "role": "competitor_official",
+            "frequency": "daily" if i == 0 else "weekly",
+        }
+        for i in range(8)
+    ]
+    (sector_dir / "sources.json").write_text(json.dumps({"sources": sources}), encoding="utf-8")
+
+    plan = plan_sources("req_test_source_planner", "sk_broadband", registry_root)
+    narrowed = select_top_sources(plan)
+
+    assert len(narrowed.planned_sources) == 6
+    assert narrowed.planned_sources[0].name == "경쟁사 0"
 
 
 def test_select_top_sources_narrows_broadband_registry_to_six(tmp_path):

@@ -120,17 +120,30 @@ def select_top_sources(source_plan: SourcePlan, perspective: str | None = None) 
         reverse=True,
     )
 
+    if len(ranked) <= _MAX_SELECTED_SOURCES:
+        return source_plan.model_copy(update={"planned_sources": ranked})
+
     selected: list[PlannedSource] = []
+    skipped_by_quota: list[PlannedSource] = []
     role_counts: dict[str | None, int] = {}
     for source in ranked:
         quota = _ROLE_MAX_QUOTA.get(source.role)
         used = role_counts.get(source.role, 0)
         if quota is not None and used >= quota:
+            skipped_by_quota.append(source)
             continue
         selected.append(source)
         role_counts[source.role] = used + 1
         if len(selected) >= _MAX_SELECTED_SOURCES:
             break
+
+    # Quotas encourage diversity, but must not leave a plan unnecessarily
+    # sparse. Backfill any open slots with the best sources skipped above.
+    if len(selected) < _MAX_SELECTED_SOURCES:
+        for source in skipped_by_quota:
+            selected.append(source)
+            if len(selected) >= _MAX_SELECTED_SOURCES:
+                break
 
     return source_plan.model_copy(update={"planned_sources": selected})
 
