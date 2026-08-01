@@ -19,9 +19,9 @@ import sys
 import uuid
 from pathlib import Path
 
-if hasattr(sys.stdout, "reconfigure"):
+if hasattr(sys.stdout, "reconfigure") and not sys.stdout.isatty():
     sys.stdout.reconfigure(encoding="utf-8")
-if hasattr(sys.stderr, "reconfigure"):
+if hasattr(sys.stderr, "reconfigure") and not sys.stderr.isatty():
     sys.stderr.reconfigure(encoding="utf-8")
 
 from dotenv import load_dotenv

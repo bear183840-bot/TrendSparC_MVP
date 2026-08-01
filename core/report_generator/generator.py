@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+from copy import deepcopy
 
 from audience.contracts import load_audience_profile
 from common.contracts import GeneratedReport, GeneratedReportSection, ReportPlan, TrendSynthesis
@@ -149,6 +150,11 @@ def generate_report(
             "audience": profile.model_dump(),
             "synthesis": synthesis.model_dump(),
         }
+        schema = deepcopy(_REPORT_SCHEMA)
+        section_schema = schema["properties"]["sections"]
+        section_schema["minItems"] = len(report_plan.sections)
+        section_schema["maxItems"] = len(report_plan.sections)
+        section_schema["items"]["properties"]["section_id"]["enum"] = list(report_plan.sections)
         response = OpenAI(api_key=api_key).responses.create(
             model=os.getenv("TRENDSPARC_REPORT_GENERATOR_MODEL", "gpt-4o-mini"),
             input=[
@@ -168,15 +174,25 @@ def generate_report(
                     "type": "json_schema",
                     "name": "trend_report",
                     "strict": True,
-                    "schema": _REPORT_SCHEMA,
+                    "schema": schema,
                 }
             },
         )
         parsed = json.loads(response.output_text)
-        required = set(report_plan.sections)
-        returned = {section["section_id"] for section in parsed["sections"]}
-        if returned != required:
-            raise ValueError(f"section mismatch: expected={sorted(required)}, returned={sorted(returned)}")
+        fallback = _fallback_report(synthesis, report_plan, audience_id)
+        fallback_by_id = {section.section_id: section for section in fallback.sections}
+        returned_by_id = {
+            section["section_id"]: GeneratedReportSection.model_validate(section)
+            for section in parsed["sections"]
+            if section.get("section_id") in fallback_by_id
+        }
+        missing = [section_id for section_id in report_plan.sections if section_id not in returned_by_id]
+        sections = [returned_by_id.get(section_id, fallback_by_id[section_id]) for section_id in report_plan.sections]
+        limitations = list(parsed["limitations"])
+        if missing:
+            limitations.append(
+                "OpenAI가 누락한 섹션을 수집 근거 기반 규칙 결과로 보완했습니다: " + ", ".join(missing)
+            )
         return GeneratedReport(
             request_id=synthesis.request_id,
             sector_id=synthesis.sector_id,
@@ -184,12 +200,18 @@ def generate_report(
             purpose_id=purpose_id,
             source_count=synthesis.source_count,
             generation_mode="openai",
-            **parsed,
+            title=parsed["title"],
+            executive_summary=parsed["executive_summary"],
+            sections=sections,
+            limitations=limitations,
         )
     except Exception as exc:
         return _fallback_report(
             synthesis,
             report_plan,
             audience_id,
-            limitation=f"OpenAI 보고서 생성에 실패해 규칙 기반 결과를 사용했습니다: {type(exc).__name__}",
+            limitation=(
+                "OpenAI 보고서 생성에 실패해 규칙 기반 결과를 사용했습니다: "
+                f"{type(exc).__name__}: {str(exc)[:240]}"
+            ),
         )

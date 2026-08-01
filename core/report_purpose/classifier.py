@@ -70,6 +70,11 @@ _KEYWORD_FALLBACKS: list[tuple[str, tuple[str, ...]]] = [
     ("current_status", ("현황", "시장", "동향", "요즘", "현재", "트렌드")),
 ]
 
+# These signals express an explicit request for response planning. They take
+# precedence over a broad AI/entity intent such as root_cause because a question
+# can mention risks and actions without asking why a problem happened.
+_EXPLICIT_ISSUE_RESPONSE_SIGNALS = ("이슈", "리스크", "위험", "대응", "조치", "issue", "risk", "response")
+
 
 def _prompt_path_for(purpose_id: str) -> str | None:
     path = _REPORT_PURPOSE_PROMPT_DIR / f"{purpose_id}.md"
@@ -99,9 +104,16 @@ def classify_report_purpose(
     context. The current rule-based skeleton does not branch on sector name.
     """
 
-    purpose_id = _PRIMARY_INTENT_TO_PURPOSE.get(entities.primary_intent)
+    terms = " ".join([*entities.keywords, *entities.technologies, *entities.organizations]).lower()
+    explicit_issue_response = any(signal.lower() in terms for signal in _EXPLICIT_ISSUE_RESPONSE_SIGNALS)
+    mapped_primary_purpose = _PRIMARY_INTENT_TO_PURPOSE.get(entities.primary_intent)
+    purpose_id = "issue_response" if explicit_issue_response else mapped_primary_purpose
     reason = f"mapped from entity primary_intent='{entities.primary_intent}'"
     confidence = "high"
+
+    if explicit_issue_response:
+        reason = "explicit issue/risk response signal found in question terms"
+        confidence = "high" if mapped_primary_purpose is not None else "medium"
 
     if purpose_id is None:
         purpose_id = _infer_from_question_terms(entities)
