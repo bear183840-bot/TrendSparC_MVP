@@ -9,7 +9,7 @@ these models — always resolve behavior through a registered profile instead.
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from typing import Literal, Optional
+from typing import Any, Literal, Optional
 
 from pydantic import BaseModel, Field
 
@@ -267,8 +267,26 @@ class GeneratedReport(BaseModel):
     generation_mode: Literal["rule_based", "openai"] = "rule_based"
 
 
+class DashboardBlock(BaseModel):
+    """Design-neutral handoff unit between Layout Generator and UI renderers.
+
+    ``block_type`` is intentionally free text. The backend may later emit a
+    known renderer type (table/chart/timeline/graph/etc.) or a new type from a
+    finalized design without changing the pipeline contract first. Unknown
+    types must be preserved and rendered through the generic fallback.
+    """
+
+    block_id: str
+    section: str
+    title: Optional[str] = None
+    block_type: str = "auto"
+    content: dict[str, Any] = Field(default_factory=dict)
+    data: Any = None
+    config: dict[str, Any] = Field(default_factory=dict)
+
+
 class DynamicLayout(BaseModel):
     request_id: str
     format: str
-    blocks: list[dict] = Field(default_factory=list)
+    blocks: list[DashboardBlock] = Field(default_factory=list)
     render_target: Optional[str] = None

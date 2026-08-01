@@ -93,13 +93,15 @@ TrendSparC는 사용자의 질문과 첨부문서를 받아 관련 공개 소스
   "format": "pdf",
   "render_target": "pdf",
   "blocks": [
-    {"section": "executive_summary", "content": {}},
-    {"section": "issue", "content": {}},
-    {"section": "impact", "content": {}},
-    {"section": "response_actions", "content": {}}
+    {"block_id": "01_executive_summary", "section": "executive_summary", "block_type": "auto", "content": {}, "data": null, "config": {}},
+    {"block_id": "02_issue", "section": "issue", "block_type": "auto", "content": {}, "data": null, "config": {}},
+    {"block_id": "03_impact", "section": "impact", "block_type": "auto", "content": {}, "data": null, "config": {}},
+    {"block_id": "04_response_actions", "section": "response_actions", "block_type": "auto", "content": {}, "data": null, "config": {}}
   ]
 }
 ```
+
+현재 `block_type=auto`는 표시 방법이 아직 결정되지 않았다는 뜻이다. 디자이너가 차트·표·그래프를 임의로 채워 넣으라는 뜻이 아니며, 최종 질문별 시안이 확정된 뒤 `data/config` 요구사항과 함께 타입을 연결한다. 구현 뼈대의 상세 내용은 `docs/dashboard_implementation_skeleton_ko.md`를 참고한다.
 
 섹션의 존재 여부와 순서는 질문 목적과 청중에 따라 달라진다. 화면을 특정 섹션 네 개에 고정하지 말고, 공통 블록 시스템으로 설계한다.
 

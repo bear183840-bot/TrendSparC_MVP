@@ -79,7 +79,10 @@ streamlit run reporting/dashboard_streamlit/app.py
 - `ReportPlan`
 - `GeneratedReport`
 - `AudienceAdaptation`
+- `DashboardBlock`
 - `DynamicLayout`
+
+대시보드 UI는 최종 디자인을 가정하지 않는 블록형 뼈대만 구현되어 있습니다. 블록 계약과 향후 시안 연결 방법은 [대시보드 구현 뼈대](docs/dashboard_implementation_skeleton_ko.md)를 참고합니다.
 
 ## 테스트
 
