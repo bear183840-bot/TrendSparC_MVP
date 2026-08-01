@@ -7,28 +7,103 @@ TrendSparC_MVP는 SK 계열사/사업영역별 질문을 받아 `intent`, `entit
 ## 전체 처리 흐름
 
 ```text
-User Question
-  ↓
-Intent / Entity Analyzer
-  ↓
-Sector Router
-  ↓
-Source Planner
-  ↓
-Sector Adapter
-  ├─ Collector
-  ├─ Processor
-  ├─ Validator
-  └─ Analyzer
-  ↓
-Trend Synthesizer
-  ↓
-Report Planner
-  ↓
-Audience Adapter
-  ↓
-Dynamic Layout / Dashboard
-```
+사용자 입력
+- 질문
+- 청중(선택)
+- 첨부자료·URL(선택)
+        ↓
+[1] Entity Extractor
+- 기업, 기술, 핵심 키워드 추출
+- 질문의 기본 intent 추정
+- 규칙 기반 우선, 애매할 때 OpenAI
+        ↓
+[2] Sector Router
+- SK하이닉스 / SK브로드밴드 / SK텔레콤 등 자동 분류
+- API 사용 없음
+        ↓
+[3] Report Purpose Classifier
+- 현황 파악
+- 이슈 대응
+- 미래사업
+- 원인·문제 분석
+- 규칙 기반 우선, 애매할 때 OpenAI
+        ↓
+[4] plan_sources()
+- 해당 섹터에 등록된 전체 후보 소스 반환
+- API 사용 없음
+        ↓
+[5] select_top_sources()
+- 질문 키워드
+- 기업·기술
+- 보고 목적
+- source topics / intents / role
+를 기준으로 관련 소스 Top 6 선택
+- API 사용 없음
+        ↓
+[6] Collector
+- 선택된 6개 소스만 검색·수집
+- Firecrawl API 사용
+- 소스당 최대 1~2건
+        ↓
+[7] Processor
+- 본문 정제
+- 중복 제거
+- 메타데이터 표준화
+- API 사용 없음
+        ↓
+[8] Validator
+- 관련성
+- 최신성
+- 출처 유무
+- 최소 본문 길이
+- 신뢰도 역할 검사
+- API 없이 규칙 기반 우선
+        ↓
+[9] Document Analyzer
+- global_system_prompt
++ sector별 system_prompt
+를 사용해 문서 분석
+- OpenAI API 사용
+
+출력 예:
+- summary
+- key_points
+- business_impact
+- risk
+- opportunity
+- evidence
+- recommended_actions
+- confidence
+        ↓
+[10] Synthesis
+- 여러 문서의 분석 결과 통합
+- 중복 제거
+- 출처 간 충돌 확인
+- 핵심 근거 정렬
+- OpenAI API 사용
+        ↓
+[11] Report Generator
+- synthesis 결과
++ 보고 목적별 프롬프트
++ 청중별 프롬프트
+를 한 번에 결합
+- OpenAI API 사용
+
+출력:
+- 섹션별 서로 다른 내용
+- Executive Summary
+- Issue / Impact / Action 등
+- 청중에 맞는 표현과 깊이
+        ↓
+[12] Layout Generator
+- Report Generator의 구조화 JSON을
+  카드, 표, 차트, 타임라인으로 배치
+- API 사용 없음
+        ↓
+[13] Renderer
+- Streamlit Dashboard
+- 1-page PDF
+- PPT 또는 HTML
 
 ## 현재 구현 범위
 
