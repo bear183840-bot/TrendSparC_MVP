@@ -152,6 +152,14 @@ def _analyze_document(client: OpenAI, system_prompt: str, document: SourceDocume
         key_points = data["key_points"]
         sentiment = data["sentiment"]
         relevant_to_question = data["relevant_to_question"]
+        business_impact = data["business_impact"]
+        risk = data["risk"]
+        opportunity = data["opportunity"]
+        recommended_actions = data["recommended_actions"]
+        monitoring_indicators = data["monitoring_indicators"]
+        evidence = data["evidence"]
+        action_level = data["action_level"]
+        analysis_confidence = data["analysis_confidence"]
     except (TypeError, json.JSONDecodeError, KeyError) as exc:
         raise PipelineStageError(
             stage=_STAGE,
@@ -165,6 +173,14 @@ def _analyze_document(client: OpenAI, system_prompt: str, document: SourceDocume
         key_points=key_points,
         sentiment=sentiment,
         relevant_to_question=relevant_to_question,
+        business_impact=business_impact,
+        risk=risk,
+        opportunity=opportunity,
+        recommended_actions=recommended_actions,
+        monitoring_indicators=monitoring_indicators,
+        evidence=evidence,
+        action_level=action_level,
+        analysis_confidence=analysis_confidence,
     )
 
 
