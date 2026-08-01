@@ -2,7 +2,7 @@
 
 SK Broadband 섹터의 실행용 Source를 관리한다. 이 섹터는 1차 발표 기준 섹터이므로, 단순 뉴스 포털만 쓰지 않고 공식 발표, 경쟁사 공식 자료, 공공 시장 보고서, 산업 전문 매체, 사용자 반응을 함께 본다.
 
-질문마다 등록된 후보 중 관련성 높은 소스를 선별해 쓰는 구조로 전환 중이라, 섹터 전용 Source를 6개에서 **13개**로 확대했다 (2026-08-01, 신규 14개 후보 중 실제 접속 검증을 통과한 7개만 반영 — 검증 결과는 아래 "이번에 반려된 후보" 참고). 공통 네이버 뉴스는 `sources/registry/common/`에서 자동 병합되므로 실제 SourcePlan 기준으로는 **최대 14개 Source**가 후보로 사용된다.
+질문마다 등록된 후보 중 관련성 높은 소스를 선별해 쓰는 구조로 전환 중이라, 섹터 전용 Source는 현재 **12개**다 (2026-08-01 기준 — 검증 결과는 아래 "이번에 반려된 후보" 참고). 공통 네이버 뉴스는 `sources/registry/common/`에서 자동 병합되므로 실제 SourcePlan 기준으로는 **최대 13개 Source**가 후보로 사용된다.
 
 ## 현재 등록 Source
 
@@ -19,7 +19,6 @@ SK Broadband 섹터의 실행용 Source를 관리한다. 이 섹터는 1차 발�
 | Disney+ 프레스룸 | `competitor_official` | `press_release` | `official` | 글로벌 OTT 대체재 공식 발표 |
 | 방송미디어통신위원회 보도자료 | `regulatory_official` | `press_release` | `official` | 방송·통신 규제 정책 1차 출처 |
 | 디지털데일리(통신/미디어) | `search` | `analysis` | `analyst_media` | 통신·미디어 뉴스 보완 |
-| 지디넷코리아 | `search` | `analysis` | `analyst_media` | IT/통신 뉴스 보완 |
 | 키노라이츠 | `user_sentiment` | - | `user_generated` | OTT 콘텐츠 소비 반응 참고 |
 | 네이버 뉴스 | `search` | - | `common` | 공통 Source, 일반 뉴스 보완 |
 
@@ -71,10 +70,10 @@ SK Broadband 섹터의 실행용 Source를 관리한다. 이 섹터는 1차 발�
 - 망 사용료·개인정보·AI 콘텐츠 규제 등 정책 리스크를 확인하는 정부 공식 1차 출처
 - 기존에 `regulatory_official` 역할이 비어있던 카테고리를 채움
 
-### 디지털데일리(통신/미디어) / 지디넷코리아
+### 디지털데일리(통신/미디어)
 
 - 전자신문 외에 통신·미디어 뉴스를 보완할 전문매체 추가 (검색 후보 다양화)
-- 둘 다 공식 발표만으로 부족한 시장 반응·산업 맥락 확인용, 공식 Source와 Cross Check 필요
+- 공식 발표만으로 부족한 시장 반응·산업 맥락 확인용이며, 공식 Source와 Cross Check가 필요하다.
 
 ### 키노라이츠
 

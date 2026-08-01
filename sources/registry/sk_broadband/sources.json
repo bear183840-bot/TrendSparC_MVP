@@ -121,17 +121,6 @@
       "topics": ["IPTV", "초고속 인터넷", "유료방송"]
     },
     {
-      "name": "지디넷코리아",
-      "url": "https://zdnet.co.kr/news/?ct=4",
-      "collection_method": ["firecrawl_search"],
-      "frequency": "daily",
-      "reliability_reason": "국내 IT 전문매체. 2026-08-01 실제 접속 확인 — 최신 뉴스 피드에 방송/통신 카테고리가 포함되어 있음을 확인함 (세부 섹션으로 완전히 필터링된 URL은 아님, 일반 뉴스피드).",
-      "reliability_tier": "analyst_media",
-      "content_type": "analysis",
-      "role": "search",
-      "topics": ["네트워크 인프라", "방송·통신", "Edge Computing"]
-    },
-    {
       "name": "키노라이츠",
       "url": "https://m.kinolights.com/",
       "collection_method": ["firecrawl_search"],
