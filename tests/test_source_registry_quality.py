@@ -32,5 +32,5 @@ def test_broadband_source_plan_keeps_sector_sources_plus_common_source():
     assert "영화진흥위원회(KOFIC)" in names
     assert "SK브로드밴드 뉴스룸" in names
     assert any("네이버" in name or "Naver" in name for name in names)
-    assert len(names) == 7
+    assert len(names) == 14  # 13 sk_broadband sources (expanded 2026-08-01) + 1 common (Naver)
     assert plan.planned_sources[0].content_type == "analysis"

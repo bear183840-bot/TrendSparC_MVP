@@ -31,7 +31,13 @@ _STAGE = "sectors.sk_broadband.adapter.collector"
 _PRIMARY_TERM_COUNT = 2
 _LAST_RESORT_TERM_COUNT = 1
 _MAX_QUERY_TERMS = 5
-_MAX_RESULTS_PER_SOURCE = 3
+_MAX_RESULTS_PER_SOURCE = 2
+# Defensive cap on top of source_planner.select_top_sources()'s 6-source
+# selection (6 sources * _MAX_RESULTS_PER_SOURCE = 12) — stops collection
+# once reached even if a future config change lets more sources or results
+# through, so the collector never hands the validator/analyzer an unbounded
+# document set.
+_MAX_COLLECTED_DOCUMENTS = 12
 _KOFIC_DETAIL_PATTERN = re.compile(r"selectBoardDetail\.do\?[^\"'<>\s]+", re.IGNORECASE)
 
 
@@ -234,4 +240,6 @@ def collect(source_plan: SourcePlan) -> list[SourceDocument]:
             print(f"[{index + 1}/{total}] {source.name} 실패: {exc.reason}", file=sys.stderr)
         except Exception as exc:  # noqa: BLE001
             print(f"[{index + 1}/{total}] {source.name} 실패: {exc}", file=sys.stderr)
-    return documents
+        if len(documents) >= _MAX_COLLECTED_DOCUMENTS:
+            break
+    return documents[:_MAX_COLLECTED_DOCUMENTS]

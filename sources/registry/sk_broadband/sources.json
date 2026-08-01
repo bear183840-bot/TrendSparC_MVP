@@ -3,74 +3,143 @@
     {
       "name": "SK브로드밴드 뉴스룸",
       "url": "https://news.sktelecom.com/tag/sk%EB%B8%8C%EB%A1%9C%EB%93%9C%EB%B0%B4%EB%93%9C",
-      "collection_method": [
-        "firecrawl_search"
-      ],
+      "collection_method": ["firecrawl_search"],
       "frequency": "daily",
       "reliability_reason": "SK브로드밴드 관련 공식 발표와 서비스·제휴·기술 적용 내용을 확인하기 위한 1차 공식 자료다.",
       "reliability_tier": "official",
       "content_type": "press_release",
-      "role": "official"
+      "role": "official",
+      "topics": ["SK Broadband", "B tv", "IPTV"]
     },
     {
       "name": "KT 뉴스룸 (경쟁사)",
       "url": "https://corp.kt.com/html/promote/news/report_list.html",
-      "collection_method": [
-        "firecrawl_search"
-      ],
+      "collection_method": ["firecrawl_search"],
       "frequency": "daily",
       "reliability_reason": "IPTV·통신·미디어 영역의 주요 경쟁사 공식 발표를 비교하기 위한 자료다.",
       "reliability_tier": "official",
       "content_type": "press_release",
-      "role": "competitor_official"
+      "role": "competitor_official",
+      "topics": ["KT (지니TV)", "IPTV", "유료방송"]
     },
     {
       "name": "한국콘텐츠진흥원(KOCCA)",
       "url": "https://www.kocca.kr",
-      "collection_method": [
-        "firecrawl_search"
-      ],
+      "collection_method": ["firecrawl_search"],
       "frequency": "daily",
       "reliability_reason": "콘텐츠산업 통계, 백서, 시장동향 자료를 제공하는 공공기관으로 미디어·콘텐츠 시장 분석의 근거 자료다.",
       "reliability_tier": "official",
       "content_type": "analysis",
-      "role": "market_analysis"
+      "role": "market_analysis",
+      "topics": ["콘텐츠산업", "OTT 소비 흐름", "미디어 통계"]
     },
     {
       "name": "영화진흥위원회(KOFIC)",
       "url": "https://www.kofic.or.kr/kofic/business/board/selectBoardList.do?boardNumber=2",
-      "collection_method": [
-        "kofic_pdf_post_download",
-        "firecrawl_parse"
-      ],
+      "collection_method": ["kofic_pdf_post_download", "firecrawl_parse"],
       "frequency": "weekly",
       "reliability_reason": "영화산업 결산, 박스오피스, 관객수, 매출 등 콘텐츠 소비 흐름을 판단할 수 있는 공공 보고서 자료다. 상세 페이지의 PDF 첨부를 POST 다운로드한 뒤 Firecrawl parse로 본문을 추출한다.",
       "reliability_tier": "official",
       "content_type": "analysis",
-      "role": "market_analysis"
+      "role": "market_analysis",
+      "topics": ["영화산업", "박스오피스", "콘텐츠 소비"]
     },
     {
       "name": "전자신문 (통신)",
       "url": "https://www.etnews.com/news/section.html?id1=03",
-      "collection_method": [
-        "firecrawl_search"
-      ],
+      "collection_method": ["firecrawl_search"],
       "frequency": "daily",
       "reliability_reason": "국내 IT·통신 전문 매체로 통신, IPTV, 네트워크, 미디어 산업 뉴스와 해설을 보완한다.",
       "reliability_tier": "analyst_media",
       "content_type": "analysis",
-      "role": "search"
+      "role": "search",
+      "topics": ["통신 정책", "IPTV", "네트워크 인프라"]
     },
     {
       "name": "왓챠피디아",
       "url": "https://pedia.watcha.com",
-      "collection_method": [
-        "firecrawl_search"
-      ],
+      "collection_method": ["firecrawl_search"],
       "frequency": "weekly",
       "reliability_reason": "콘텐츠·OTT 사용자의 반응과 선호를 참고하기 위한 user sentiment 자료다. 사실 검증 출처가 아니라 보조 신호로만 사용한다.",
       "reliability_tier": "user_generated",
-      "role": "user_sentiment"
+      "role": "user_sentiment",
+      "topics": ["사용자 반응", "콘텐츠 평가"]
+    },
+    {
+      "name": "LG유플러스 뉴스룸",
+      "url": "https://news.lguplus.com/",
+      "collection_method": ["firecrawl_search"],
+      "frequency": "daily",
+      "reliability_reason": "IPTV·초고속인터넷 영역의 주요 경쟁사 공식 발표를 비교하기 위한 자료다. 2026-08-01 실제 접속 확인 — 프레스센터/기업뉴스 섹션이 실제로 운영 중임을 확인함.",
+      "reliability_tier": "official",
+      "content_type": "press_release",
+      "role": "competitor_official",
+      "topics": ["LG U+ (U+tv)", "IPTV", "초고속 인터넷"]
+    },
+    {
+      "name": "Netflix 미디어 센터 (한국)",
+      "url": "https://about.netflix.com/ko/newsroom",
+      "collection_method": ["firecrawl_search"],
+      "frequency": "weekly",
+      "reliability_reason": "글로벌 OTT 대체재의 한국 오리지널 콘텐츠·사업 발표를 확인하기 위한 공식 자료. 2026-08-01 실제 접속 확인 — 카테고리 필터링을 갖춘 정식 뉴스룸으로 확인됨.",
+      "reliability_tier": "official",
+      "content_type": "press_release",
+      "role": "competitor_official",
+      "topics": ["Netflix", "OTT", "콘텐츠 유통"]
+    },
+    {
+      "name": "Disney+ 프레스룸",
+      "url": "https://press.disneyplus.com/",
+      "collection_method": ["firecrawl_search"],
+      "frequency": "weekly",
+      "reliability_reason": "글로벌 OTT 경쟁사 공식 콘텐츠·사업 발표 확인용. 2026-08-01 실제 접속 확인 — 공식 프레스센터이며 최신 콘텐츠 발표가 게시되고 있음을 확인함.",
+      "reliability_tier": "official",
+      "content_type": "press_release",
+      "role": "competitor_official",
+      "topics": ["Disney+", "OTT", "콘텐츠 라이선싱"]
+    },
+    {
+      "name": "방송미디어통신위원회 보도자료",
+      "url": "https://www.kmcc.go.kr/user.do?mode=list&boardId=1113",
+      "collection_method": ["firecrawl_search"],
+      "frequency": "daily",
+      "reliability_reason": "방송·통신 규제 정책(망 사용료, 개인정보 등)의 정부 공식 1차 출처. 2026-08-01 실제 접속 확인 — 원래 알려진 URL(kcc.go.kr)이 방송미디어통신위원회(kmcc.go.kr)로 자동 이동됨(기관명 변경으로 추정), 알림마당>보도자료 게시판이 실제로 운영 중임을 확인함.",
+      "reliability_tier": "official",
+      "content_type": "press_release",
+      "role": "regulatory_official",
+      "topics": ["방송·통신 정책", "망 사용료", "개인정보"]
+    },
+    {
+      "name": "디지털데일리 (통신/미디어)",
+      "url": "https://www.ddaily.co.kr/page/news/4",
+      "collection_method": ["firecrawl_search"],
+      "frequency": "daily",
+      "reliability_reason": "ICT 전문지로 통신·미디어 정책, IPTV, 유료방송 이슈를 상시 보도. 2026-08-01 실제 접속 확인 — '통신/미디어' 섹션이 실제 운영 중이며 관련 최신 기사가 다수 게재됨을 확인함.",
+      "reliability_tier": "analyst_media",
+      "content_type": "analysis",
+      "role": "search",
+      "topics": ["IPTV", "초고속 인터넷", "유료방송"]
+    },
+    {
+      "name": "지디넷코리아",
+      "url": "https://zdnet.co.kr/news/?ct=4",
+      "collection_method": ["firecrawl_search"],
+      "frequency": "daily",
+      "reliability_reason": "국내 IT 전문매체. 2026-08-01 실제 접속 확인 — 최신 뉴스 피드에 방송/통신 카테고리가 포함되어 있음을 확인함 (세부 섹션으로 완전히 필터링된 URL은 아님, 일반 뉴스피드).",
+      "reliability_tier": "analyst_media",
+      "content_type": "analysis",
+      "role": "search",
+      "topics": ["네트워크 인프라", "방송·통신", "Edge Computing"]
+    },
+    {
+      "name": "키노라이츠",
+      "url": "https://m.kinolights.com/",
+      "collection_method": ["firecrawl_search"],
+      "frequency": "daily",
+      "reliability_reason": "OTT 콘텐츠 통합 검색·평가 서비스로 콘텐츠·OTT 사용자의 반응과 선호를 참고하기 위한 user sentiment 자료다. 사실 검증 출처가 아니라 보조 신호로만 사용한다. 2026-08-01 실제 서비스 존재 확인함.",
+      "reliability_tier": "user_generated",
+      "role": "user_sentiment",
+      "topics": ["콘텐츠 소비", "OTT 통합 검색"]
     }
   ]
 }

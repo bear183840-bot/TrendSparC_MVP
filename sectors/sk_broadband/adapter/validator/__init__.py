@@ -1,12 +1,36 @@
-"""SK Broadband sector validator."""
+"""SK Broadband sector validator.
+
+Checks 4 things before a document reaches the analyzer: structural validity
+(existing), recency, cross-source near-duplicates, and source quality (via a
+final rank + cap). Relevance to the actual question is intentionally NOT
+judged here — `validate()` only receives documents, not the question or its
+keywords, so a keyword-match "relevance" check here would just be an
+unfounded guess. Real relevance judgment already happens downstream in the
+analyzer's `relevant_to_question` field, which core/request_pipeline/
+pipeline.py uses to drop irrelevant documents after analysis — see
+CLAUDE.md's "no fabrication" principle.
+
+Exact duplicates (same URL + near-identical content) are already deduped in
+processor.py via a content fingerprint; the near-duplicate check here is a
+narrower net for the case processor.py can't catch: different URLs (e.g.
+syndicated copies across outlets) carrying the same headline.
+"""
 
 from __future__ import annotations
 
+from datetime import datetime, timedelta, timezone
 from urllib.parse import urlparse
 
 from common.contracts import SourceDocument
 
 _MIN_CONTENT_LENGTH = 250
+_MAX_DOCUMENT_AGE_DAYS = 730
+_MAX_VALIDATED_DOCUMENTS = 8
+
+# Ranks a document's source when trimming down to _MAX_VALIDATED_DOCUMENTS —
+# mirrors the same 3-tier convention documented on PlannedSource.reliability_tier
+# in common/contracts.py. Unset/unrecognized tiers rank last, never guessed.
+_RELIABILITY_RANK = {"official": 0, "analyst_media": 1, "user_generated": 2}
 
 
 def _has_valid_url(url: str | None) -> bool:
@@ -16,7 +40,7 @@ def _has_valid_url(url: str | None) -> bool:
     return parsed.scheme in {"http", "https"} and bool(parsed.netloc)
 
 
-def _is_valid(document: SourceDocument) -> bool:
+def _is_structurally_valid(document: SourceDocument) -> bool:
     if not document.source_id or not document.title:
         return False
     if not _has_valid_url(document.url):
@@ -26,5 +50,46 @@ def _is_valid(document: SourceDocument) -> bool:
     return True
 
 
+def _is_recent_enough(document: SourceDocument) -> bool:
+    # Missing published_at is common (Firecrawl doesn't always extract a
+    # date) and must not be penalized — only reject when we actually know
+    # the document is stale, never guess staleness from absence of a date.
+    if document.published_at is None:
+        return True
+    published_at = document.published_at
+    if published_at.tzinfo is None:
+        published_at = published_at.replace(tzinfo=timezone.utc)
+    return datetime.now(timezone.utc) - published_at <= timedelta(days=_MAX_DOCUMENT_AGE_DAYS)
+
+
+def _title_key(document: SourceDocument) -> str:
+    return " ".join(document.title.split()).lower()
+
+
+def _drop_cross_source_title_duplicates(documents: list[SourceDocument]) -> list[SourceDocument]:
+    seen_titles: set[str] = set()
+    kept: list[SourceDocument] = []
+    for document in documents:
+        key = _title_key(document)
+        if key in seen_titles:
+            continue
+        seen_titles.add(key)
+        kept.append(document)
+    return kept
+
+
+def _quality_sort_key(document: SourceDocument) -> tuple[int, float]:
+    reliability_rank = _RELIABILITY_RANK.get(document.reliability_tier, len(_RELIABILITY_RANK))
+    # More recent first; undated documents sort after every dated one at the
+    # same reliability rank, but are still eligible (never dropped solely for
+    # lacking a date).
+    recency = document.published_at.timestamp() if document.published_at else float("-inf")
+    return (reliability_rank, -recency)
+
+
 def validate(source_documents: list[SourceDocument]) -> list[SourceDocument]:
-    return [document for document in source_documents if _is_valid(document)]
+    structurally_valid = [document for document in source_documents if _is_structurally_valid(document)]
+    recent_enough = [document for document in structurally_valid if _is_recent_enough(document)]
+    deduplicated = _drop_cross_source_title_duplicates(recent_enough)
+    ranked = sorted(deduplicated, key=_quality_sort_key)
+    return ranked[:_MAX_VALIDATED_DOCUMENTS]
