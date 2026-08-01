@@ -161,6 +161,7 @@ def run_pipeline(
             request.request_id,
             result.entities,
             result.sector_route,
+            request.question,
         )
         result.trace.append(StageTrace(stage="report_purpose", status=StageStatus.OK))
     except PipelineStageError as exc:
@@ -178,7 +179,11 @@ def run_pipeline(
             search_terms,
             result.entities.perspective,
         )
-        result.source_plan = select_top_sources(result.source_plan, result.entities.perspective)
+        result.source_plan = select_top_sources(
+            result.source_plan,
+            result.entities.perspective,
+            result.report_purpose.purpose_id,
+        )
         result.trace.append(StageTrace(stage="source_planner", status=StageStatus.OK))
     except PipelineStageError as exc:
         _halt("source_planner", exc.reason, exc.detail)

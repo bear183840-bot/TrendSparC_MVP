@@ -35,6 +35,7 @@ from firecrawl.v2.types import ScrapeOptions
 
 from common.contracts import PlannedSource, SourceDocument, SourcePlan
 from common.errors import PipelineStageError
+from core.source_planner.query_strategy import build_search_queries, build_source_search_terms
 
 _API_KEY_ENV_VAR = "FIRECRAWL_API_KEY"
 _SEARCH_TIMEOUT_SECONDS = 30
@@ -124,8 +125,7 @@ def _search_source(client: Firecrawl, domain: str, deduped_keywords: list[str]):
     """Try progressively shorter queries until one returns results, a real
     error, or a timeout occurs. Returns ("ok", results-list), ("error", exc),
     or ("timeout", None) — mirrors _run_with_timeout's status values."""
-    for term_count in _query_term_counts(len(deduped_keywords)):
-        query = " ".join(deduped_keywords[:term_count])
+    for query in build_search_queries(deduped_keywords):
         status, payload = _run_with_timeout(
             lambda: client.search(
                 query,
@@ -205,7 +205,7 @@ def collect(source_plan: SourcePlan) -> list[SourceDocument]:
             continue
         print(f"[{index + 1}/{total}] {source.name} 검색중...", file=sys.stderr)
         try:
-            source_documents = _crawl_source(client, source, source_plan.question_keywords)
+            source_documents = _crawl_source(client, source, build_source_search_terms(source, source_plan.question_keywords))
             documents.extend(source_documents)
             print(f"[{index + 1}/{total}] {source.name} 완료 ({len(source_documents)}건)", file=sys.stderr)
         except PipelineStageError as exc:

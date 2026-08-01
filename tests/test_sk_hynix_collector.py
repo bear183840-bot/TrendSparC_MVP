@@ -108,9 +108,8 @@ class _RetryClient:
         return _search_data([])
 
 
-def test_crawl_source_succeeds_on_short_primary_query_without_escalating():
-    """The 2-term primary query is tried first; if it already matches, the
-    longer (more likely to fail) queries are never attempted."""
+def test_crawl_source_preserves_full_question_before_short_fallback():
+    """Meaning-rich full/middle/tail queries run before a single-term fallback."""
     result = _make_result("본문", title="제목", url="https://example.com/a/")
     source = PlannedSource(name="primary-success source", url="https://example.com/news/")
     client = _RetryClient([result], min_words_for_success=2)
@@ -119,7 +118,12 @@ def test_crawl_source_succeeds_on_short_primary_query_without_escalating():
 
     assert len(documents) == 1
     assert documents[0].url == "https://example.com/a/"
-    assert client.queries == ["포인트 마케팅"]  # succeeded immediately, no escalation needed
+    assert client.queries == [
+        "포인트 마케팅 시장 현황",
+        "포인트 마케팅 시장",
+        "마케팅 시장 현황",
+        "포인트",
+    ]
 
 
 class _ExactLengthClient:
@@ -137,9 +141,7 @@ class _ExactLengthClient:
         return _search_data([])
 
 
-def test_crawl_source_escalates_to_full_query_only_as_a_last_resort():
-    """Both short attempts (2 terms, then 1 term) fail; only the full-length
-    query (tried last, since it's the least likely to match) succeeds."""
+def test_crawl_source_uses_full_question_first_when_it_matches():
     result = _make_result("본문", title="제목", url="https://example.com/a/")
     source = PlannedSource(name="last-resort source", url="https://example.com/news/")
     client = _ExactLengthClient([result], required_words=4)
@@ -147,7 +149,7 @@ def test_crawl_source_escalates_to_full_query_only_as_a_last_resort():
     documents = _crawl_source(client, source, ["포인트", "마케팅", "시장", "현황"])
 
     assert len(documents) == 1
-    assert client.queries == ["포인트 마케팅", "포인트", "포인트 마케팅 시장 현황"]
+    assert client.queries == ["포인트 마케팅 시장 현황"]
 
 
 def test_crawl_source_gives_up_after_all_term_counts_fail():
@@ -157,7 +159,12 @@ def test_crawl_source_gives_up_after_all_term_counts_fail():
     documents = _crawl_source(client, source, ["포인트", "마케팅", "시장", "현황"])
 
     assert documents == []
-    assert client.queries == ["포인트 마케팅", "포인트", "포인트 마케팅 시장 현황"]  # tried short-first, all failed
+    assert client.queries == [
+        "포인트 마케팅 시장 현황",
+        "포인트 마케팅 시장",
+        "마케팅 시장 현황",
+        "포인트",
+    ]
 
 
 def test_crawl_source_returns_up_to_two_documents_from_search_results():

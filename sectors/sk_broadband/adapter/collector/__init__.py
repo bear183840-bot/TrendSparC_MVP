@@ -22,6 +22,7 @@ from firecrawl.v2.types import ScrapeOptions
 
 from common.contracts import PlannedSource, SourceDocument, SourcePlan
 from common.errors import PipelineStageError
+from core.source_planner.query_strategy import build_search_queries, build_source_search_terms
 from sources.collectors.kofic_pdf import collect_pdf_markdown_from_detail_url
 
 _API_KEY_ENV_VAR = "FIRECRAWL_API_KEY"
@@ -82,8 +83,7 @@ def _query_term_counts(available: int) -> list[int]:
 
 
 def _search_source(client: Firecrawl, domain: str, deduped_keywords: list[str]):
-    for term_count in _query_term_counts(len(deduped_keywords)):
-        query = " ".join(deduped_keywords[:term_count])
+    for query in build_search_queries(deduped_keywords):
         status, payload = _run_with_timeout(
             lambda: client.search(
                 query,
@@ -219,20 +219,6 @@ def _crawl_source(client: Firecrawl, source: PlannedSource, api_key: str, keywor
     return _crawl_web_source(client, source, keywords)
 
 
-def _search_keywords_for_source(source: PlannedSource, question_keywords: list[str]) -> list[str]:
-    """Put source-specific vocabulary first outside the focal-company newsroom.
-
-    Searching a competitor or regulator domain for the focal SK company name
-    frequently yields zero results. Registry topics describe the vocabulary that
-    actually exists on that source, while the remaining question terms retain the
-    user's IPTV/OTT/risk context.
-    """
-    question_terms = [term for term in question_keywords if term]
-    if source.role == "official" or not source.topics:
-        return list(dict.fromkeys(question_terms))
-    return list(dict.fromkeys([*source.topics, *question_terms]))
-
-
 def collect(source_plan: SourcePlan) -> list[SourceDocument]:
     if not source_plan.planned_sources:
         raise PipelineStageError(stage=_STAGE, reason="no sources registered for sk_broadband")
@@ -251,7 +237,7 @@ def collect(source_plan: SourcePlan) -> list[SourceDocument]:
                 client,
                 source,
                 api_key,
-                _search_keywords_for_source(source, source_plan.question_keywords),
+                build_source_search_terms(source, source_plan.question_keywords),
             )
             documents.extend(source_documents)
             print(f"[{index + 1}/{total}] {source.name} 완료 ({len(source_documents)}건)", file=sys.stderr)
