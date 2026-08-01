@@ -1,9 +1,10 @@
 {
   "sector_id": "general",
   "display_name": "General (sector-unspecified fallback)",
-  "status": "template_only",
+  "status": "active",
   "aliases": [],
-  "keywords": [],
+  "keywords": ["뉴스", "경제", "사회", "기술", "정책", "문화", "생활", "건강"],
+  "market_keywords": ["최신 동향", "공식 발표", "전문가 분석"],
   "pipeline_entrypoint": "sectors.general.adapter",
   "system_prompt_path": "sectors/general/prompts/system_prompt.md"
 }

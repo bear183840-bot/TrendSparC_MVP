@@ -6,3 +6,5 @@ firecrawl-py>=1.0
 openai>=1.50
 streamlit>=1.35
 requests>=2.31,<3
+pypdf>=5.0
+python-docx>=1.1

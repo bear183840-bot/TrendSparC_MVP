@@ -15,6 +15,7 @@ Run with: streamlit run reporting/dashboard_streamlit/app.py
 
 from __future__ import annotations
 
+import base64
 import sys
 import textwrap
 import uuid
@@ -52,6 +53,9 @@ SECTOR_BADGES = {
     "sk_hynix": "SK hynix",
     "sk_broadband": "SK broadband",
     "sk_planet": "SK플래닛",
+    "sk_telecom": "SK telecom",
+    "sk_innovation": "SK innovation",
+    "general": "General",
 }
 
 _MARK_SVG = f"""
@@ -131,7 +135,7 @@ with st.form("intake_form"):
         uploaded_files = st.file_uploader(
             "파일/이미지 첨부 (선택)",
             accept_multiple_files=True,
-            help="첨부된 파일은 이름/형식/용량만 요청에 기록됩니다. 내용 분석은 아직 구현되지 않았습니다.",
+            help="PDF, DOCX, TXT/MD/CSV/JSON/HTML(파일당 최대 10MB)의 본문을 추출해 웹 문서와 동일한 분석 근거로 사용합니다.",
         )
 
         audience_ids = list_audience_ids()
@@ -161,6 +165,7 @@ if submitted:
                 filename=f.name,
                 content_type=f.type,
                 size_bytes=f.size,
+                content_base64=base64.b64encode(f.getvalue()).decode("ascii"),
             )
             for f in (uploaded_files or [])
         ]
@@ -202,6 +207,11 @@ if result is not None:
     with st.expander("단계별 실행 기록 (StageTrace)"):
         for t in result.trace:
             st.text(f"{t.stage}: {t.status.value}" + (f" — {t.reason}" if t.reason else ""))
+
+    if result.attachment_extractions:
+        with st.expander("첨부문서 추출 결과"):
+            for item in result.attachment_extractions:
+                st.json(item.model_dump())
 
     if result.layout is not None and result.layout.blocks:
         st.caption(f"포맷: {result.layout.format}")

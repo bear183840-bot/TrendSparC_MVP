@@ -11,12 +11,15 @@ from common.contracts import AudienceAdaptation, DynamicLayout, ReportPlan
 
 
 def generate_layout(report_plan: ReportPlan, adaptation: AudienceAdaptation) -> DynamicLayout:
+    section_order = list(report_plan.sections)
+    if "executive_summary" in adaptation.adapted_sections:
+        section_order.insert(0, "executive_summary")
     blocks = [
         {
             "section": section,
             "content": adaptation.adapted_sections.get(section, {}),
         }
-        for section in report_plan.sections
+        for section in section_order
     ]
 
     return DynamicLayout(

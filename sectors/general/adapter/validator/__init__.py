@@ -1,18 +1,5 @@
-"""validator stub for the general sector adapter.
+"""Apply the shared recency, attribution, and content-quality gates."""
 
-Not implemented on purpose: this sector currently has status template_only.
-No fake data may ever be returned from here — only a clearly-labeled
-PipelineStageError so the orchestrator's stage trace shows exactly which
-sector adapter stage was called and why it can't proceed yet.
-"""
+from sectors.sk_telecom.adapter.validator import validate
 
-from __future__ import annotations
-
-from common.errors import PipelineStageError
-
-
-def validate(source_documents):
-    raise PipelineStageError(
-        stage="sectors.general.adapter.validator",
-        reason="template_only: sector adapter not implemented",
-    )
+__all__ = ["validate"]
