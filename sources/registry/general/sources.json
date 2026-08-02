@@ -1,1 +1,34 @@
-{"sources": []}
+{
+  "sources": [
+    {
+      "name": "대한민국 정책브리핑",
+      "url": "https://www.korea.kr/news/policyNewsList.do",
+      "collection_method": ["firecrawl_search"],
+      "frequency": "daily",
+      "reliability_reason": "대한민국 정부의 공식 정책·뉴스 포털로, 경제·사회·문화·외교 등 전 부처의 정책 발표를 아우른다. 실사이트 확인 결과 '정책뉴스'(/news/policyNewsList.do) 섹션이 실제로 운영 중이며 특정 부처에 국한되지 않는 범정부 뉴스를 다룸을 확인함.",
+      "reliability_tier": "official",
+      "content_type": "press_release",
+      "role": "regulatory_official"
+    },
+    {
+      "name": "경향신문",
+      "url": "https://www.khan.co.kr/newest/articles",
+      "collection_method": ["firecrawl_search"],
+      "frequency": "daily",
+      "reliability_reason": "정치·경제·사회·국제·문화 등을 폭넓게 다루는 종합 일간지. 실사이트 확인 결과 '최신기사'(/newest/articles) 섹션이 특정 분야에 국한되지 않고 전체 기사를 시간순으로 게재함을 확인함 — 계열사 무관 일반 질문의 범용 검색 소스로 적합.",
+      "reliability_tier": "analyst_media",
+      "content_type": "analysis",
+      "role": "search"
+    },
+    {
+      "name": "통계청 KOSIS (국가통계포털)",
+      "url": "https://kosis.kr/serviceInfo/newContrainDataList.do",
+      "collection_method": ["firecrawl_search"],
+      "frequency": "weekly",
+      "reliability_reason": "통계청이 운영하는 국가승인통계 포털. 실사이트 확인 결과 '최근수록자료'(/serviceInfo/newContrainDataList.do) 페이지가 실제로 작동하며, 생산자물가조사·국민계정 등 실제 기관·일자가 붙은 통계 항목이 게재됨을 확인함 — 계열사 무관 경제/사회 질문의 시장분석형 1차 데이터 출처로 적합.",
+      "reliability_tier": "official",
+      "content_type": "analysis",
+      "role": "market_analysis"
+    }
+  ]
+}

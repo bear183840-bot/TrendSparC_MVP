@@ -66,7 +66,12 @@ def _analyze(client: OpenAI, prompt: str, document: SourceDocument, question: st
                     "content": (
                         f"Original question: {question}\n\nTitle: {document.title}\n"
                         f"URL: {document.url or 'local attachment'}\n\n{document.content or ''}\n\n"
-                        "Judge relevance to the original question. Use only this document, leave unsupported "
+                        "Judge relevance to the original question: mark relevant_to_question true if this "
+                        "document contains ANY fact that meaningfully informs the answer, even partial "
+                        "evidence — it does not need to fully answer the question by itself, since multiple "
+                        "documents combine into one report. Mark it false only when the document is "
+                        "genuinely off-topic (its actual subject differs from the question, not just "
+                        "sharing a keyword). Use only this document, leave unsupported "
                         "strategy fields empty, and write in the question's language."
                     ),
                 },

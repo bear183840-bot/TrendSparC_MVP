@@ -54,6 +54,33 @@ _ROLE_MAX_QUOTA: dict[str, int] = {
     "user_sentiment": 1,
 }
 
+# A fixed quota is wrong for a question whose whole point IS that role — e.g.
+# a competitor_comparison question genuinely needs several competitor
+# sources, not the usual ceiling of one. Only the named role's ceiling is
+# raised (never lowered) for the matching perspective; every other role keeps
+# its default from _ROLE_MAX_QUOTA above.
+_ROLE_MAX_QUOTA_OVERRIDES_BY_PERSPECTIVE: dict[str, dict[str, int]] = {
+    "competitor_comparison": {"competitor_official": 3},
+    "market_landscape": {"market_analysis": 3},
+    "regulatory_policy": {"regulatory_official": 2},
+    "company_update": {"official": 3},
+}
+
+# Regardless of how a perspective boost above reshuffles the budget, these
+# three roles (the sector's originally-mandatory official/search/
+# market_analysis coverage — see PlannedSource.role's docstring) must never
+# be squeezed out to zero just because a different role's ceiling grew. A
+# role only gets this floor if the sector actually has a registered source
+# for it — nothing is fabricated to satisfy the floor.
+_GUARANTEED_ROLES = {"official", "search", "market_analysis"}
+
+
+def _role_quota_for(perspective: str | None) -> dict[str, int]:
+    quota = dict(_ROLE_MAX_QUOTA)
+    for role, raised_quota in _ROLE_MAX_QUOTA_OVERRIDES_BY_PERSPECTIVE.get(perspective, {}).items():
+        quota[role] = max(quota.get(role, 0), raised_quota)
+    return quota
+
 _RELIABILITY_SCORE: dict[str, float] = {"official": 1.0, "analyst_media": 0.7, "user_generated": 0.4}
 _FREQUENCY_SCORE: dict[str, float] = {"daily": 1.0, "weekly": 0.7, "monthly": 0.4}
 
@@ -91,24 +118,34 @@ def _purpose_match_score(source: PlannedSource, perspective: str | None) -> floa
     return 1.0 - (priority / max_priority) if max_priority else 1.0
 
 
+def _capability_match_score(source: PlannedSource, information_needs: list[str]) -> float:
+    if not source.capabilities or not information_needs:
+        return _NEUTRAL_SCORE
+    needed = set(information_needs)
+    return len(needed.intersection(source.capabilities)) / len(needed)
+
+
 def _score_source(
     source: PlannedSource,
     question_keywords: list[str],
     perspective: str | None,
     report_purpose_id: str | None = None,
+    information_needs: list[str] | None = None,
 ) -> float:
-    # Weights follow the agreed source-registry redesign: topic match 35%,
-    # question-purpose match 20%, reliability 20%, recency 15%, role-known 10%.
+    # Capability expresses whether the source can provide the kind of evidence
+    # the question needs; topic match still decides subject relevance.
     topic_score = _topic_match_score(source, question_keywords)
+    capability_score = _capability_match_score(source, information_needs or [])
     purpose_score = _purpose_match_score(source, perspective)
     reliability_score = _RELIABILITY_SCORE.get(source.reliability_tier, _NEUTRAL_SCORE)
     recency_score = _FREQUENCY_SCORE.get(source.frequency, _NEUTRAL_SCORE)
     role_known_score = 1.0 if source.role else _NEUTRAL_SCORE
     base_score = (
-        0.35 * topic_score
-        + 0.20 * purpose_score
-        + 0.20 * reliability_score
-        + 0.15 * recency_score
+        0.25 * topic_score
+        + 0.30 * capability_score
+        + 0.15 * purpose_score
+        + 0.15 * reliability_score
+        + 0.05 * recency_score
         + 0.10 * role_known_score
     )
     purpose_roles = _ROLE_SCORE_BY_REPORT_PURPOSE.get(report_purpose_id, {})
@@ -145,6 +182,7 @@ def select_top_sources(
             source_plan.question_keywords,
             perspective,
             report_purpose_id,
+            source_plan.information_needs,
         ),
         reverse=True,
     )
@@ -152,6 +190,7 @@ def select_top_sources(
     if len(ranked) <= _MAX_SELECTED_SOURCES:
         return source_plan.model_copy(update={"planned_sources": ranked})
 
+    role_quota = _role_quota_for(perspective)
     selected: list[PlannedSource] = []
     skipped_by_quota: list[PlannedSource] = []
     role_counts: dict[str | None, int] = {}
@@ -167,7 +206,7 @@ def select_top_sources(
     for source in ranked:
         if source in selected:
             continue
-        quota = _ROLE_MAX_QUOTA.get(source.role)
+        quota = role_quota.get(source.role)
         used = role_counts.get(source.role, 0)
         if quota is not None and used >= quota:
             skipped_by_quota.append(source)
@@ -176,6 +215,35 @@ def select_top_sources(
         role_counts[source.role] = used + 1
         if len(selected) >= _MAX_SELECTED_SOURCES:
             break
+
+    # A perspective boost above can let one role (e.g. competitor_official for
+    # a comparison question) consume enough of the budget that a mandatory
+    # role never gets picked at all. Reserve each represented mandatory role's
+    # single best candidate, evicting the weakest already-selected source from
+    # a role that currently holds more than its own guaranteed floor if the
+    # budget is already full — never evicting down past that floor.
+    missing_guaranteed_roles = _GUARANTEED_ROLES - {source.role for source in selected}
+    for role in missing_guaranteed_roles:
+        candidate = next((source for source in ranked if source.role == role and source not in selected), None)
+        if candidate is None:
+            continue  # this sector has no registered source for this role at all — nothing to guarantee
+        if len(selected) >= _MAX_SELECTED_SOURCES:
+            evictable = [
+                source
+                for source in reversed(selected)
+                if role_counts.get(source.role, 0) > (1 if source.role in _GUARANTEED_ROLES else 0)
+            ]
+            if not evictable:
+                continue  # every selected source is already at its own floor; leave this guarantee unmet
+            worst = evictable[0]
+            selected.remove(worst)
+            role_counts[worst.role] -= 1
+            if worst not in skipped_by_quota:
+                skipped_by_quota.append(worst)
+        selected.append(candidate)
+        role_counts[role] = role_counts.get(role, 0) + 1
+        if candidate in skipped_by_quota:
+            skipped_by_quota.remove(candidate)
 
     # Quotas encourage diversity, but must not leave a plan unnecessarily
     # sparse. Backfill any open slots with the best sources skipped above.
@@ -211,6 +279,7 @@ def plan_sources(
     registry_root: Path,
     question_keywords: list[str] | None = None,
     perspective: str | None = None,
+    information_needs: list[str] | None = None,
 ) -> SourcePlan:
     planned_sources = _load_registry_dir(registry_root / sector_id) + _load_registry_dir(
         registry_root / _COMMON_REGISTRY_DIR_NAME
@@ -226,5 +295,6 @@ def plan_sources(
         sector_id=sector_id,
         planned_sources=planned_sources,
         question_keywords=question_keywords or [],
+        information_needs=information_needs or [],
         notes=notes,
     )

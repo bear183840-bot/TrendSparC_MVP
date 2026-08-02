@@ -7,6 +7,12 @@ focus:
   - competitive_position
   - board_level_risk
 format_preference: pdf
+report_structure:
+  - overview
+  - opportunity
+  - risk
+  - strategic_recommendation
+  - sources
 ---
 
 경영진 청중 프로필입니다. Broad한 시각, 주요 결정사항, 앞으로의 전망에 관심이

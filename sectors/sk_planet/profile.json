@@ -1,6 +1,7 @@
 {
   "sector_id": "sk_planet",
   "display_name": "SK플래닛 (SK Planet)",
+  "canonical_name": "SK플래닛",
   "status": "active",
   "aliases": [
     "SK Planet",
@@ -73,6 +74,8 @@
     "데이터 마케팅 시장",
     "Ad-Tech 시장"
   ],
+  "key_metrics": ["MAU", "활성 이용자", "포인트 거래액", "제휴사 수", "데이터 마케팅 매출", "광고 전환율", "재방문율"],
+  "strategic_dimensions": ["OK캐쉬백·Syrup 이용자 활성화", "제휴 생태계", "데이터 마케팅 수익화", "개인화·Ad-Tech 경쟁력", "포인트·결제 플랫폼 경쟁", "개인정보 규제"],
   "pipeline_entrypoint": "sectors.sk_planet.adapter",
   "system_prompt_path": "sectors/sk_planet/prompts/system_prompt.md"
 }

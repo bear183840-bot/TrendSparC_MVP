@@ -11,7 +11,8 @@
       "reliability_reason": "여러 언론사 기사를 종합하는 포털이며 단일 발행처가 아니므로 개별 기사의 1차 출처는 원 언론사 기준으로 판단할 것",
       "role": "search",
       "planning_priority": "core",
-      "topics": ["최신 뉴스", "산업 동향", "경쟁 현황", "리스크", "대응", "정책"]
+      "topics": ["최신 뉴스", "산업 동향", "경쟁 현황", "리스크", "대응", "정책"],
+      "capabilities": ["financial_performance", "customer_market", "product_technology", "operations_supply", "strategy_investment", "competition", "regulation_risk", "user_sentiment"]
     }
   ]
 }

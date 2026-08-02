@@ -11,7 +11,8 @@
       "content_type": "press_release",
       "role": "official",
       "reliability_tier": "official",
-      "topics": ["SK플래닛", "OK캐쉬백", "시럽", "모바일 커머스"]
+      "topics": ["SK플래닛", "OK캐쉬백", "시럽", "모바일 커머스", "제휴", "데이터 마케팅"],
+      "capabilities": ["customer_market", "product_technology", "strategy_investment"]
     },
     {
       "name": "전자신문 (IT/데이터/플랫폼)",
@@ -37,7 +38,8 @@
       "content_type": "analysis",
       "role": "market_analysis",
       "reliability_tier": "analyst_media",
-      "topics": ["Web3", "블록체인 로열티", "플랫폼 생태계"]
+      "topics": ["Web3", "블록체인 로열티", "플랫폼 생태계"],
+      "capabilities": ["product_technology", "strategy_investment", "competition"]
     },
     {
       "name": "모바일인덱스 (아이지에이웍스)",
@@ -50,7 +52,8 @@
       "content_type": "analysis",
       "role": "market_analysis",
       "reliability_tier": "analyst_media",
-      "topics": ["앱 트래픽", "사용자 행동 데이터", "모바일 커머스 트렌드"]
+      "topics": ["앱 트래픽", "MAU", "사용자 행동 데이터", "모바일 커머스 트렌드"],
+      "capabilities": ["customer_market", "user_sentiment", "competition"]
     },
     {
       "name": "데이터넷 (빅데이터/마케팅)",

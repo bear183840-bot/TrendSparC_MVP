@@ -9,7 +9,20 @@
       "reliability_tier": "official",
       "content_type": "press_release",
       "role": "official",
-      "topics": ["SK Broadband", "B tv", "IPTV"]
+      "topics": ["SK Broadband", "B tv", "IPTV", "사업 전략", "서비스 성과"],
+      "capabilities": ["product_technology", "customer_market", "strategy_investment"]
+    },
+    {
+      "name": "SK텔레콤 IR 자료실 (SK브로드밴드 연결 실적)",
+      "url": "https://www.sktelecom.com/investor/lib/presentation.do",
+      "collection_method": ["firecrawl_search"],
+      "frequency": "quarterly",
+      "reliability_reason": "SK텔레콤 공식 IR 자료에서 연결 자회사인 SK브로드밴드의 유선·미디어 사업 실적과 주요 KPI를 확인하기 위한 1차 자료다.",
+      "reliability_tier": "official",
+      "content_type": "analysis",
+      "role": "official",
+      "topics": ["SK브로드밴드 매출", "유선사업 실적", "IPTV 가입자", "미디어 사업 KPI"],
+      "capabilities": ["financial_performance", "customer_market", "operations_supply", "strategy_investment"]
     },
     {
       "name": "KT 뉴스룸 (경쟁사)",
@@ -31,7 +44,8 @@
       "reliability_tier": "official",
       "content_type": "analysis",
       "role": "market_analysis",
-      "topics": ["콘텐츠산업", "OTT 소비 흐름", "미디어 통계"]
+      "topics": ["콘텐츠산업", "OTT 소비 흐름", "미디어 통계"],
+      "capabilities": ["customer_market", "competition"]
     },
     {
       "name": "영화진흥위원회(KOFIC)",

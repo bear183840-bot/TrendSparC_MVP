@@ -1,6 +1,7 @@
 {
   "sector_id": "sk_hynix",
-  "display_name": "SK hynix",
+  "display_name": "SK하이닉스 (SK hynix)",
+  "canonical_name": "SK하이닉스",
   "status": "active",
   "aliases": ["SK hynix", "SK하이닉스", "하이닉스", "에스케이하이닉스", "000660"],
   "keywords": [
@@ -21,6 +22,8 @@
     "HBM 시장",
     "반도체 공급망 동향"
   ],
+  "key_metrics": ["매출", "영업이익", "CAPEX", "HBM 수율", "양산 일정", "고객사별 물량", "시장점유율"],
+  "strategic_dimensions": ["AI 메모리 경쟁력", "고객사 승인과 공급", "수율과 생산능력", "투자 타이밍", "경쟁사 기술 격차", "수출 규제와 공급망"],
   "pipeline_entrypoint": "sectors.sk_hynix.adapter",
   "system_prompt_path": "sectors/sk_hynix/prompts/system_prompt.md"
 }

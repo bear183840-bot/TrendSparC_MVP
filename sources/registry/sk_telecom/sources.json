@@ -10,7 +10,9 @@
       "reliability_reason": "SK텔레콤 공식 보도자료 채널로 신뢰도가 매우 높음. 실사이트 확인 결과 Press Center > 보도자료 카테고리가 실제로 운영 중이며 날짜별 실적/신사업 발표가 지속 게재됨을 확인함",
       "reliability_tier": "official",
       "content_type": "press_release",
-      "role": "official"
+      "role": "official",
+      "topics": ["SK텔레콤 실적", "5G 가입자", "AI 서비스", "AI 데이터센터", "사업 전략"],
+      "capabilities": ["financial_performance", "customer_market", "product_technology", "strategy_investment"]
     },
     {
       "name": "전자신문 (IT·통신 섹션)",
@@ -46,7 +48,9 @@
       "reliability_reason": "정보통신정책연구원(KISDI)은 통신정책과 통신시장 경쟁상황 평가를 수행하는 공식 정책연구기관이다. 통신시장 경쟁상황 평가 보고서는 국내 통신시장 현황, 경쟁 이슈, 시장획정과 평가 방법론을 포함하므로 SK텔레콤 섹터의 시장분석 근거로 사용한다.",
       "reliability_tier": "official",
       "content_type": "analysis",
-      "role": "market_analysis"
+      "role": "market_analysis",
+      "topics": ["통신시장 경쟁", "시장점유율", "가입자", "요금", "규제"],
+      "capabilities": ["customer_market", "competition", "regulation_risk"]
     },
     {
       "name": "SK텔레콤 IR 자료실",
@@ -57,7 +61,8 @@
       "reliability_tier": "official",
       "content_type": "analysis",
       "role": "official",
-      "topics": ["실적", "ARPU", "CAPEX", "AI 전략"]
+      "topics": ["실적", "매출", "영업이익", "ARPU", "가입자", "CAPEX", "AI 전략"],
+      "capabilities": ["financial_performance", "customer_market", "strategy_investment", "operations_supply"]
     },
     {
       "name": "KT 보도자료",

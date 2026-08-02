@@ -171,9 +171,9 @@ def _crawl_source(client: Firecrawl, source: PlannedSource, keywords: list[str])
 
     documents: list[SourceDocument] = []
     for item in payload[:_MAX_RESULTS_PER_SOURCE]:
-        metadata = item.metadata
-        article_url = (metadata.url if metadata else None) or item.url
-        markdown = item.markdown
+        metadata = getattr(item, "metadata", None)
+        article_url = getattr(metadata, "url", None) or getattr(item, "url", None)
+        markdown = getattr(item, "markdown", None)
         if not markdown and article_url:
             scrape_status, scrape_payload = _run_with_timeout(
                 lambda: client.scrape(article_url, formats=["markdown"]),
@@ -187,9 +187,9 @@ def _crawl_source(client: Firecrawl, source: PlannedSource, keywords: list[str])
             SourceDocument(
                 doc_id=_doc_id(source, article_url),
                 source_id=source.name,
-                title=(metadata.title if metadata else None) or item.title,
+                title=getattr(metadata, "title", None) or getattr(item, "title", None),
                 url=article_url,
-                published_at=_parse_published_at(metadata.published_time if metadata else None),
+                published_at=_parse_published_at(getattr(metadata, "published_time", None)),
                 content=markdown,
                 # Only carried through when the registry itself sets a tier
                 # (see PlannedSource.reliability_tier) — never invented here.

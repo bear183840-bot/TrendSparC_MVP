@@ -35,7 +35,11 @@ _ANALYSIS_SCHEMA = {
         "sentiment": {"type": "string", "enum": ["positive", "neutral", "negative", "mixed"]},
         "relevant_to_question": {
             "type": "boolean",
-            "description": "문서가 질문에 실질적으로 답하면 true, 키워드만 겹치면 false.",
+            "description": (
+                "이 문서 하나가 질문 전체에 답할 필요는 없다 — 여러 문서가 합쳐져 최종 리포트가 되므로, "
+                "질문과 관련된 사실을 조금이라도 포함하면(부분적 근거라도) true. "
+                "실제 주제가 질문과 무관한 경우(키워드만 겹치고 본문 내용은 다른 경우)에만 false."
+            ),
         },
         "business_impact": {
             "type": "string",

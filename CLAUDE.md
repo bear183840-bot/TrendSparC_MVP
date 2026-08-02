@@ -106,15 +106,25 @@ extracting the shared logic.
 - **`general` sector is deliberately unimplemented** — only gets the common
   source registry (Naver) wired into its `SourcePlan`; no real
   collector/analyzer. Not currently planned.
-- **`prompts/common/audience_profile.md` is a new, still-empty placeholder.**
-  The team wants ONE shared place defining each of the 4 audiences'
-  tone/format rules, so a sector's `system_prompt.md` "대상별 강조 포인트"
-  section only lists *which of that sector's own data* matters to each
-  audience (short bullets) instead of repeating the full definition —
+- **`prompts/common/audience_profile.md`** is the ONE shared place defining a
+  concrete section-by-section report template for each of the 4 audiences
+  (실무진/임원/경영진/외부사람), so a sector's `system_prompt.md` "대상별
+  강조 포인트" section only lists *which of that sector's own data* matters
+  to each audience (short bullets) instead of repeating the full definition —
   `sk_telecom`/`sk_innovation` already follow this lighter bullet format
   and point back to this file. `sk_hynix`/`sk_planet` still use the older,
   heavier per-sector table format (written before this convention existed)
-  — not yet retrofitted, would need doing once the common file has real content.
+  — not yet retrofitted.
+- **`audience/profiles/_default.md`** (leading underscore) is the fallback
+  profile used when no audience is explicitly selected — see
+  `core/request_pipeline/pipeline.py`'s `_DEFAULT_AUDIENCE_ID`. It's
+  intentionally excluded from `audience.contracts.list_audience_ids()`
+  (filtered by the leading `_`) so the UI never offers it as a 5th
+  selectable persona — the correct selectable set is exactly 4
+  (practitioner/executive/management/external). It has no `report_structure`
+  on purpose, so `report_planner.plan_report()` gives it a lean,
+  purpose-driven section list instead of forcing any one persona's fixed
+  page shape onto a question with no explicit audience.
 - **`PlannedSource.role`** (free-text, distinct from `content_type` above) tags
   *why* a source is registered for a per-sector coverage quota: `official`
   (sector's own SK 계열사 newsroom, >=1 required), `search` (general trade
@@ -126,9 +136,18 @@ extracting the shared logic.
   `sources/registry/sk_broadband/sources.json` for a real example (flagged
   with a `role_todo` note instead of a guessed value). `sk_telecom` currently
   has **zero** `market_analysis`-role sources — a real, unfilled gap, not
-  yet a registered source. No code currently branches on `role` — it's
-  purely descriptive/reporting today, unlike `content_type` which
-  `core/source_planner/planner.py` actually uses to reorder sources.
+  yet a registered source. `core/source_planner/planner.py`'s
+  `select_top_sources()` actively uses `role` (not just `content_type`) to
+  narrow a sector's registry down to `_MAX_SELECTED_SOURCES=6`: each role has
+  a default ceiling (`_ROLE_MAX_QUOTA`) so one role can't consume the whole
+  budget, but a question's `perspective` can raise a specific role's ceiling
+  when the question is fundamentally about that angle (e.g.
+  `competitor_comparison` raises `competitor_official`'s cap from 1 to 3 —
+  see `_ROLE_MAX_QUOTA_OVERRIDES_BY_PERSPECTIVE`). A separate guarantee
+  (`_GUARANTEED_ROLES = {official, search, market_analysis}`) makes sure a
+  perspective boost for one role can never squeeze these three down to zero,
+  evicting the weakest over-quota selection instead if the 6-slot budget is
+  already full.
 - **`PlannedSource.reliability_tier`** (`common/contracts.py`) is a real,
   domain-expert-confirmed 3-tier convention: `official` (government/company
   1st-party) / `analyst_media` (industry press, interprets rather than just

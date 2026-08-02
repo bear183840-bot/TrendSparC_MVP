@@ -6,6 +6,11 @@ focus:
   - market_context
   - public_facts
 format_preference: html
+report_structure:
+  - overview
+  - market_status
+  - opportunity
+  - sources
 ---
 
 외부 관계자(고객사, 파트너, 협력사 등 SK 계열사 외부 인원 — 컨설팅형 청중

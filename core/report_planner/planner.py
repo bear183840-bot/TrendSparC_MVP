@@ -103,7 +103,16 @@ def plan_report(
     raw_purpose_id = report_purpose if isinstance(report_purpose, str) else report_purpose.purpose_id
     purpose_id = purpose.purpose_id if purpose is not None else raw_purpose_id
     purpose_sections = purpose.recommended_sections if purpose is not None else []
-    sections = _dedupe_semantic_sections(_BASE_SECTIONS + list(purpose_sections) + list(profile.focus))
+    if profile.report_structure:
+        # A fixed report_structure is a deliberate, stable page shape for this
+        # audience (today: executive) — purpose still shapes the CONTENT written
+        # into each fixed section (see report_generator/generator.py), but it
+        # must not inject additional top-level sections on top of that shape.
+        sections = _dedupe_semantic_sections(list(profile.report_structure))
+    else:
+        # No fixed shape for this audience — purpose-recommended sections are
+        # the primary structure, with the audience's focus areas layered in.
+        sections = _dedupe_semantic_sections(_BASE_SECTIONS + list(purpose_sections) + list(profile.focus))
 
     return ReportPlan(
         request_id=synthesis.request_id,

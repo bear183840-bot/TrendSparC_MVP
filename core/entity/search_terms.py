@@ -36,6 +36,12 @@ _INTENT_FRAMING_WORDS = {
     "root_cause": "원인",
 }
 
+_PERSPECTIVE_FRAMING_WORDS = {
+    "competitor_comparison": "경쟁사 비교",
+    "market_landscape": "시장 현황",
+    "regulatory_policy": "정책 동향",
+}
+
 _MARKET_LANDSCAPE_PERSPECTIVE = "market_landscape"
 
 
@@ -57,7 +63,7 @@ def build_search_terms(
 
     anchor_topic = next((term for term in entities.keywords if term != anchor_primary), None)
     if anchor_topic is None:
-        framing_word = _INTENT_FRAMING_WORDS.get(entities.primary_intent)
+        framing_word = _PERSPECTIVE_FRAMING_WORDS.get(entities.perspective) or _INTENT_FRAMING_WORDS.get(entities.primary_intent)
         if framing_word and framing_word != anchor_primary:
             anchor_topic = framing_word
 

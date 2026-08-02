@@ -7,6 +7,13 @@ focus:
   - source_traceability
   - operational_implication
 format_preference: dashboard
+report_structure:
+  - overview
+  - key_metrics
+  - timeline
+  - response_actions
+  - risk
+  - sources
 ---
 
 실무진(현업 담당자)을 위한 프로필입니다. 동일 업무 실행에 관심이 많고,

@@ -117,6 +117,7 @@ def route_request(
     entities: EntityExtractionResult,
     profiles: dict[str, SectorProfile],
     requested_sector_id: str | None = None,
+    question: str | None = None,
 ) -> SectorRoute:
     """Match extracted entities/keywords against registered sector profiles.
 
@@ -139,27 +140,68 @@ def route_request(
             sector_id=profile.sector_id,
             status="routed",
             matched_profile=profile,
+            confidence="high",
+            routing_method="user_selected",
         )
 
-    best_profile: SectorProfile | None = None
-    best_score = 0
-    best_matches: list[str] = []
+    # An AI-first entity decision is authoritative as long as it names a sector
+    # from the live registry. This stays registry-driven: adding a profile does
+    # not require another branch in core code.
+    if entities.sector_id is not None:
+        ai_profile = profiles.get(entities.sector_id)
+        if ai_profile is None:
+            return SectorRoute(
+                request_id=request_id,
+                sector_id=entities.sector_id,
+                status="unsupported",
+                reason=f"AI-selected sector '{entities.sector_id}' is not registered under sectors/",
+                confidence=entities.routing_confidence or "low",
+                routing_method="ai",
+            )
+        return SectorRoute(
+            request_id=request_id,
+            sector_id=ai_profile.sector_id,
+            status="routed",
+            matched_profile=ai_profile,
+            reason=entities.routing_reason or "sector selected by AI-first intent analysis",
+            confidence=entities.routing_confidence or "medium",
+            routing_method="ai",
+            needs_ai_routing=False,
+        )
+
+    scored_profiles: list[tuple[int, SectorProfile, list[str]]] = []
     for profile in profiles.values():
         if profile.sector_id == FALLBACK_SECTOR_ID:
             continue
         score, matches = _score_profile(entities, profile)
-        if score > best_score:
-            best_profile = profile
-            best_score = score
-            best_matches = matches
+        scored_profiles.append((score, profile, matches))
+
+    scored_profiles.sort(key=lambda item: item[0], reverse=True)
+    best_score, best_profile, best_matches = scored_profiles[0] if scored_profiles else (0, None, [])
+    runner_up_score = scored_profiles[1][0] if len(scored_profiles) > 1 else 0
 
     if best_profile is not None and best_score >= _MIN_ROUTE_SCORE:
+        token_count = len((question or "").split())
+        unusual_length = bool(question) and (token_count <= 1 or token_count > 35 or len(question or "") > 400)
+        decisive_margin = best_score - runner_up_score
+        if best_score >= 6 and decisive_margin >= 3 and not unusual_length:
+            confidence = "high"
+        elif best_score >= 3 and decisive_margin >= 2 and not unusual_length:
+            confidence = "medium"
+        else:
+            confidence = "low"
         return SectorRoute(
             request_id=request_id,
             sector_id=best_profile.sector_id,
             status="routed",
             matched_profile=best_profile,
-            reason=f"matched profile signals: {', '.join(best_matches)}; score={best_score}",
+            reason=(
+                f"matched profile signals: {', '.join(best_matches)}; "
+                f"score={best_score}; runner_up={runner_up_score}"
+            ),
+            confidence=confidence,
+            routing_method="rule_based",
+            needs_ai_routing=confidence != "high",
         )
 
     fallback = profiles.get(FALLBACK_SECTOR_ID)
@@ -170,6 +212,9 @@ def route_request(
             status="routed",
             matched_profile=fallback,
             reason="no sector-specific strong signal matched; routed to fallback sector",
+            confidence="low",
+            routing_method="fallback",
+            needs_ai_routing=True,
         )
 
     return SectorRoute(

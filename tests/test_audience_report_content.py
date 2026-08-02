@@ -34,11 +34,41 @@ def test_report_purpose_changes_actual_section_content():
     future = adapt_for_audience(synthesis, future_plan, "executive")
     issue = adapt_for_audience(synthesis, issue_plan, "executive")
 
-    assert "opportunity" in future.adapted_sections
-    assert "response_actions" in issue.adapted_sections
-    assert future.adapted_sections["opportunity"]["section_goal"] != issue.adapted_sections["response_actions"]["section_goal"]
-    assert future.adapted_sections["opportunity"]["purpose_id"] == "future_business"
-    assert issue.adapted_sections["response_actions"]["purpose_id"] == "issue_response"
+    expected = {"overview", "key_metrics", "timeline", "decision_required", "risk", "sources"}
+    assert set(future.adapted_sections) == expected
+    assert set(issue.adapted_sections) == expected
+    assert future.adapted_sections["overview"]["purpose_id"] == "future_business"
+    assert issue.adapted_sections["overview"]["purpose_id"] == "issue_response"
+
+
+def test_practitioner_management_external_each_have_their_own_fixed_structure():
+    synthesis = _synthesis()
+    purpose = _purpose("current_status")
+
+    practitioner_sections = plan_report(synthesis, "practitioner", purpose).sections
+    management_sections = plan_report(synthesis, "management", purpose).sections
+    external_sections = plan_report(synthesis, "external", purpose).sections
+
+    assert practitioner_sections == ["overview", "key_metrics", "timeline", "response_actions", "risk", "sources"]
+    assert management_sections == ["overview", "opportunity", "risk", "strategic_recommendation", "sources"]
+    assert external_sections == ["overview", "market_status", "opportunity", "sources"]
+    # each audience's fixed structure differs from the others' and from executive's
+    assert len({tuple(practitioner_sections), tuple(management_sections), tuple(external_sections)}) == 3
+
+
+def test_no_audience_selected_falls_back_to_dynamic_purpose_sections():
+    synthesis = _synthesis()
+    # current_status's own recommended_sections (current_situation/market_status/
+    # near_term_outlook) don't overlap with any of the 4 personas' fixed section
+    # names, so this cleanly proves no fixed persona shape leaked in.
+    purpose = _purpose("current_status")
+
+    plan = plan_report(synthesis, "_default", purpose)
+
+    assert "decision_required" not in plan.sections  # executive's fixed shape
+    assert "response_actions" not in plan.sections  # practitioner's fixed shape
+    assert "strategic_recommendation" not in plan.sections  # management's fixed shape
+    assert plan.sections[0] == "overview"
 
 
 def test_audience_profile_changes_visible_depth_tone_and_focus():

@@ -56,6 +56,21 @@ class EntityExtractionResult(BaseModel):
     organizations: list[str] = Field(default_factory=list)
     technologies: list[str] = Field(default_factory=list)
     keywords: list[str] = Field(default_factory=list)
+    # Evidence categories required to answer the question. These are shared
+    # across sectors and matched against registry-owned source capabilities.
+    information_needs: list[str] = Field(default_factory=list)
+    # Conversational questions do not enter the report pipeline. Report-worthy
+    # questions without an SK-sector match continue through the general route.
+    response_mode: Optional[Literal["report", "direct_answer"]] = None
+    direct_answer: Optional[str] = None
+    # Optional routing metadata. Existing consumers can ignore these fields;
+    # the router uses them only when the second-pass AI made a final decision.
+    sector_id: Optional[str] = None
+    routing_confidence: Optional[Literal["low", "medium", "high"]] = None
+    routing_reason: Optional[str] = None
+    needs_ai_routing: Optional[bool] = None
+    extraction_method: Optional[Literal["ai", "rule_fallback"]] = None
+    extraction_error: Optional[str] = None
 
 
 class ReportPurposeClassification(BaseModel):
@@ -83,6 +98,7 @@ class ReportPurposeClassification(BaseModel):
 class SectorProfile(BaseModel):
     sector_id: str
     display_name: str
+    canonical_name: Optional[str] = None
     status: Literal["active", "template_only", "unsupported"]
     aliases: list[str] = Field(default_factory=list)
     keywords: list[str] = Field(default_factory=list)
@@ -90,6 +106,10 @@ class SectorProfile(BaseModel):
     # brand/product terms in `keywords` above — used as the search anchor for
     # market_landscape-perspective questions instead of a brand name.
     market_keywords: list[str] = Field(default_factory=list)
+    # Registry-owned business context supplied to AI stages. Core code never
+    # branches on a sector id; adding a new sector only requires profile data.
+    key_metrics: list[str] = Field(default_factory=list)
+    strategic_dimensions: list[str] = Field(default_factory=list)
     pipeline_entrypoint: Optional[str] = None
     system_prompt_path: Optional[str] = None
 
@@ -100,6 +120,9 @@ class SectorRoute(BaseModel):
     status: Literal["routed", "unsupported"]
     matched_profile: Optional[SectorProfile] = None
     reason: Optional[str] = None
+    confidence: Optional[Literal["low", "medium", "high"]] = None
+    routing_method: Optional[Literal["user_selected", "rule_based", "ai", "fallback"]] = None
+    needs_ai_routing: bool = False
 
 
 class PlannedSource(BaseModel):
@@ -155,6 +178,9 @@ class PlannedSource(BaseModel):
     # Left empty when a source's coverage is too broad/general to tag
     # meaningfully — never guessed.
     topics: list[str] = Field(default_factory=list)
+    # What kinds of evidence this source can normally provide. Values use the
+    # same shared vocabulary as EntityExtractionResult.information_needs.
+    capabilities: list[str] = Field(default_factory=list)
     # Registry-driven planning importance. "core" sources receive a reserved
     # Top-N slot but still pass the same document relevance/quality validation.
     planning_priority: Optional[Literal["core", "standard", "supporting"]] = None
@@ -165,13 +191,19 @@ class SourcePlan(BaseModel):
     sector_id: str
     planned_sources: list[PlannedSource] = Field(default_factory=list)
     question_keywords: list[str] = Field(default_factory=list)
+    information_needs: list[str] = Field(default_factory=list)
     notes: Optional[str] = None
 
 
 class SourceDocument(BaseModel):
     doc_id: str
     source_id: str
-    title: str
+    # Optional: some Firecrawl responses carry no title in either the top-level
+    # result or its metadata. A missing title doesn't make the content
+    # unusable, so the collector still records the document — validator's
+    # _is_valid() is what actually filters out title-less documents before
+    # they reach analysis, not this contract.
+    title: Optional[str] = None
     url: Optional[str] = None
     published_at: Optional[datetime] = None
     content: Optional[str] = None

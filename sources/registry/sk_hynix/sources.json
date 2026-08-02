@@ -18,7 +18,8 @@
       "content_type": "press_release",
       "role": "official",
       "reliability_tier": "official",
-      "topics": ["SK하이닉스 투자", "HBM 시장 동향", "실적"]
+      "topics": ["SK하이닉스 투자", "HBM 시장 동향", "실적", "수율", "양산"],
+      "capabilities": ["financial_performance", "product_technology", "operations_supply", "strategy_investment"]
     },
     {
       "name": "삼성전자DS 뉴스룸",
@@ -76,7 +77,8 @@
       "content_type": "analysis",
       "role": "market_analysis",
       "reliability_tier": "analyst_media",
-      "topics": ["DRAM/NAND/HBM 가격", "수급", "시장 점유율"]
+      "topics": ["DRAM/NAND/HBM 가격", "수급", "시장 점유율"],
+      "capabilities": ["customer_market", "competition", "operations_supply"]
     },
     {
       "name": "BIS (미국 상무부 산업안보국) Newsroom",
@@ -192,7 +194,8 @@
       "reliability_tier": "official",
       "content_type": "press_release",
       "role": "official",
-      "topics": ["실적 발표(가이던스)", "CAPEX"]
+      "topics": ["실적 발표(가이던스)", "매출", "영업이익", "CAPEX"],
+      "capabilities": ["financial_performance", "strategy_investment", "operations_supply"]
     }
   ]
 }

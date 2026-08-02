@@ -68,6 +68,22 @@ def test_crawl_source_returns_document_from_top_search_result():
     assert documents[0].content == "# HBM4 기사 본문"
 
 
+def test_crawl_source_accepts_firecrawl_document_without_top_level_title():
+    metadata = types.SimpleNamespace(
+        title=None,
+        url="https://example.com/news/no-title/",
+        published_time=None,
+    )
+    result = types.SimpleNamespace(markdown="# 제목 없는 기사", metadata=metadata)
+    source = PlannedSource(name="metadata-only source", url="https://example.com/news/")
+
+    documents = _crawl_source(_FastClient([result]), source, ["산업 정책"])
+
+    assert len(documents) == 1
+    assert documents[0].title is None
+    assert documents[0].url == metadata.url
+
+
 def test_crawl_source_returns_empty_when_no_search_results():
     source = PlannedSource(name="empty source", url="https://example.com/news/")
 
@@ -108,8 +124,8 @@ class _RetryClient:
         return _search_data([])
 
 
-def test_crawl_source_preserves_full_question_before_short_fallback():
-    """Meaning-rich full/middle/tail queries run before a single-term fallback."""
+def test_crawl_source_uses_clean_two_term_query_before_long_fallbacks():
+    """A focused entity/topic pair should avoid unnecessary restrictive calls."""
     result = _make_result("본문", title="제목", url="https://example.com/a/")
     source = PlannedSource(name="primary-success source", url="https://example.com/news/")
     client = _RetryClient([result], min_words_for_success=2)
@@ -118,12 +134,7 @@ def test_crawl_source_preserves_full_question_before_short_fallback():
 
     assert len(documents) == 1
     assert documents[0].url == "https://example.com/a/"
-    assert client.queries == [
-        "포인트 마케팅 시장 현황",
-        "포인트 마케팅 시장",
-        "마케팅 시장 현황",
-        "포인트",
-    ]
+    assert client.queries == ["포인트 마케팅"]
 
 
 class _ExactLengthClient:
@@ -141,7 +152,7 @@ class _ExactLengthClient:
         return _search_data([])
 
 
-def test_crawl_source_uses_full_question_first_when_it_matches():
+def test_crawl_source_expands_to_full_question_only_when_short_queries_miss():
     result = _make_result("본문", title="제목", url="https://example.com/a/")
     source = PlannedSource(name="last-resort source", url="https://example.com/news/")
     client = _ExactLengthClient([result], required_words=4)
@@ -149,7 +160,11 @@ def test_crawl_source_uses_full_question_first_when_it_matches():
     documents = _crawl_source(client, source, ["포인트", "마케팅", "시장", "현황"])
 
     assert len(documents) == 1
-    assert client.queries == ["포인트 마케팅 시장 현황"]
+    assert client.queries == [
+        "포인트 마케팅",
+        "포인트 마케팅 시장",
+        "포인트 마케팅 시장 현황",
+    ]
 
 
 def test_crawl_source_gives_up_after_all_term_counts_fail():
@@ -160,11 +175,12 @@ def test_crawl_source_gives_up_after_all_term_counts_fail():
 
     assert documents == []
     assert client.queries == [
-        "포인트 마케팅 시장 현황",
+        "포인트 마케팅",
         "포인트 마케팅 시장",
+        "포인트 마케팅 시장 현황",
         "마케팅 시장 현황",
         "포인트",
-        "site:example.com 포인트 마케팅 시장 현황",
+        "site:example.com 포인트 마케팅",
     ]
 
 

@@ -49,7 +49,7 @@ _ANALYSIS_SCHEMA = {
         },
         "relevant_to_question": {
             "type": "boolean",
-            "description": "true only if this document's content actually addresses the original question above — false if it's off-topic or only superficially shares a keyword with it",
+            "description": "true if this document contains ANY fact that meaningfully informs the answer, even partial evidence — it does not need to fully answer the question by itself, since multiple documents combine into one report. false only if it's genuinely off-topic (its actual subject differs from the question, not just sharing a keyword)",
         },
         "business_impact": {
             "type": "string",
@@ -111,7 +111,9 @@ def _analyze_document(client: OpenAI, system_prompt: str, document: SourceDocume
         "---\n"
         "위 문서가 영어 등 외국어라도, summary/key_points는 반드시 한국어로만 작성하세요. "
         "summary/key_points는 위 질문과 어떻게 관련되는지를 기준으로 작성하고, "
-        "이 문서가 실제로 질문에 답이 되는 내용인지 relevant_to_question에 정직하게 판단하세요."
+        "이 문서 하나가 질문 전체에 답할 필요는 없습니다 — 여러 문서가 합쳐져 최종 리포트가 되므로, "
+        "질문과 관련된 사실을 조금이라도 포함하면(부분적 근거라도) relevant_to_question을 true로 판단하고, "
+        "실제 주제가 질문과 무관한 경우(키워드만 겹치고 본문 내용은 다른 경우)에만 false로 판단하세요."
     )
 
     try:

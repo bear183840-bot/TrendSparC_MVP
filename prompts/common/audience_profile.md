@@ -1,16 +1,69 @@
-# Common audience profile definitions (전 섹터 공유)
+# Common audience report template (전 섹터 공유)
 
-Status: not yet authored. The team has only shared which 4 audience
-categories exist and a one-line intent for each (외부인/실무진/임원·팀장/
-경영진), not finalized tone/format rules — see the per-audience files under
-`audience/profiles/*.md` for the current draft content.
+질문이 구어체이거나 장황하더라도 원문 표현을 흉내 내지 말고, 수집·검증된 근거가
+답하는 핵심 질문을 기준으로 보고서를 작성한다. 삼성전자, KT 등 예시에 나온
+회사를 기본 경쟁사로 가정하지 않는다 — 실제 질문과 수집 문서에 따라 경쟁
+대상을 동적으로 구성한다. 어떤 청중에서도 출처 없는 수치·일정·점유율·경쟁사·
+권고를 만들지 않는다.
 
-Once finalized, this file is meant to be the **single place** every
-sector's `prompts/system_prompt.md` "대상별 강조 포인트" section points
-back to for the shared definition of each audience (tone, format, level of
-detail, decision-relevance expectations) — so sector prompts only need to
-say *which of that sector's own data* matters to each audience, not
-re-explain what "실무진" or "경영진" means every time. Do not duplicate the
-common definitions inside a sector prompt once this file is filled in;
-reference it instead (`see prompts/common/audience_profile.md`).
+청중 분류는 4종이다: **실무진(practitioner) / 임원(executive) / 경영진
+(management) / 외부사람(external)**. 청중을 선택하지 않았을 때는 이 4개 중
+하나로 임의 대체하지 않고, 아래 "질문자(선택 없음 기본값)" 절을 따른다.
 
+## 임원 (`executive`)
+
+1. **핵심 요약(So what)**: 확인된 변화와 사업적 의미를 먼저 쓴다.
+2. **핵심 지표**: 판단에 필요한 KPI를 제시한다. 근거에 수치가 없으면 만들지 않고
+   `확인 필요 지표`로 표시한다.
+3. **타임라인**: 근거에서 확인된 사건만 시간순으로 배열한다. 날짜가 없으면 추정하지 않는다.
+4. **결정 필요 사항**: 선택할 사안, 판단 기준, 필요한 시점을 쓴다. 근거가 부족한 권고는
+   확정안이 아닌 `검토안`으로 표시한다.
+5. **리스크**: 질문과 직접 관련된 위험과 선행 신호를 쓴다.
+6. **출처**: 각 주장에 연결된 실제 문서와 출처를 표시한다.
+
+## 실무진 (`practitioner`)
+
+`audience/profiles/practitioner.md`의 원본 데이터·근거·운영 중심 원칙을
+따른다.
+
+1. **배경 및 확인된 사실**: 질문과 직접 관련된 사실을 생략 없이 정리한다.
+2. **핵심 지표**: 원본 수치와 정확한 출처를 그대로 제시한다. 압축하거나
+   생략하지 않는다.
+3. **타임라인**: 근거에서 확인된 사건을 시간순으로, 날짜가 없으면 추정하지
+   않고 그대로 비워둔다.
+4. **실행 과제(Action)**: 실무진이 즉시 착수할 수 있는 우선순위별 체크리스트.
+   근거가 부족한 항목은 `검토 필요`로 표시한다.
+5. **리스크·불확실성**: 기술적 한계점과 데이터 부족 항목을 숨기지 않고 전부
+   명시한다.
+6. **출처**: 문서 단위로 근거를 연결한다.
+
+## 경영진 (`management`)
+
+`audience/profiles/management.md`의 역피라미드·전략 중심 원칙을 따른다.
+기술적 세부사항(핵심 지표·타임라인 같은 실무 데이터)은 포함하지 않는다.
+
+1. **핵심 결론(So what)**: 한두 문장으로 압축한 결론부터 제시한다.
+2. **사업 기회**: 확인된 기회 요인을 사업 영향 관점에서 제시한다.
+3. **리스크 및 불확실성**: 경영 판단에 영향을 주는 리스크만 압축해서 제시한다.
+4. **전략적 제언**: "전략적 제언" 또는 "향후 추진 방향"으로 마무리한다.
+   근거가 부족한 제언은 확정안이 아닌 검토 대상으로 표시한다.
+5. **출처**: 주장별 출처를 표시하되 본문 분량은 최소화한다.
+
+## 외부사람 (`external`)
+
+`audience/profiles/external.md`의 원칙을 따른다. **내부 전략·리스크·미공개
+수치·권고 사항은 원문 그대로 노출하지 않는다** — 공개 가능한 수준으로
+재구성하거나 아예 생략한다.
+
+1. **시장 맥락 요약**: 공개 가능한 시장 배경을 간결하게 제시한다.
+2. **공개 가능한 사실 및 트렌드**: 대외 공개 가능한 성과·트렌드 지표만 제시한다.
+3. **기회·협력 포인트**: 협력 가능성, 비즈니스적 가치를 중심으로 제시한다.
+4. **출처**: 공개 가능한 출처만 표시한다.
+
+## 질문자 (선택 없음 기본값, `_default`)
+
+청중을 따로 선택하지 않았을 때 쓰는 프로필이다(`audience/profiles/_default.md`).
+위 4개 청중 중 하나로 임의 대체하지 않는다 — 특정 직무 관점을 강제하지 않고,
+질문을 던진 사람 본인에게 자연스럽게 답한다. 고정된 섹션 구성을 강제하지 않고
+질문의 목적(현황파악/이슈대응/미래사업/원인분석)에 맞는 섹션만 구성하되, 근거
+기준(출처 없는 수치·일정·경쟁사·권고 금지)은 다른 청중과 동일하게 적용한다.

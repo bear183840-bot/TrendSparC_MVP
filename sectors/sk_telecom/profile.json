@@ -1,6 +1,7 @@
 {
   "sector_id": "sk_telecom",
   "display_name": "SK텔레콤 (SK Telecom)",
+  "canonical_name": "SK텔레콤",
   "status": "active",
   "aliases": [
     "SK텔레콤",
@@ -29,6 +30,8 @@
     "5G 시장",
     "AI 서비스 시장"
   ],
+  "key_metrics": ["매출", "영업이익", "ARPU", "5G 가입자", "해지율", "CAPEX", "AI 데이터센터 가동률", "AI 서비스 이용자"],
+  "strategic_dimensions": ["통신 본업 경쟁력", "AI 피라미드 전략", "AI 데이터센터 투자", "에이닷·AI 서비스 성장", "네트워크 투자 효율", "통신 규제와 고객 신뢰"],
   "pipeline_entrypoint": "sectors.sk_telecom.adapter",
   "system_prompt_path": "sectors/sk_telecom/prompts/system_prompt.md"
 }

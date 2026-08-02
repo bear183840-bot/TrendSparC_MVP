@@ -31,6 +31,11 @@ _SECTION_GOALS = {
     "problem": "관찰된 문제와 범위",
     "root_cause": "근거로 연결된 원인 구조",
     "improvement_plan": "검증 가능한 개선 조치",
+    "key_metrics": "의사결정에 필요한 핵심 KPI와 확인 필요 지표",
+    "timeline": "근거에서 확인된 주요 사건과 일정",
+    "decision_required": "선택할 사안과 판단 기준",
+    "risk": "주요 위험과 선행 신호",
+    "sources": "주장에 연결된 실제 출처",
 }
 
 

@@ -7,6 +7,13 @@ focus:
   - risk_and_opportunity
   - recommended_action
 format_preference: pdf
+report_structure:
+  - overview
+  - key_metrics
+  - timeline
+  - decision_required
+  - risk
+  - sources
 ---
 
 임원·팀장급 청중 프로필입니다. 액션과 결정사항을 포함하는 데 초점을 두고,

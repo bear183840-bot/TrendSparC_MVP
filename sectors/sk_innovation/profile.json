@@ -1,6 +1,7 @@
 {
   "sector_id": "sk_innovation",
   "display_name": "SK이노베이션 (SK Innovation)",
+  "canonical_name": "SK이노베이션",
   "status": "active",
   "aliases": [
     "SK이노베이션",
@@ -33,6 +34,8 @@
     "정유 시장",
     "친환경에너지 시장"
   ],
+  "key_metrics": ["매출", "영업손익", "CAPEX", "배터리 수주잔고", "공장 가동률", "생산능력", "정제마진", "원재료 가격"],
+  "strategic_dimensions": ["SK온 수익성", "북미 공장 가동", "완성차 고객 수주", "배터리 투자와 현금흐름", "정유·에너지 포트폴리오", "원재료·정책 리스크"],
   "pipeline_entrypoint": "sectors.sk_innovation.adapter",
   "system_prompt_path": "sectors/sk_innovation/prompts/system_prompt.md"
 }

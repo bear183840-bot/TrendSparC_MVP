@@ -1,6 +1,7 @@
 {
   "sector_id": "sk_broadband",
-  "display_name": "SK Broadband",
+  "display_name": "SK브로드밴드 (SK Broadband)",
+  "canonical_name": "SK브로드밴드",
   "status": "active",
   "aliases": [
     "SK Broadband",
@@ -8,6 +9,7 @@
     "SK브로드밴드",
     "SK 브로드밴드",
     "에스케이브로드밴드",
+    "브로드밴드",
     "B tv",
     "비티비",
     "Btv",
@@ -147,6 +149,8 @@
     "영화산업 결산",
     "콘텐츠산업 동향"
   ],
+  "key_metrics": ["매출", "영업이익", "IPTV 가입자", "초고속인터넷 가입자", "해지율", "ARPU", "콘텐츠 이용률", "데이터센터 가동률"],
+  "strategic_dimensions": ["유료방송 가입자 방어", "OTT·콘텐츠 경쟁력", "결합상품과 ARPU", "네트워크·IDC 성장", "AI 미디어 개인화", "규제와 망 비용"],
   "pipeline_entrypoint": "sectors.sk_broadband.adapter",
   "system_prompt_path": "sectors/sk_broadband/prompts/system_prompt.md"
 }

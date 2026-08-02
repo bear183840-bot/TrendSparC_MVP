@@ -28,9 +28,17 @@ _SECTION_TITLES = {
     "key_implication": "Key Implication",
     "risk_and_opportunity": "Risk and Opportunity",
     "recommended_action": "Recommended Action",
+    "key_metrics": "핵심 지표",
+    "timeline": "타임라인",
+    "decision_required": "결정 필요 사항",
+    "risk": "리스크",
+    "sources": "출처",
 }
 
-_ACTION_SECTIONS = {"response_actions", "improvement_plan", "strategic_recommendation", "recommended_action"}
+_ACTION_SECTIONS = {
+    "response_actions", "improvement_plan", "strategic_recommendation",
+    "recommended_action", "decision_required",
+}
 _TRACEABLE_FIELDS = (
     "key_points", "evidence", "risks", "opportunities", "actions", "monitoring_indicators",
 )
@@ -114,7 +122,7 @@ def _fallback_report(
     for section_id in report_plan.sections:
         key_points = synthesis.key_points or synthesis.highlights
         kwargs: dict[str, list[str]] = {}
-        if section_id in {"issue", "problem", "root_cause"}:
+        if section_id in {"issue", "problem", "root_cause", "risk"}:
             kwargs["risks"] = _take(synthesis.risks, limit)
             kwargs["evidence"] = _take(synthesis.evidence, limit)
         elif section_id == "risk_and_opportunity":
@@ -127,6 +135,14 @@ def _fallback_report(
         elif section_id in _ACTION_SECTIONS:
             kwargs["actions"] = _take(synthesis.recommended_actions, limit)
             kwargs["monitoring_indicators"] = _take(synthesis.monitoring_indicators, limit)
+        elif section_id == "key_metrics":
+            kwargs["monitoring_indicators"] = _take(synthesis.monitoring_indicators, limit)
+            kwargs["evidence"] = _take(synthesis.evidence, limit)
+        elif section_id == "timeline":
+            kwargs["key_points"] = _take(key_points, limit)
+            kwargs["evidence"] = _take(synthesis.evidence, limit)
+        elif section_id == "sources":
+            kwargs["evidence"] = _take(synthesis.evidence, limit)
         elif section_id in {"opportunity", "trend", "near_term_outlook", "investment_signal"}:
             kwargs["opportunities"] = _take(synthesis.opportunities, limit)
             kwargs["monitoring_indicators"] = _take(synthesis.monitoring_indicators, limit)
@@ -209,7 +225,15 @@ def generate_report(
                         "Keep every [doc_id=...] marker attached to its claim, never invent facts, and state uncertainty. "
                         "Copy names in canonical_entities exactly; never abbreviate, translate, or respell them. "
                         "Put recommendations in actions, risks in risks, opportunities in opportunities, and sources in evidence. "
-                        "Return every required section_id exactly once. Write the report in the question's language."
+                        "Return every required section_id exactly once and in the supplied order. "
+                        "For an executive report, use: so-what summary, key metrics, timeline, decision required, risk, sources. "
+                        "Include only evidenced KPI values and timeline events; otherwise label what still needs verification. "
+                        "Treat unsupported recommendations as proposals to review, not established decisions. "
+                        "The output-language rule is strict: write the title, executive summary, every section, "
+                        "and every limitation in the question's language. For a Korean question, all narrative "
+                        "text must be Korean; keep only proper names and standard acronyms such as NVIDIA, HBM, "
+                        "AI, and ARPU in English. Before returning JSON, verify every narrative field against "
+                        "the question's language."
                     ),
                 },
                 {"role": "user", "content": json.dumps(payload, ensure_ascii=False)},

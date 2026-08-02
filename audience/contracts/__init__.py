@@ -23,6 +23,7 @@ class AudienceProfile(BaseModel):
     detail_level: str
     focus: list[str] = []
     format_preference: str
+    report_structure: list[str] = []
     description: str = ""
 
 
@@ -47,6 +48,12 @@ def load_audience_profile(audience_id: str, profiles_dir: Path = PROFILES_DIR) -
 
 
 def list_audience_ids(profiles_dir: Path = PROFILES_DIR) -> list[str]:
+    """User-selectable audience ids only.
+
+    Filenames starting with "_" (e.g. "_default.md") are internal fallback
+    profiles — still loadable directly via load_audience_profile(), but
+    never offered as one of the selectable personas in the UI.
+    """
     if not profiles_dir.is_dir():
         return []
-    return sorted(p.stem for p in profiles_dir.glob("*.md"))
+    return sorted(p.stem for p in profiles_dir.glob("*.md") if not p.stem.startswith("_"))

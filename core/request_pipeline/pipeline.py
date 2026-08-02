@@ -46,12 +46,12 @@ from common.contracts import (
 from common.errors import PipelineStageError, StageStatus, StageTrace
 from core.attachments.extractor import build_question_context, extract_attachments
 from core.entity.ai_based import extract_entities_ai
-from core.entity.extractor import extract_entities
 from core.entity.search_terms import build_search_terms
 from core.layout_generator.generator import generate_layout
 from core.report_planner.planner import plan_report
 from core.report_generator.generator import generate_report
 from core.report_purpose.classifier import classify_report_purpose
+from core.request_pipeline.direct_response import direct_response_for
 from core.sector_router.router import route_request, scan_sectors
 from core.source_planner.planner import plan_sources, select_top_sources
 from core.synthesis.ai_based import refine_synthesis_ai
@@ -68,7 +68,7 @@ _ADAPTER_ROLE_FUNCS = {
     "analyzer": "analyze",
 }
 _ADAPTER_ROLE_ORDER = ("collector", "processor", "validator", "analyzer")
-_DEFAULT_AUDIENCE_ID = "practitioner"
+_DEFAULT_AUDIENCE_ID = "_default"
 
 
 class PipelineResult(BaseModel):
@@ -86,6 +86,7 @@ class PipelineResult(BaseModel):
     audience_adaptation: Optional[AudienceAdaptation] = None
     layout: Optional[DynamicLayout] = None
     halted_at_stage: Optional[str] = None
+    direct_answer: Optional[str] = None
 
 
 def _call_sector_adapter_stage(sector_route: SectorRoute, role: str, *args):
@@ -103,6 +104,15 @@ def run_pipeline(
 ) -> PipelineResult:
     result = PipelineResult(request_id=request.request_id)
     requested_sector_id = requested_sector_id if requested_sector_id is not None else request.requested_sector_id
+    profiles = scan_sectors(SECTORS_DIR)
+
+    direct_answer = direct_response_for(request.question)
+    if direct_answer is not None:
+        result.direct_answer = direct_answer
+        result.trace.append(
+            StageTrace(stage="direct_response", status=StageStatus.OK, reason="conversational input")
+        )
+        return result
 
     def _maybe_force_fail(stage: str) -> None:
         if force_fail_stage == stage:
@@ -127,18 +137,35 @@ def run_pipeline(
     # 1. entity (also classifies primary_intent, see core/entity)
     try:
         _maybe_force_fail("entity")
-        rule_based_entities = extract_entities(contextual_request)
-        result.entities = extract_entities_ai(contextual_request, rule_based_entities)
+        result.entities = extract_entities_ai(contextual_request, None, profiles, requested_sector_id)
         result.trace.append(StageTrace(stage="entity", status=StageStatus.OK))
     except PipelineStageError as exc:
         _halt("entity", exc.reason, exc.detail)
         return result
 
+    if result.entities.response_mode == "direct_answer":
+        result.direct_answer = result.entities.direct_answer or "무엇을 도와드릴까요?"
+        result.trace.append(
+            StageTrace(stage="direct_response", status=StageStatus.OK, reason="AI classified conversational input")
+        )
+        for stage in (
+            "sector_router", "report_purpose", "source_planner", "sector_adapter",
+            "synthesis", "report_planner", "report_generator", "audience_adapter",
+            "layout_generator",
+        ):
+            result.trace.append(StageTrace(stage=stage, status=StageStatus.SKIPPED, reason="direct response"))
+        return result
+
     # 2. sector_router
     try:
         _maybe_force_fail("sector_router")
-        profiles = scan_sectors(SECTORS_DIR)
-        result.sector_route = route_request(request.request_id, result.entities, profiles, requested_sector_id)
+        result.sector_route = route_request(
+            request.request_id,
+            result.entities,
+            profiles,
+            requested_sector_id,
+            question=request.question,
+        )
         result.trace.append(StageTrace(stage="sector_router", status=StageStatus.OK))
     except PipelineStageError as exc:
         _halt("sector_router", exc.reason, exc.detail)
@@ -153,6 +180,20 @@ def run_pipeline(
         return result
 
     sector_id = result.sector_route.sector_id
+
+    # Profiles marked template_only are recognized routes, but must never enter
+    # an adapter. This is currently how the explicit general fallback reports
+    # that classification succeeded while report generation is not implemented.
+    if result.sector_route.matched_profile.status == "template_only":
+        reason = f"template_only: sector '{sector_id}' report pipeline is not implemented"
+        result.trace.append(StageTrace(stage="sector_adapter", status=StageStatus.TEMPLATE_ONLY, reason=reason))
+        for stage in (
+            "report_purpose", "source_planner", "synthesis", "report_planner",
+            "report_generator", "audience_adapter", "layout_generator",
+        ):
+            result.trace.append(StageTrace(stage=stage, status=StageStatus.SKIPPED, reason=reason))
+        result.halted_at_stage = "sector_adapter"
+        return result
 
     # 3. report_purpose
     try:
@@ -178,6 +219,7 @@ def run_pipeline(
             SOURCE_REGISTRY_DIR,
             search_terms,
             result.entities.perspective,
+            result.entities.information_needs,
         )
         result.source_plan = select_top_sources(
             result.source_plan,

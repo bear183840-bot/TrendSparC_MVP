@@ -28,3 +28,14 @@ def test_regulatory_policy_perspective_from_regulation_keyword():
 def test_company_update_is_the_default_perspective():
     result = extract_entities(_request("SK온 북미 공장 준공식 소식은?"))
     assert result.perspective == "company_update"
+
+
+def test_colloquial_other_companies_question_becomes_clean_comparison_query():
+    result = extract_entities(_request("HBM4 다른 기업들 어느정도 수준으로 개발하고 있어?"))
+
+    assert result.perspective == "competitor_comparison"
+    assert result.technologies == ["HBM4"]
+    assert "경쟁사" in result.keywords
+    assert "기술 수준" in result.keywords
+    assert "개발 현황" in result.keywords
+    assert not {"기업들", "어느정도", "수준으로", "개발하고", "있어"}.intersection(result.keywords)

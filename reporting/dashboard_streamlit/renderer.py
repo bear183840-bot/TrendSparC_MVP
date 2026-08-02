@@ -37,6 +37,38 @@ KNOWN_BLOCK_TYPES = {
 
 _renderer_registry: dict[str, BlockRenderer] = {}
 
+_SECTION_LABELS = {
+    "executive_summary": "핵심 요약",
+    "overview": "전체 맥락",
+    "current_situation": "현재 상황",
+    "market_status": "시장 현황",
+    "near_term_outlook": "단기 전망",
+    "issue": "핵심 이슈",
+    "impact": "주요 영향",
+    "response_actions": "대응 과제",
+    "trend": "변화 신호",
+    "opportunity": "사업 기회",
+    "investment_signal": "투자 신호",
+    "strategic_recommendation": "전략 제안",
+    "problem": "문제 정의",
+    "root_cause": "원인 구조",
+    "improvement_plan": "개선 계획",
+    "key_implication": "핵심 시사점",
+    "risk_and_opportunity": "위험과 기회",
+    "recommended_action": "권고 과제",
+}
+
+_BLOCK_LABELS = {
+    "text": "SUMMARY",
+    "metrics": "KEY SIGNALS",
+    "matrix": "PRIORITY VIEW",
+    "graph": "CAUSE MAP",
+    "chart": "TREND VIEW",
+    "timeline": "WATCH POINTS",
+    "list": "ACTION LIST",
+    "evidence": "EVIDENCE",
+}
+
 
 def _require_streamlit() -> None:
     if st is None:
@@ -83,14 +115,41 @@ def _render_auto(block: DashboardBlock) -> None:
 
 
 def _render_text(block: DashboardBlock) -> None:
-    st.write(_payload(block))
+    payload = _payload(block)
+    if not isinstance(payload, dict):
+        st.write(payload)
+        return
+    summary = payload.get("summary")
+    if summary:
+        st.markdown(f"### {summary}")
+    highlights = payload.get("key_points") or payload.get("highlights") or []
+    for item in highlights:
+        st.write(f"- {item}")
+    source_count = payload.get("source_count")
+    unique_source_count = payload.get("unique_source_count")
+    if source_count is not None or unique_source_count is not None:
+        left, right = st.columns(2)
+        left.metric("분석 문서", source_count or 0)
+        right.metric("고유 출처", unique_source_count or 0)
+    limitations = payload.get("limitations") or []
+    if limitations:
+        with st.expander("분석 한계"):
+            for item in limitations:
+                st.write(f"- {item}")
 
 
 def _render_list(block: DashboardBlock) -> None:
     payload = _payload(block)
-    values = payload if isinstance(payload, list) else payload.get("items", []) if isinstance(payload, dict) else []
-    for value in values:
-        st.write(f"- {value}")
+    if isinstance(payload, list):
+        values = payload
+    elif isinstance(payload, dict):
+        values = payload.get("actions") or payload.get("monitoring_indicators") or payload.get("key_points") or payload.get("items", [])
+    else:
+        values = []
+    if not values:
+        st.caption("표시할 실행 항목이 없습니다.")
+    for index, value in enumerate(values, 1):
+        st.markdown(f"**{index}.** {value}")
 
 
 def _render_metric(block: DashboardBlock) -> None:
@@ -110,8 +169,97 @@ def _render_table(block: DashboardBlock) -> None:
     st.dataframe(payload, use_container_width=True)
 
 
+def _content_values(payload: Any, *keys: str) -> list[Any]:
+    if not isinstance(payload, dict):
+        return []
+    values = []
+    for key in keys:
+        value = payload.get(key)
+        if isinstance(value, list):
+            values.extend(value)
+        elif value not in (None, ""):
+            values.append(value)
+    return values
+
+
+def _render_metrics(block: DashboardBlock) -> None:
+    payload = _payload(block)
+    groups = [
+        ("핵심 영향", _content_values(payload, "key_points", "business_impacts")),
+        ("위험", _content_values(payload, "risks")),
+        ("기회", _content_values(payload, "opportunities")),
+    ]
+    visible = [(label, values) for label, values in groups if values]
+    if not visible:
+        st.caption("확인된 지표가 없습니다.")
+        return
+    columns = st.columns(len(visible))
+    for column, (label, values) in zip(columns, visible):
+        with column:
+            st.caption(label)
+            st.metric("확인 신호", len(values))
+            for value in values[:3]:
+                st.write(f"- {value}")
+
+
+def _render_matrix(block: DashboardBlock) -> None:
+    payload = _payload(block)
+    risks = _content_values(payload, "risks")
+    opportunities = _content_values(payload, "opportunities")
+    left, right = st.columns(2)
+    with left:
+        st.markdown("**주요 위험**")
+        for value in risks or ["확인된 위험 신호가 없습니다."]:
+            st.write(f"- {value}")
+    with right:
+        st.markdown("**기회 신호**")
+        for value in opportunities or ["확인된 기회 신호가 없습니다."]:
+            st.write(f"- {value}")
+
+
+def _render_graph(block: DashboardBlock) -> None:
+    payload = _payload(block)
+    stages = [
+        ("문제", _content_values(payload, "summary")),
+        ("원인", _content_values(payload, "risks", "key_points")),
+        ("영향", _content_values(payload, "evidence")),
+        ("개선", _content_values(payload, "actions")),
+    ]
+    columns = st.columns(4)
+    for column, (label, values) in zip(columns, stages):
+        with column:
+            st.caption(label)
+            for value in values[:3] or ["근거 확인 필요"]:
+                st.write(value)
+
+
+def _render_chart(block: DashboardBlock) -> None:
+    payload = _payload(block)
+    if block.data is not None:
+        st.dataframe(block.data, use_container_width=True)
+        return
+    signals = _content_values(payload, "opportunities", "key_points", "monitoring_indicators")
+    st.caption("수치·시계열 근거가 없어 차트 대신 확인된 신호를 표시합니다.")
+    for value in signals:
+        st.write(f"- {value}")
+
+
+def _render_timeline(block: DashboardBlock) -> None:
+    values = _content_values(_payload(block), "monitoring_indicators", "opportunities", "key_points")
+    for index, value in enumerate(values, 1):
+        st.markdown(f"**{index:02d}**　{value}")
+
+
+def _render_evidence(block: DashboardBlock) -> None:
+    values = _content_values(_payload(block), "evidence")
+    for value in values:
+        st.write(f"↗ {value}")
+    if not values:
+        st.caption("연결된 근거가 없습니다.")
+
+
 def _render_unassigned_visual(block: DashboardBlock) -> None:
-    st.caption(f"'{block.block_type}' 표시 방식은 최종 디자인에서 연결됩니다.")
+    st.caption(f"'{block.block_type}' 블록은 임시 표시 방식으로 렌더링됩니다.")
     payload = _payload(block)
     if payload not in (None, {}, []):
         st.json(payload)
@@ -121,13 +269,13 @@ register_renderer("auto", _render_auto)
 register_renderer("text", _render_text)
 register_renderer("list", _render_list)
 register_renderer("metric", _render_metric)
-register_renderer("metrics", _render_unassigned_visual)
+register_renderer("metrics", _render_metrics)
 register_renderer("table", _render_table)
-register_renderer("chart", _render_unassigned_visual)
-register_renderer("timeline", _render_unassigned_visual)
-register_renderer("graph", _render_unassigned_visual)
-register_renderer("matrix", _render_unassigned_visual)
-register_renderer("evidence", _render_auto)
+register_renderer("chart", _render_chart)
+register_renderer("timeline", _render_timeline)
+register_renderer("graph", _render_graph)
+register_renderer("matrix", _render_matrix)
+register_renderer("evidence", _render_evidence)
 register_renderer("custom", _render_unassigned_visual)
 
 
@@ -135,7 +283,8 @@ def render_block(block: DashboardBlock | dict[str, Any]) -> None:
     _require_streamlit()
     parsed = block if isinstance(block, DashboardBlock) else DashboardBlock.model_validate(block)
     resolved_type = normalized_block_type(parsed)
-    st.subheader(parsed.title or parsed.section.replace("_", " ").title())
+    st.caption(_BLOCK_LABELS.get(resolved_type, "INSIGHT BLOCK"))
+    st.subheader(_SECTION_LABELS.get(parsed.section, parsed.title or parsed.section.replace("_", " ").title()))
     _renderer_registry.get(resolved_type, _render_unassigned_visual)(parsed)
 
 

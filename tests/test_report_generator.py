@@ -59,16 +59,16 @@ def test_report_generator_creates_distinct_issue_impact_action_sections(monkeypa
     )
     plan = plan_report(synthesis, "executive", purpose)
 
-    assert plan.sections == ["overview", "issue", "impact", "response_actions"]
+    assert plan.sections == ["overview", "key_metrics", "timeline", "decision_required", "risk", "sources"]
 
     report = generate_report("어떻게 대응해야 하나?", synthesis, plan, "executive")
     sections = {section.section_id: section for section in report.sections}
 
     assert report.executive_summary
-    assert sections["issue"].risks
-    assert sections["impact"].key_points
-    assert sections["response_actions"].actions
-    assert sections["issue"].summary != sections["response_actions"].summary
+    assert sections["risk"].risks
+    assert sections["decision_required"].actions
+    assert sections["sources"].evidence
+    assert sections["risk"].summary != sections["decision_required"].summary
     assert report.generation_mode == "rule_based"
     assert report.unique_source_count == 1
     assert any("고유 출처" in limitation for limitation in report.limitations)
@@ -85,7 +85,7 @@ def test_report_planner_keeps_problem_and_root_cause_but_removes_audience_aliase
 
     plan = plan_report(synthesis, "executive", purpose)
 
-    assert plan.sections == ["overview", "problem", "root_cause", "improvement_plan"]
+    assert plan.sections == ["overview", "key_metrics", "timeline", "decision_required", "risk", "sources"]
 
 
 def test_report_generator_openai_path_receives_full_synthesis(monkeypatch):
@@ -138,9 +138,12 @@ def test_report_generator_openai_path_receives_full_synthesis(monkeypatch):
     report = generate_report("어떻게 대응해야 하나?", synthesis, plan, "executive")
 
     user_payload = json.loads(captured["input"][1]["content"])
+    system_prompt = captured["input"][0]["content"]
     assert user_payload["synthesis"]["risks"] == synthesis.risks
     assert user_payload["synthesis"]["evidence"] == synthesis.evidence
     assert user_payload["synthesis"]["recommended_actions"] == synthesis.recommended_actions
+    assert "all narrative text must be Korean" in system_prompt
+    assert "key metrics, timeline, decision required, risk, sources" in system_prompt
     assert report.generation_mode == "openai"
     assert report.executive_summary == "경영진 요약"
     assert [section.section_id for section in report.sections] == plan.sections

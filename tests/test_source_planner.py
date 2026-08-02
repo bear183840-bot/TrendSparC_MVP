@@ -260,6 +260,109 @@ def test_real_broadband_registry_select_top_sources_respects_quotas():
     assert role_counts.get("search", 0) <= 2
 
 
+def test_competitor_comparison_perspective_raises_the_competitor_role_ceiling():
+    project_root = Path(__file__).resolve().parent.parent
+    registry_root = project_root / "sources" / "registry"
+
+    plan = plan_sources(
+        "req_test_source_planner",
+        "sk_broadband",
+        registry_root,
+        question_keywords=["KT", "LG유플러스", "Netflix", "경쟁"],
+        perspective="competitor_comparison",
+    )
+    narrowed = select_top_sources(plan, perspective="competitor_comparison")
+
+    role_counts: dict[str | None, int] = {}
+    for source in narrowed.planned_sources:
+        role_counts[source.role] = role_counts.get(source.role, 0) + 1
+    # sk_broadband has 4 registered competitor_official sources (KT, LG유플러스,
+    # Netflix, Disney+) — a comparison question should be able to pull in more
+    # than the usual ceiling of 1.
+    assert role_counts.get("competitor_official", 0) > 1
+    assert role_counts.get("competitor_official", 0) <= 3
+
+
+def test_non_comparison_perspective_keeps_the_competitor_role_ceiling_at_one():
+    project_root = Path(__file__).resolve().parent.parent
+    registry_root = project_root / "sources" / "registry"
+
+    plan = plan_sources(
+        "req_test_source_planner",
+        "sk_broadband",
+        registry_root,
+        question_keywords=["OTT", "IPTV"],
+        perspective="market_landscape",
+    )
+    narrowed = select_top_sources(plan, perspective="market_landscape")
+
+    role_counts: dict[str | None, int] = {}
+    for source in narrowed.planned_sources:
+        role_counts[source.role] = role_counts.get(source.role, 0) + 1
+    assert role_counts.get("competitor_official", 0) <= 1
+
+
+def test_guaranteed_role_is_never_squeezed_to_zero_by_a_perspective_boost(tmp_path):
+    # Extreme synthetic case: many high-scoring competitor sources plus a
+    # perspective boost that raises their ceiling to 3 — without the
+    # guarantee, all 6 slots could go to competitor_official and official/
+    # search/market_analysis would vanish entirely even though each has a
+    # real registered source.
+    registry_root = tmp_path / "registry"
+    sector_dir = registry_root / "sk_broadband"
+    sector_dir.mkdir(parents=True)
+    sources = [
+        {
+            "name": f"경쟁사 {i}",
+            "url": f"https://competitor-{i}.example.com",
+            "role": "competitor_official",
+            "reliability_tier": "official",
+            "frequency": "daily",
+            "topics": ["경쟁", "비교"],
+        }
+        for i in range(6)
+    ] + [
+        {"name": "공식 뉴스룸", "url": "https://official.example.com", "role": "official", "frequency": "daily"},
+        {"name": "전문지", "url": "https://search.example.com", "role": "search", "frequency": "daily"},
+        {"name": "시장조사", "url": "https://market.example.com", "role": "market_analysis", "frequency": "daily"},
+    ]
+    (sector_dir / "sources.json").write_text(json.dumps({"sources": sources}), encoding="utf-8")
+
+    plan = plan_sources(
+        "req_test_source_planner",
+        "sk_broadband",
+        registry_root,
+        question_keywords=["경쟁", "비교"],
+        perspective="competitor_comparison",
+    )
+    narrowed = select_top_sources(plan, perspective="competitor_comparison")
+
+    roles_present = {source.role for source in narrowed.planned_sources}
+    assert {"official", "search", "market_analysis"} <= roles_present
+    assert len(narrowed.planned_sources) == 6
+
+
+def test_real_naver_common_source_always_survives_selection():
+    # 네이버 뉴스 is registered with planning_priority: "core" in
+    # sources/registry/common/sources.json specifically so it's never
+    # squeezed out by role quotas or perspective boosts, across every sector.
+    project_root = Path(__file__).resolve().parent.parent
+    registry_root = project_root / "sources" / "registry"
+
+    for sector_id, perspective in [
+        ("sk_broadband", "competitor_comparison"),
+        ("sk_hynix", "market_landscape"),
+        ("sk_telecom", "company_update"),
+        ("sk_planet", None),
+        ("sk_innovation", "regulatory_policy"),
+    ]:
+        plan = plan_sources(
+            "req_test_source_planner", sector_id, registry_root, question_keywords=["테스트"], perspective=perspective
+        )
+        narrowed = select_top_sources(plan, perspective=perspective)
+        assert "네이버 뉴스" in [source.name for source in narrowed.planned_sources], sector_id
+
+
 def test_core_common_source_is_guaranteed_a_top_six_slot(tmp_path):
     registry_root = tmp_path / "registry"
     sector_dir = registry_root / "sk_planet"

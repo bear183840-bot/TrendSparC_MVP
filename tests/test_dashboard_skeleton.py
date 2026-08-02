@@ -3,7 +3,7 @@ from core.layout_generator.generator import generate_layout
 from reporting.dashboard_streamlit.renderer import normalized_block_type
 
 
-def test_layout_generator_emits_design_neutral_auto_blocks():
+def test_layout_generator_emits_purpose_specific_semantic_blocks():
     plan = ReportPlan(
         request_id="req_dashboard",
         audience_id="executive",
@@ -28,7 +28,9 @@ def test_layout_generator_emits_design_neutral_auto_blocks():
     assert [block.section for block in layout.blocks] == [
         "executive_summary", "overview", "issue", "impact", "response_actions",
     ]
-    assert all(block.block_type == "auto" for block in layout.blocks)
+    assert [block.block_type for block in layout.blocks] == [
+        "text", "text", "matrix", "metrics", "list",
+    ]
     assert all(block.data is None and block.config == {} for block in layout.blocks)
     assert layout.blocks[0].block_id == "01_executive_summary"
 
