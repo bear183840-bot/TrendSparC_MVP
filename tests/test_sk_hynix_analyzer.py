@@ -28,6 +28,10 @@ def _make_response(
     business_impact="",
     risk="",
     opportunity="",
+    strength="",
+    weakness="",
+    metric_points=None,
+    comparison_points=None,
     recommended_actions=None,
     monitoring_indicators=None,
     evidence=None,
@@ -35,7 +39,7 @@ def _make_response(
     analysis_confidence="low",
 ):
     # Mirrors the real OpenAI Structured Outputs contract: _ANALYSIS_SCHEMA
-    # marks all 12 fields "required" with strict=True, so a real response
+    # marks all 16 fields "required" with strict=True, so a real response
     # always includes them — the test fixture must too, or _analyze_document's
     # data["field"] indexing raises KeyError before the test's actual
     # assertion is even reached.
@@ -49,6 +53,10 @@ def _make_response(
                 "business_impact": business_impact,
                 "risk": risk,
                 "opportunity": opportunity,
+                "strength": strength,
+                "weakness": weakness,
+                "metric_points": metric_points or [],
+                "comparison_points": comparison_points or [],
                 "recommended_actions": recommended_actions or [],
                 "monitoring_indicators": monitoring_indicators or [],
                 "evidence": evidence or [],

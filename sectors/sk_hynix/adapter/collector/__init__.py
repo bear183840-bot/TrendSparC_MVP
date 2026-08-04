@@ -35,6 +35,7 @@ from firecrawl.v2.types import ScrapeOptions
 
 from common.contracts import PlannedSource, SourceDocument, SourcePlan
 from common.errors import PipelineStageError
+from core.collection_progress import emit_collection_event
 from core.source_planner.query_strategy import build_search_queries, build_source_search_terms
 from sources.collectors.firecrawl_web import response_markdown
 
@@ -230,15 +231,22 @@ def collect(source_plan: SourcePlan) -> list[SourceDocument]:
     for index, source in enumerate(source_plan.planned_sources):
         if not source.url:
             continue
+        emit_collection_event(source.name, index + 1, total, "started")
         print(f"[{index + 1}/{total}] {source.name} 검색중...", file=sys.stderr)
         try:
             source_documents = _crawl_source(client, source, build_source_search_terms(source, source_plan.question_keywords))
             documents.extend(source_documents)
+            emit_collection_event(
+                source.name, index + 1, total, "completed", document_count=len(source_documents)
+            )
             print(f"[{index + 1}/{total}] {source.name} 완료 ({len(source_documents)}건)", file=sys.stderr)
         except PipelineStageError as exc:
             # One source failing (rate limit, network error, etc.) must not
             # discard whatever was already collected from the others — skip
             # it and keep going, regardless of how many sources are registered.
+            emit_collection_event(
+                source.name, index + 1, total, "failed", detail=exc.detail or exc.reason
+            )
             print(f"[{index + 1}/{total}] {source.name} 실패: {exc.reason}", file=sys.stderr)
         if len(documents) >= _MAX_COLLECTED_DOCUMENTS:
             break

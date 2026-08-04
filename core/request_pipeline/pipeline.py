@@ -25,7 +25,7 @@ import sys
 from pathlib import Path
 from typing import Optional
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from audience.adapter import adapt_for_audience
 from common.contracts import (
@@ -39,12 +39,14 @@ from common.contracts import (
     ReportPurposeClassification,
     SectorRoute,
     SourceDocument,
+    SourceCollectionEvent,
     SourcePlan,
     TrendSynthesis,
     UserRequest,
 )
 from common.errors import PipelineStageError, StageStatus, StageTrace
 from core.attachments.extractor import build_question_context, extract_attachments
+from core.collection_progress import bind_collection_events, reset_collection_events
 from core.entity.ai_based import extract_entities_ai
 from core.entity.search_terms import build_search_terms
 from core.layout_generator.generator import generate_layout
@@ -78,6 +80,7 @@ class PipelineResult(BaseModel):
     entities: Optional[EntityExtractionResult] = None
     sector_route: Optional[SectorRoute] = None
     source_plan: Optional[SourcePlan] = None
+    collection_events: list[SourceCollectionEvent] = Field(default_factory=list)
     report_purpose: Optional[ReportPurposeClassification] = None
     document_analyses: list[DocumentAnalysis] = []
     synthesis: Optional[TrendSynthesis] = None
@@ -256,7 +259,16 @@ def run_pipeline(
                 args = ([*documents, *attachment_documents], question_with_context)
             else:
                 args = (documents,)
-            output = _call_sector_adapter_stage(result.sector_route, role, *args)
+            if role == "collector":
+                collection_events: list[SourceCollectionEvent] = []
+                progress_token = bind_collection_events(collection_events)
+                try:
+                    output = _call_sector_adapter_stage(result.sector_route, role, *args)
+                finally:
+                    reset_collection_events(progress_token)
+                    result.collection_events.extend(collection_events)
+            else:
+                output = _call_sector_adapter_stage(result.sector_route, role, *args)
             if role == "analyzer":
                 document_by_id = {document.doc_id: document for document in [*documents, *attachment_documents]}
                 enriched_output = []

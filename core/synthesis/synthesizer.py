@@ -42,6 +42,10 @@ def synthesize(
     business_impacts: list[str] = []
     risks: list[str] = []
     opportunities: list[str] = []
+    strengths: list[str] = []
+    weaknesses: list[str] = []
+    metric_series: list = []
+    comparison_points: list = []
     recommended_actions: list[str] = []
     monitoring_indicators: list[str] = []
     evidence: list[str] = []
@@ -51,6 +55,8 @@ def synthesize(
         _append_text(highlights, "Business Impact", analysis.business_impact, analysis.doc_id)
         _append_text(highlights, "Risk", analysis.risk, analysis.doc_id)
         _append_text(highlights, "Opportunity", analysis.opportunity, analysis.doc_id)
+        _append_text(highlights, "Strength", analysis.strength, analysis.doc_id)
+        _append_text(highlights, "Weakness", analysis.weakness, analysis.doc_id)
         _append_items(highlights, "Action", analysis.recommended_actions, analysis.doc_id)
         _append_items(highlights, "Monitoring", analysis.monitoring_indicators, analysis.doc_id)
         key_points.extend(_tag(value, analysis.doc_id) for value in analysis.key_points if value)
@@ -60,6 +66,12 @@ def synthesize(
             risks.append(_tag(analysis.risk, analysis.doc_id))
         if analysis.opportunity:
             opportunities.append(_tag(analysis.opportunity, analysis.doc_id))
+        if analysis.strength:
+            strengths.append(_tag(analysis.strength, analysis.doc_id))
+        if analysis.weakness:
+            weaknesses.append(_tag(analysis.weakness, analysis.doc_id))
+        metric_series.extend(analysis.metric_points)
+        comparison_points.extend(analysis.comparison_points)
         recommended_actions.extend(_tag(value, analysis.doc_id) for value in analysis.recommended_actions if value)
         monitoring_indicators.extend(_tag(value, analysis.doc_id) for value in analysis.monitoring_indicators if value)
         evidence.extend(_tag(value, analysis.doc_id) for value in analysis.evidence if value)
@@ -78,6 +90,10 @@ def synthesize(
         business_impacts=business_impacts,
         risks=risks,
         opportunities=opportunities,
+        strengths=strengths,
+        weaknesses=weaknesses,
+        metric_series=metric_series,
+        comparison_points=comparison_points,
         recommended_actions=recommended_actions,
         monitoring_indicators=monitoring_indicators,
         evidence=evidence,

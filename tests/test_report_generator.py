@@ -1,4 +1,4 @@
-from common.contracts import DocumentAnalysis, ReportPurposeClassification
+from common.contracts import ComparisonPoint, DocumentAnalysis, MetricPoint, ReportPurposeClassification
 from core.report_generator.generator import generate_report
 from core.report_planner.planner import plan_report
 from core.synthesis.synthesizer import synthesize
@@ -72,6 +72,40 @@ def test_report_generator_creates_distinct_issue_impact_action_sections(monkeypa
     assert report.generation_mode == "rule_based"
     assert report.unique_source_count == 1
     assert any("고유 출처" in limitation for limitation in report.limitations)
+
+
+def test_fallback_report_carries_structured_fields_into_market_status_section():
+    analysis = DocumentAnalysis(
+        doc_id="attachment:brief",
+        summary="요약",
+        business_impact="운영 비용이 증가한다",
+        metric_points=[
+            MetricPoint(label="가입자", period="2019", value=519.0, unit="만 명"),
+            MetricPoint(label="가입자", period="2023", value=946.0, unit="만 명"),
+        ],
+        comparison_points=[
+            ComparisonPoint(entity="A사", criterion="가격", value="1만원", level="medium"),
+            ComparisonPoint(entity="B사", criterion="가격", value="9천원", level="low"),
+        ],
+    )
+    synthesis = synthesize("req_report", "general", [analysis])
+    purpose = ReportPurposeClassification(
+        request_id="req_report",
+        purpose_id="current_status",
+        display_name="현황 파악",
+        recommended_sections=["market_status"],
+    )
+    # "external" is the audience whose fixed report_structure actually includes
+    # market_status - see audience/profiles/external.md.
+    plan = plan_report(synthesis, "external", purpose)
+    assert "market_status" in plan.sections
+
+    report = generate_report("시장 현황이 어때?", synthesis, plan, "external")
+    market_section = next(section for section in report.sections if section.section_id == "market_status")
+
+    assert len(market_section.metric_points) == 2
+    assert {point.period for point in market_section.metric_points} == {"2019", "2023"}
+    assert len(market_section.comparison_points) == 2
 
 
 def test_report_planner_keeps_problem_and_root_cause_but_removes_audience_aliases():

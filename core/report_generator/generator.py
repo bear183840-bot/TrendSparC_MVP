@@ -42,6 +42,13 @@ _ACTION_SECTIONS = {
 _TRACEABLE_FIELDS = (
     "key_points", "evidence", "risks", "opportunities", "actions", "monitoring_indicators",
 )
+# Structured fields (metric_points/comparison_points) are excluded here — they're
+# lists of Pydantic objects, not "[doc_id=...]"-tagged strings, so they can't be
+# joined into summary text the way the fields below can.
+_TEXT_SUMMARY_FIELDS = (
+    "key_points", "evidence", "risks", "opportunities", "strengths",
+    "weaknesses", "actions", "monitoring_indicators",
+)
 
 _REPORT_SCHEMA = {
     "type": "object",
@@ -82,6 +89,12 @@ def _take(values: list[str], limit: int) -> list[str]:
     return list(dict.fromkeys(value for value in values if value))[:limit]
 
 
+def _take_raw(values: list, limit: int) -> list:
+    """Slice without dedup — for structured (non-hashable-friendly) items like
+    MetricPoint/ComparisonPoint, not plain strings."""
+    return list(values)[:limit]
+
+
 def _diversity_limitations(synthesis: TrendSynthesis) -> list[str]:
     if synthesis.source_count and synthesis.unique_source_count == 1:
         source_label = synthesis.source_ids[0] if synthesis.source_ids else "단일 출처"
@@ -105,6 +118,12 @@ def _repair_section(
     for field in _TRACEABLE_FIELDS:
         traced = [item for item in data[field] if "[doc_id=" in item]
         data[field] = traced or fallback_data[field]
+    # Structured facts (metric_points/comparison_points/strengths/weaknesses) are never
+    # requested from the OpenAI report writer (see _REPORT_SCHEMA) — always take them
+    # from the rule-based fallback, which copies them unmodified from synthesis. This
+    # keeps numbers/comparisons exactly as the analyzer extracted them, never rewritten.
+    for field in ("strengths", "weaknesses", "metric_points", "comparison_points"):
+        data[field] = fallback_data[field]
     if not data.get("confidence"):
         data["confidence"] = fallback.confidence
     return GeneratedReportSection.model_validate(data)
@@ -121,21 +140,27 @@ def _fallback_report(
     sections: list[GeneratedReportSection] = []
     for section_id in report_plan.sections:
         key_points = synthesis.key_points or synthesis.highlights
-        kwargs: dict[str, list[str]] = {}
+        kwargs: dict[str, list] = {}
         if section_id in {"issue", "problem", "root_cause", "risk"}:
             kwargs["risks"] = _take(synthesis.risks, limit)
+            kwargs["weaknesses"] = _take(synthesis.weaknesses, limit)
             kwargs["evidence"] = _take(synthesis.evidence, limit)
         elif section_id == "risk_and_opportunity":
             kwargs["risks"] = _take(synthesis.risks, limit)
             kwargs["opportunities"] = _take(synthesis.opportunities, limit)
+            kwargs["strengths"] = _take(synthesis.strengths, limit)
+            kwargs["weaknesses"] = _take(synthesis.weaknesses, limit)
             kwargs["evidence"] = _take(synthesis.evidence, limit)
         elif section_id in {"impact", "market_status", "current_situation"}:
             kwargs["key_points"] = _take(synthesis.business_impacts or key_points, limit)
+            kwargs["metric_points"] = _take_raw(synthesis.metric_series, limit)
+            kwargs["comparison_points"] = _take_raw(synthesis.comparison_points, limit)
             kwargs["evidence"] = _take(synthesis.evidence, limit)
         elif section_id in _ACTION_SECTIONS:
             kwargs["actions"] = _take(synthesis.recommended_actions, limit)
             kwargs["monitoring_indicators"] = _take(synthesis.monitoring_indicators, limit)
         elif section_id == "key_metrics":
+            kwargs["metric_points"] = _take_raw(synthesis.metric_series, limit)
             kwargs["monitoring_indicators"] = _take(synthesis.monitoring_indicators, limit)
             kwargs["evidence"] = _take(synthesis.evidence, limit)
         elif section_id == "timeline":
@@ -145,11 +170,14 @@ def _fallback_report(
             kwargs["evidence"] = _take(synthesis.evidence, limit)
         elif section_id in {"opportunity", "trend", "near_term_outlook", "investment_signal"}:
             kwargs["opportunities"] = _take(synthesis.opportunities, limit)
+            kwargs["metric_points"] = _take_raw(synthesis.metric_series, limit)
             kwargs["monitoring_indicators"] = _take(synthesis.monitoring_indicators, limit)
         else:
             kwargs["key_points"] = _take(key_points, limit)
             kwargs["evidence"] = _take(synthesis.evidence, limit)
-        summary_values = next((values for values in kwargs.values() if values), [])
+        summary_values = next(
+            (kwargs[field] for field in _TEXT_SUMMARY_FIELDS if kwargs.get(field)), []
+        )
         sections.append(
             GeneratedReportSection(
                 section_id=section_id,

@@ -195,6 +195,17 @@ class SourcePlan(BaseModel):
     notes: Optional[str] = None
 
 
+class SourceCollectionEvent(BaseModel):
+    """One observable source-collection step for UI progress and audit logs."""
+
+    source_name: str
+    source_index: int
+    source_total: int
+    status: Literal["started", "completed", "failed", "skipped"]
+    document_count: int = 0
+    detail: Optional[str] = None
+
+
 class SourceDocument(BaseModel):
     doc_id: str
     source_id: str
@@ -208,6 +219,27 @@ class SourceDocument(BaseModel):
     published_at: Optional[datetime] = None
     content: Optional[str] = None
     reliability_tier: Optional[str] = None
+
+
+class MetricPoint(BaseModel):
+    """One evidence-stated number tied to a time period (e.g. subscriber count in a given
+    year). Never estimated or interpolated — only populated when a document states it."""
+
+    label: str
+    period: str
+    value: float
+    unit: Optional[str] = None
+
+
+class ComparisonPoint(BaseModel):
+    """One evidence-stated fact comparing an entity against a shared criterion (e.g. a
+    competitor's price tier). `level` is only set when the document itself states an
+    explicit ranking — never inferred from tone or absence of information."""
+
+    entity: str
+    criterion: str
+    value: str
+    level: Optional[Literal["low", "medium", "high"]] = None
 
 
 class DocumentAnalysis(BaseModel):
@@ -224,6 +256,15 @@ class DocumentAnalysis(BaseModel):
     business_impact: Optional[str] = None
     risk: Optional[str] = None
     opportunity: Optional[str] = None
+    # The other half of a SWOT pair with risk/opportunity above — same
+    # optional-string, evidence-only convention.
+    strength: Optional[str] = None
+    weakness: Optional[str] = None
+    # Structured numeric/comparison facts, only when the document states them
+    # explicitly (see MetricPoint/ComparisonPoint docstrings) — empty list is
+    # the default and correct state for most documents.
+    metric_points: list[MetricPoint] = Field(default_factory=list)
+    comparison_points: list[ComparisonPoint] = Field(default_factory=list)
     recommended_actions: list[str] = Field(default_factory=list)
     monitoring_indicators: list[str] = Field(default_factory=list)
     evidence: list[str] = Field(default_factory=list)
@@ -247,6 +288,10 @@ class TrendSynthesis(BaseModel):
     business_impacts: list[str] = Field(default_factory=list)
     risks: list[str] = Field(default_factory=list)
     opportunities: list[str] = Field(default_factory=list)
+    strengths: list[str] = Field(default_factory=list)
+    weaknesses: list[str] = Field(default_factory=list)
+    metric_series: list[MetricPoint] = Field(default_factory=list)
+    comparison_points: list[ComparisonPoint] = Field(default_factory=list)
     recommended_actions: list[str] = Field(default_factory=list)
     monitoring_indicators: list[str] = Field(default_factory=list)
     evidence: list[str] = Field(default_factory=list)
@@ -280,6 +325,10 @@ class GeneratedReportSection(BaseModel):
     evidence: list[str] = Field(default_factory=list)
     risks: list[str] = Field(default_factory=list)
     opportunities: list[str] = Field(default_factory=list)
+    strengths: list[str] = Field(default_factory=list)
+    weaknesses: list[str] = Field(default_factory=list)
+    metric_points: list[MetricPoint] = Field(default_factory=list)
+    comparison_points: list[ComparisonPoint] = Field(default_factory=list)
     actions: list[str] = Field(default_factory=list)
     monitoring_indicators: list[str] = Field(default_factory=list)
     confidence: Optional[str] = None

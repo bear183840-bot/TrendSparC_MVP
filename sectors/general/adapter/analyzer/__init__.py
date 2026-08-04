@@ -10,6 +10,7 @@ from openai import OpenAI
 
 from common.contracts import DocumentAnalysis, SourceDocument
 from common.errors import PipelineStageError
+from sources.openai_retry import call_with_retry
 
 _API_KEY_ENV_VAR = "TRENDSPARC_GENERAL_ANALYZER_API_KEY"
 _MODEL_ENV_VAR = "TRENDSPARC_GENERAL_ANALYZER_MODEL"
@@ -28,6 +29,38 @@ _ANALYSIS_SCHEMA = {
         "business_impact": {"type": "string", "description": "Supported impact; empty when unsupported."},
         "risk": {"type": "string", "description": "Supported risk; empty when unsupported."},
         "opportunity": {"type": "string", "description": "Supported opportunity; empty when unsupported."},
+        "strength": {"type": "string", "description": "Supported strength/competitive edge; empty when unsupported."},
+        "weakness": {"type": "string", "description": "Supported weakness; empty when unsupported."},
+        "metric_points": {
+            "type": "array",
+            "description": "Only numeric value+period pairs explicitly stated in the document. Never estimate or calculate. Empty array when none.",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "label": {"type": "string"},
+                    "period": {"type": "string"},
+                    "value": {"type": "number"},
+                    "unit": {"type": "string"},
+                },
+                "required": ["label", "period", "value", "unit"],
+                "additionalProperties": False,
+            },
+        },
+        "comparison_points": {
+            "type": "array",
+            "description": "Only explicit comparisons stated in the document. `level` only when the document itself states a ranking, otherwise null. Empty array when none.",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "entity": {"type": "string"},
+                    "criterion": {"type": "string"},
+                    "value": {"type": "string"},
+                    "level": {"type": ["string", "null"], "enum": ["low", "medium", "high", None]},
+                },
+                "required": ["entity", "criterion", "value", "level"],
+                "additionalProperties": False,
+            },
+        },
         "recommended_actions": {"type": "array", "items": {"type": "string"}},
         "monitoring_indicators": {"type": "array", "items": {"type": "string"}},
         "evidence": {"type": "array", "items": {"type": "string"}},
@@ -39,7 +72,8 @@ _ANALYSIS_SCHEMA = {
     },
     "required": [
         "summary", "key_points", "sentiment", "relevant_to_question", "business_impact",
-        "risk", "opportunity", "recommended_actions", "monitoring_indicators", "evidence",
+        "risk", "opportunity", "strength", "weakness", "metric_points", "comparison_points",
+        "recommended_actions", "monitoring_indicators", "evidence",
         "action_level", "analysis_confidence",
     ],
 }
@@ -56,7 +90,7 @@ def _system_prompt() -> str:
 
 def _analyze(client: OpenAI, prompt: str, document: SourceDocument, question: str) -> DocumentAnalysis:
     try:
-        response = client.chat.completions.create(
+        response = call_with_retry(lambda: client.chat.completions.create(
             model=os.getenv(_MODEL_ENV_VAR, "gpt-4o-mini"),
             max_tokens=4096,
             messages=[
@@ -72,7 +106,14 @@ def _analyze(client: OpenAI, prompt: str, document: SourceDocument, question: st
                         "documents combine into one report. Mark it false only when the document is "
                         "genuinely off-topic (its actual subject differs from the question, not just "
                         "sharing a keyword). Use only this document, leave unsupported "
-                        "strategy fields empty, and write in the question's language."
+                        "strategy fields empty, and write in the question's language. Fill strength/weakness "
+                        "whenever the document supports them, same as risk/opportunity — do not skip them. "
+                        "Extract metric_points only for numbers explicitly tied to a stated period, and "
+                        "comparison_points only for explicit comparisons between named entities — never "
+                        "estimate or calculate a value the document doesn't state. Financial tables commonly "
+                        "show the same line item across several period columns side by side (e.g. 3Q25/3Q24/"
+                        "2Q25) — when you see that pattern, extract every period as its own metric_point with "
+                        "the same label, not just one."
                     ),
                 },
             ],
@@ -80,7 +121,7 @@ def _analyze(client: OpenAI, prompt: str, document: SourceDocument, question: st
                 "type": "json_schema",
                 "json_schema": {"name": "document_analysis", "schema": _ANALYSIS_SCHEMA, "strict": True},
             },
-        )
+        ))
         message = response.choices[0].message
         if message.refusal:
             raise ValueError(message.refusal)

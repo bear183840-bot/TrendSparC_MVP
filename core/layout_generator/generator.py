@@ -37,8 +37,56 @@ _SECTION_BLOCK_TYPES = {
 }
 
 
-def _block_type(section: str, content: dict) -> str:
-    """Choose a semantic UI slot without inventing chart data."""
+# When a section legitimately qualifies for more than one structured type
+# (e.g. it has both a 2+ point metric series AND a SWOT split), the audience
+# decides which one wins - see AudienceAdaptation.audience_id / the audience
+# priority table in the feature plan (external -> big picture, practitioner
+# -> detail, executive/management -> headline numbers).
+_AUDIENCE_TYPE_PRIORITY: dict[str, list[str]] = {
+    "external": ["matrix", "chart"],
+    "practitioner": ["table", "list"],
+    "executive": ["metrics", "list"],
+    "management": ["metrics", "chart"],
+}
+
+
+def _candidate_content_types(content: dict) -> list[str]:
+    """Which structured block_types this section's content actually supports.
+
+    Never invents a type the content doesn't back - a "chart" only qualifies
+    when 2+ distinct time periods are present, a "table" only when 2+ distinct
+    entities are being compared, and "matrix" (SWOT) only when at least two of
+    the four strength/weakness/risk/opportunity fields have real content.
+    """
+    candidates: list[str] = []
+    metric_points = content.get("metric_points") or []
+    periods = {point.get("period") for point in metric_points if isinstance(point, dict)}
+    if len(periods) >= 2:
+        candidates.append("chart")
+    comparison_points = content.get("comparison_points") or []
+    entities = {point.get("entity") for point in comparison_points if isinstance(point, dict)}
+    if len(entities) >= 2:
+        candidates.append("table")
+    swot_fields = ("strengths", "weaknesses", "risks", "opportunities")
+    if sum(1 for field in swot_fields if content.get(field)) >= 2:
+        candidates.append("matrix")
+    return candidates
+
+
+def _block_type(section: str, content: dict, audience_id: str | None = None) -> str:
+    """Choose a semantic UI slot from the section's actual structured content
+    first; only fall back to the static per-section table when nothing
+    structured exists. This deliberately inverts the old precedence (section
+    name first) so a section never gets stuck as a text list just because its
+    name isn't in the static table, and never gets a chart/table it has no
+    real data to back."""
+    candidates = _candidate_content_types(content)
+    if len(candidates) > 1 and audience_id:
+        for preferred in _AUDIENCE_TYPE_PRIORITY.get(audience_id, []):
+            if preferred in candidates:
+                return preferred
+    if candidates:
+        return candidates[0]
     if section in _SECTION_BLOCK_TYPES:
         return _SECTION_BLOCK_TYPES[section]
     if content.get("actions"):
@@ -64,7 +112,7 @@ def generate_layout(report_plan: ReportPlan, adaptation: AudienceAdaptation) -> 
                 block_id=f"{index + 1:02d}_{section}",
                 section=section,
                 title=_block_title(section, content),
-                block_type=_block_type(section, content),
+                block_type=_block_type(section, content, report_plan.audience_id),
                 content=content,
             )
         )

@@ -9,6 +9,7 @@ chart from non-chart data.
 from __future__ import annotations
 
 from collections.abc import Callable
+from html import escape
 from typing import Any
 
 try:
@@ -17,6 +18,7 @@ except ModuleNotFoundError:  # contract/unit tests can run without the optional 
     st = None  # type: ignore[assignment]
 
 from common.contracts import DashboardBlock, DynamicLayout
+from reporting.dashboard_streamlit.components import clean_citation
 
 BlockRenderer = Callable[[DashboardBlock], None]
 
@@ -114,6 +116,12 @@ def _render_auto(block: DashboardBlock) -> None:
         _render_scalar_or_collection("data", block.data)
 
 
+def _bullet_list_html(values: list[Any]) -> str:
+    if not values:
+        return '<p class="ts-empty">표시할 항목이 없습니다.</p>'
+    return "<ul>" + "".join(f"<li>{escape(clean_citation(str(value)))}</li>" for value in values) + "</ul>"
+
+
 def _render_text(block: DashboardBlock) -> None:
     payload = _payload(block)
     if not isinstance(payload, dict):
@@ -121,21 +129,23 @@ def _render_text(block: DashboardBlock) -> None:
         return
     summary = payload.get("summary")
     if summary:
-        st.markdown(f"### {summary}")
+        st.markdown(f"### {escape(clean_citation(str(summary)))}")
     highlights = payload.get("key_points") or payload.get("highlights") or []
-    for item in highlights:
-        st.write(f"- {item}")
+    st.markdown(_bullet_list_html(highlights), unsafe_allow_html=True)
     source_count = payload.get("source_count")
     unique_source_count = payload.get("unique_source_count")
     if source_count is not None or unique_source_count is not None:
-        left, right = st.columns(2)
-        left.metric("분석 문서", source_count or 0)
-        right.metric("고유 출처", unique_source_count or 0)
+        st.markdown(
+            '<div class="ts-metric-groups">'
+            f'<div class="ts-stat"><small>분석 문서</small><b>{source_count or 0}</b></div>'
+            f'<div class="ts-stat"><small>고유 출처</small><b>{unique_source_count or 0}</b></div>'
+            "</div>",
+            unsafe_allow_html=True,
+        )
     limitations = payload.get("limitations") or []
     if limitations:
         with st.expander("분석 한계"):
-            for item in limitations:
-                st.write(f"- {item}")
+            st.markdown(_bullet_list_html(limitations), unsafe_allow_html=True)
 
 
 def _render_list(block: DashboardBlock) -> None:
@@ -148,8 +158,12 @@ def _render_list(block: DashboardBlock) -> None:
         values = []
     if not values:
         st.caption("표시할 실행 항목이 없습니다.")
-    for index, value in enumerate(values, 1):
-        st.markdown(f"**{index}.** {value}")
+        return
+    rows = "".join(
+        f'<li><span class="ts-item-index">{index:02d}</span><span>{escape(clean_citation(str(value)))}</span></li>'
+        for index, value in enumerate(values, 1)
+    )
+    st.markdown(f'<ol class="ts-compact-list">{rows}</ol>', unsafe_allow_html=True)
 
 
 def _render_metric(block: DashboardBlock) -> None:
@@ -166,6 +180,23 @@ def _render_metric(block: DashboardBlock) -> None:
 
 def _render_table(block: DashboardBlock) -> None:
     payload = _payload(block)
+    if isinstance(payload, list) and payload and all(isinstance(row, dict) for row in payload):
+        columns: list[str] = []
+        for row in payload:
+            for key in row:
+                if key not in columns:
+                    columns.append(key)
+        head = "".join(f"<th>{escape(str(column))}</th>" for column in columns)
+        body = "".join(
+            "<tr>" + "".join(f"<td>{escape(clean_citation(str(row.get(column, ''))))}</td>" for column in columns) + "</tr>"
+            for row in payload
+        )
+        st.markdown(
+            f'<div class="ts-table-wrap"><table class="ts-table"><thead><tr>{head}</tr></thead>'
+            f"<tbody>{body}</tbody></table></div>",
+            unsafe_allow_html=True,
+        )
+        return
     st.dataframe(payload, use_container_width=True)
 
 
@@ -193,28 +224,30 @@ def _render_metrics(block: DashboardBlock) -> None:
     if not visible:
         st.caption("확인된 지표가 없습니다.")
         return
-    columns = st.columns(len(visible))
-    for column, (label, values) in zip(columns, visible):
-        with column:
-            st.caption(label)
-            st.metric("확인 신호", len(values))
-            for value in values[:3]:
-                st.write(f"- {value}")
+    cards = "".join(
+        f'<div class="ts-stat"><small>{escape(label)}</small><b>{len(values)}건</b>'
+        f'<ul>{"".join(f"<li>{escape(clean_citation(str(value)))}</li>" for value in values[:3])}</ul></div>'
+        for label, values in visible
+    )
+    st.markdown(f'<div class="ts-metric-groups">{cards}</div>', unsafe_allow_html=True)
 
 
 def _render_matrix(block: DashboardBlock) -> None:
     payload = _payload(block)
     risks = _content_values(payload, "risks")
     opportunities = _content_values(payload, "opportunities")
-    left, right = st.columns(2)
-    with left:
-        st.markdown("**주요 위험**")
-        for value in risks or ["확인된 위험 신호가 없습니다."]:
-            st.write(f"- {value}")
-    with right:
-        st.markdown("**기회 신호**")
-        for value in opportunities or ["확인된 기회 신호가 없습니다."]:
-            st.write(f"- {value}")
+
+    def cell(label: str, values: list[Any], empty: str) -> str:
+        body = "".join(f"<li>{escape(clean_citation(str(value)))}</li>" for value in values) or f"<li class='ts-empty'>{escape(empty)}</li>"
+        return f'<div class="ts-duo-cell"><h4>{escape(label)}</h4><ul>{body}</ul></div>'
+
+    markup = (
+        '<div class="ts-duo">'
+        + cell("주요 위험", risks, "확인된 위험 신호가 없습니다.")
+        + cell("기회 신호", opportunities, "확인된 기회 신호가 없습니다.")
+        + "</div>"
+    )
+    st.markdown(markup, unsafe_allow_html=True)
 
 
 def _render_graph(block: DashboardBlock) -> None:
@@ -229,33 +262,53 @@ def _render_graph(block: DashboardBlock) -> None:
     for column, (label, values) in zip(columns, stages):
         with column:
             st.caption(label)
-            for value in values[:3] or ["근거 확인 필요"]:
-                st.write(value)
+            body = "".join(f"<li>{escape(clean_citation(str(value)))}</li>" for value in values[:3])
+            st.markdown(f"<ul>{body}</ul>" if body else '<p class="ts-empty">근거 확인 필요</p>', unsafe_allow_html=True)
 
 
 def _render_chart(block: DashboardBlock) -> None:
     payload = _payload(block)
-    if block.data is not None:
-        st.dataframe(block.data, use_container_width=True)
+    if isinstance(block.data, dict) and isinstance(block.data.get("rows"), list) and block.data["rows"]:
+        try:
+            import pandas as pd
+
+            x_key = block.config.get("x")
+            y_key = block.config.get("y")
+            frame = pd.DataFrame(block.data["rows"])
+            if x_key in frame.columns and y_key in frame.columns:
+                st.area_chart(frame.set_index(x_key)[[y_key]])
+                return
+        except Exception:
+            pass
+        st.dataframe(block.data["rows"], use_container_width=True)
         return
     signals = _content_values(payload, "opportunities", "key_points", "monitoring_indicators")
     st.caption("수치·시계열 근거가 없어 차트 대신 확인된 신호를 표시합니다.")
-    for value in signals:
-        st.write(f"- {value}")
+    st.markdown(_bullet_list_html(signals), unsafe_allow_html=True)
 
 
 def _render_timeline(block: DashboardBlock) -> None:
     values = _content_values(_payload(block), "monitoring_indicators", "opportunities", "key_points")
-    for index, value in enumerate(values, 1):
-        st.markdown(f"**{index:02d}**　{value}")
+    if not values:
+        st.caption("근거에서 확인된 일정이나 모니터링 시점이 없습니다.")
+        return
+    markup = '<div class="ts-timeline">' + "".join(
+        f'<div class="ts-timeline-step"><b>{index:02d}</b>{escape(clean_citation(str(value)))}</div>'
+        for index, value in enumerate(values, 1)
+    ) + "</div>"
+    st.markdown(markup, unsafe_allow_html=True)
 
 
 def _render_evidence(block: DashboardBlock) -> None:
     values = _content_values(_payload(block), "evidence")
-    for value in values:
-        st.write(f"↗ {value}")
     if not values:
         st.caption("연결된 근거가 없습니다.")
+        return
+    rows = "".join(
+        f'<li><span class="ts-item-index">↗</span><span>{escape(clean_citation(str(value)))}</span></li>'
+        for value in values
+    )
+    st.markdown(f'<ol class="ts-compact-list">{rows}</ol>', unsafe_allow_html=True)
 
 
 def _render_unassigned_visual(block: DashboardBlock) -> None:
