@@ -9,12 +9,13 @@ TrendSparC는 질문과 첨부자료를 실제 공개 소스와 함께 수집·�
   → 첨부 본문 추출(PDF/DOCX/TXT 계열)
   → Entity Extractor
   → Sector Router (신호 없음: general)
-  → Report Purpose Classifier
+  → Report Purpose Classifier (복합 목적 질문은 secondary_purpose_id도 함께 감지)
   → plan_sources() / select_top_sources() (Top 6)
-  → Collector (Firecrawl, 소스당 최대 1~2건)
+  → Collector (섹터별 Firecrawl 검색, sk_broadband는 옵션으로 OpenAI 웹검색 하니스)
   → Processor / Validator
   → Document Analyzer (웹 문서와 첨부문서를 동일한 분석 입력으로 처리)
-  → Synthesis
+    ↳ 검증/분석 결과가 섹터 최소 기준에 못 미치면 제외 URL을 갱신해 bounded 재수집
+  → Synthesis (문서 종합 + 근거 텍스트에서 매출/순이익 등 수치 구조화 추출)
   → Report Planner
   → Report Generator
   → Audience Adapter
@@ -24,6 +25,8 @@ TrendSparC는 질문과 첨부자료를 실제 공개 소스와 함께 수집·�
 
 Report Generator는 `summary`, `key_points`, `business_impact`, `risk`, `opportunity`, `evidence`, `recommended_actions`, `monitoring_indicators`, `confidence`를 모두 입력으로 받아 Executive Summary와 목적별 섹션을 완성된 JSON으로 작성합니다. API 키가 없거나 호출이 실패하면 근거 필드를 보존하는 규칙 기반 보고서로 내려가며, 근거가 없는 내용은 만들지 않습니다.
 
+`common/content_quality_validator.py`는 섹터·목적·질문에 종속되지 않는 콘텐츠 정합성 규칙(KPI 관련성 정렬, 지표 모양별 chart/bar/kpi 분기, 비교표 공통축 필터, 섹션 간 중복 제거, 복합 목적 감지, 텍스트 내 수치 구조화 추출)을 한 곳에 모아두고 렌더링·Report Generator·Report Purpose Classifier가 공통으로 가져다 씁니다.
+
 ## 섹터와 소스 현황
 
 모든 등록 섹터의 Collector / Processor / Validator / Analyzer가 구현되어 있으며 `profile.json.status`는 `active`입니다. 아래 숫자는 섹터 전용 소스 수입니다. 실행 시 `planning_priority: core`로 등록된 공통 네이버 뉴스가 Top 6 핵심 소스로 포함됩니다.
@@ -31,7 +34,7 @@ Report Generator는 `summary`, `key_points`, `business_impact`, `risk`, `opportu
 | Sector | 상태 | 전용 Source | 범위 |
 |---|---|---:|---|
 | `sk_hynix` | active | 14 | 메모리·HBM·반도체 시장 |
-| `sk_broadband` | active | 12 | IPTV·OTT·미디어·네트워크 |
+| `sk_broadband` | active | 12 | IPTV·OTT·미디어·네트워크 (옵션: 질문 단위 OpenAI 웹검색 하니스 + 영화진흥위원회 KOFIC PDF 수집) |
 | `sk_planet` | active | 16 | 포인트·데이터마케팅·Ad-Tech·Web3 |
 | `sk_telecom` | active | 13 | 이동통신·AI·데이터센터·6G |
 | `sk_innovation` | active | 12 | 배터리·정유·에너지·친환경 |
@@ -82,7 +85,7 @@ streamlit run reporting/dashboard_streamlit/app.py
 - `DashboardBlock`
 - `DynamicLayout`
 
-대시보드 UI는 최종 디자인을 가정하지 않는 블록형 뼈대만 구현되어 있습니다. 블록 계약과 향후 시안 연결 방법은 [대시보드 구현 뼈대](docs/dashboard_implementation_skeleton_ko.md)를 참고합니다.
+대시보드 UI(`streamlit run reporting/dashboard_streamlit/app.py`)는 KPI 카드, 지표 차트/막대, 비교 테이블, SWOT, 액션 리스트, 출처 패널까지 실제로 렌더링합니다. 블록 타입은 `reporting/dashboard_streamlit/blocks/`의 레지스트리 방식으로 등록되어 있어 core 코드 수정 없이 새 시각화를 추가할 수 있습니다. 실행 중에는 수집 진행 상황이 화면에 실시간으로 표시되고, 콘솔에 찍히는 원본 로그도 실행 기록 패널에서 그대로 다운로드할 수 있습니다. 블록 계약 배경은 [대시보드 구현 뼈대](docs/dashboard_implementation_skeleton_ko.md)를 참고합니다.
 
 ## 테스트
 

@@ -14,7 +14,7 @@ import sys
 import threading
 from datetime import datetime
 from queue import Queue
-from urllib.parse import urljoin, urlparse
+from urllib.parse import parse_qs, urljoin, urlparse
 
 import requests
 from firecrawl import Firecrawl
@@ -62,7 +62,20 @@ _MIN_REQUIRED_SOURCE_DOCUMENTS = 2
 # through, so the collector never hands the validator/analyzer an unbounded
 # document set.
 _MAX_COLLECTED_DOCUMENTS = 12
-_KOFIC_DETAIL_PATTERN = re.compile(r"selectBoardDetail\.do\?[^\"'<>\s]+", re.IGNORECASE)
+# Live-verified against kofic.or.kr (2026-08-06): the listing page's static
+# HTML never contains a real, directly-usable detail-page URL. The only
+# literal "selectBoardDetail.do?..." substring on the page is a JS template
+# fragment inside the fn_detailPage() function *definition*
+# ("selectBoardDetail.do?boardNumber=2", missing boardSeqNumber entirely) -
+# matching that (the old behavior) produces a URL the server 420s on. The
+# real per-post id only exists in each row's own onclick handler -
+# fn_goDetailPage(<boardSeqNumber>, boardType, isPublic) on the title link,
+# or equivalently fn_zipFileDownload('<boardNumber>','<boardSeqNumber>','1')
+# on the download icon - never as a plain href.
+_KOFIC_BOARD_SEQ_PATTERN = re.compile(
+    r"fn_goDetailPage\(\s*(?P<seq_a>\d+)|fn_zipFileDownload\(\s*'[^']*'\s*,\s*'(?P<seq_b>\d+)'",
+    re.IGNORECASE,
+)
 
 
 def _doc_id(source: PlannedSource, url: str, suffix: str = "") -> str:
@@ -207,6 +220,32 @@ def _normalize_kofic_detail_url(raw_url: str, base_url: str) -> str:
     return urljoin(base_url, raw_url.replace("&amp;", "&").strip())
 
 
+def _extract_kofic_board_seq_numbers(html_or_markdown: str) -> list[str]:
+    """Real per-post ids from a KOFIC listing page's onclick handlers (see
+    _KOFIC_BOARD_SEQ_PATTERN) - deduped, page order preserved."""
+    seq_numbers: list[str] = []
+    for match in _KOFIC_BOARD_SEQ_PATTERN.finditer(html_or_markdown):
+        seq = match.group("seq_a") or match.group("seq_b")
+        if seq:
+            seq_numbers.append(seq)
+    return list(dict.fromkeys(seq_numbers))
+
+
+def _build_kofic_detail_url(source_url: str, board_seq_number: str) -> str | None:
+    """The registered source.url is the *listing* page
+    (.../selectBoardList.do?boardNumber=<N>) - boardNumber identifies which
+    board/category (e.g. "2" = 보도자료), taken from there rather than
+    hardcoded, so this stays correct if the registry ever points at a
+    different KOFIC board. boardSeqNumber is the specific post, only ever
+    discoverable via _extract_kofic_board_seq_numbers."""
+    parsed = urlparse(source_url)
+    board_number = parse_qs(parsed.query).get("boardNumber", [None])[0]
+    if not board_number:
+        return None
+    detail_path = parsed.path.replace("selectBoardList.do", "selectBoardDetail.do")
+    return f"{parsed.scheme}://{parsed.netloc}{detail_path}?boardNumber={board_number}&boardSeqNumber={board_seq_number}"
+
+
 def _discover_kofic_detail_urls_from_search(client: Firecrawl, source: PlannedSource, keywords: list[str]) -> list[str]:
     if not source.url or not keywords:
         return []
@@ -219,11 +258,13 @@ def _discover_kofic_detail_urls_from_search(client: Firecrawl, source: PlannedSo
     urls: list[str] = []
     for item in payload:
         candidate = _item_url(item)
-        if candidate and "selectBoardDetail.do" in candidate:
+        if candidate and "selectBoardDetail.do" in candidate and "boardSeqNumber=" in candidate:
             urls.append(_normalize_kofic_detail_url(candidate, source.url))
         markdown = getattr(item, "markdown", None) or ""
-        for match in _KOFIC_DETAIL_PATTERN.findall(markdown):
-            urls.append(_normalize_kofic_detail_url(match, source.url))
+        for seq in _extract_kofic_board_seq_numbers(markdown):
+            built = _build_kofic_detail_url(source.url, seq)
+            if built:
+                urls.append(built)
     return list(dict.fromkeys(urls))[:_MAX_RESULTS_PER_SOURCE]
 
 
@@ -236,7 +277,11 @@ def _discover_kofic_detail_urls_from_listing(source: PlannedSource) -> list[str]
         response.encoding = response.encoding or "utf-8"
     except Exception:  # noqa: BLE001
         return []
-    urls = [_normalize_kofic_detail_url(match, source.url) for match in _KOFIC_DETAIL_PATTERN.findall(response.text)]
+    urls = [
+        built
+        for seq in _extract_kofic_board_seq_numbers(response.text)
+        if (built := _build_kofic_detail_url(source.url, seq)) is not None
+    ]
     return list(dict.fromkeys(urls))[:_MAX_RESULTS_PER_SOURCE]
 
 
@@ -244,6 +289,18 @@ def _crawl_kofic_pdf_source(client: Firecrawl, source: PlannedSource, api_key: s
     detail_urls = _discover_kofic_detail_urls_from_search(client, source, keywords)
     if not detail_urls:
         detail_urls = _discover_kofic_detail_urls_from_listing(source)
+    if not detail_urls:
+        # Never a silent "0건" - distinguish "genuinely nothing new posted"
+        # from "discovery itself found no candidate post ids", visible in
+        # both the terminal log and (via the caller's emit_collection_event)
+        # the in-app 실행 기록 panel, so a recurring failure here doesn't
+        # quietly look identical to a normal empty result.
+        print(
+            f"[KOFIC] no post ids discovered for '{source.name}' from search results or the "
+            "listing page - either the site's markup changed again or there's genuinely nothing "
+            "new; see _extract_kofic_board_seq_numbers",
+            file=sys.stderr,
+        )
     documents: list[SourceDocument] = []
     for detail_url in detail_urls[:_MAX_RESULTS_PER_SOURCE]:
         try:
@@ -298,6 +355,11 @@ def _run_question_ai_harness(
                 model=model,
                 target_docs=_QUESTION_HARNESS_MAX_DOCS,
                 assess_scraped_evidence=True,
+                # One extra round beyond the default 3, specifically to give
+                # a gap-driven follow-up query (see run loop's next_queries)
+                # a real shot at covering an information need the first few
+                # rounds missed, before we accept a partial result below.
+                max_rounds=4,
             ),
             search_context=search_context,
         )
@@ -347,7 +409,7 @@ def _collect_with_question_harness(
             _QUESTION_SEARCH_EVENT_NAME,
             1,
             total,
-            "completed" if search_result.sufficient else "failed",
+            "completed" if len(search_result.documents) >= _MIN_REQUIRED_SOURCE_DOCUMENTS else "failed",
             document_count=len(search_result.documents),
             detail=detail,
         )
@@ -372,23 +434,34 @@ def _collect_with_question_harness(
             detail = exc.detail or exc.reason if isinstance(exc, PipelineStageError) else str(exc)
             emit_collection_event(source.name, index, total, "failed", detail=detail)
             print(f"[{index}/{total}] {source.name} 실패: {detail}", file=sys.stderr)
-    if (
-        search_result is None
-        or not search_result.sufficient
-        or len(search_result.documents) < _MIN_REQUIRED_SOURCE_DOCUMENTS
-    ):
-        missing = search_result.missing_information_needs if search_result else []
+    # Not all-or-nothing: a real, corroborated core of evidence (>= 2
+    # documents from >= 2 independent sources) is required, but the harness
+    # is not required to have covered every single information_need before
+    # we proceed - a need it genuinely couldn't find evidence for after its
+    # full round budget is left empty and surfaced honestly as a report
+    # limitation downstream (see pipeline.py's report_generator call),
+    # rather than fabricated or used to block the whole report.
+    #
+    # This must count the *combined* `documents` list (harness + KOFIC/other
+    # special sources), not just search_result.documents - otherwise a
+    # question that the harness alone couldn't fully cover gets rejected
+    # even when a special source (e.g. KOFIC) already supplied real,
+    # independent corroborating evidence.
+    independent_sources = {document.source_id for document in documents}
+    if len(documents) < _MIN_REQUIRED_SOURCE_DOCUMENTS or len(independent_sources) < _MIN_REQUIRED_SOURCE_DOCUMENTS:
         raise PipelineStageError(
             stage=_STAGE,
             reason=(
                 "insufficient relevant evidence after bounded collection "
-                f"(documents={len(search_result.documents) if search_result else 0}, "
-                f"missing={missing})"
+                f"(documents={len(documents)}, independent_sources={len(independent_sources)})"
             ),
-            detail=(
-                "At least two question-relevant documents from independent sources "
-                "and coverage of every required information need are required."
-            ),
+            detail="At least two question-relevant documents from independent sources are required.",
+        )
+    if search_result and search_result.missing_information_needs:
+        print(
+            f"[{_STAGE}] proceeding with partial coverage - no grounded evidence found for: "
+            f"{search_result.missing_information_needs}",
+            file=sys.stderr,
         )
     return documents[:_MAX_COLLECTED_DOCUMENTS]
 

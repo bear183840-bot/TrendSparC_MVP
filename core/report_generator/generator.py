@@ -8,10 +8,10 @@ import re
 from copy import deepcopy
 
 from audience.contracts import load_audience_profile
+from common.content_quality_validator import dated_items, dedupe_structured_across_sections
 from common.contracts import GeneratedReport, GeneratedReportSection, ReportPlan, TrendSynthesis
 
 _DOC_ID_RE = re.compile(r"\[doc_id=([^\]]+)\]")
-_TIMELINE_DATE_RE = re.compile(r"(20\d{2}\s*년(?:\s*\d{1,2}\s*월)?|[1-4]\s*분기|\d{1,2}\s*월\s*\d{1,2}\s*일)")
 
 _SECTION_TITLES = {
     "overview": "Executive Overview",
@@ -109,7 +109,7 @@ def _timeline_key_points(synthesis: TrendSynthesis, limit: int) -> list[str]:
     copies overview's key_points (that just duplicated Overview verbatim). If
     neither source yields a real point in time, returns [] so the timeline
     block's own empty-state ("근거에서 확인된 일정이 없습니다") shows honestly."""
-    dated_evidence = [item for item in synthesis.evidence if item and _TIMELINE_DATE_RE.search(item)]
+    dated_evidence = dated_items(synthesis.evidence)
     metric_labels = [
         f"{point.period} — {point.label}: {point.value}{point.unit}"
         for point in synthesis.metric_series
@@ -185,15 +185,31 @@ def _repair_section(
     return GeneratedReportSection.model_validate(data)
 
 
+def _missing_needs_limitation(missing_information_needs: list[str] | None) -> list[str]:
+    """Honest '확인 안 됨' disclosure for information needs the collector
+    genuinely couldn't find grounded evidence for, after its full search
+    budget - never fabricated, never silently dropped, never allowed to
+    block the rest of the report (see sk_broadband's collector, which now
+    accepts a partial result instead of all-or-nothing)."""
+    if not missing_information_needs:
+        return []
+    return [
+        "다음 정보는 근거를 확인하지 못해 반영하지 못했습니다 (확인 안 됨): "
+        + ", ".join(missing_information_needs)
+    ]
+
+
 def _fallback_report(
     synthesis: TrendSynthesis,
     report_plan: ReportPlan,
     audience_id: str,
     limitation: str | None = None,
+    missing_information_needs: list[str] | None = None,
 ) -> GeneratedReport:
     profile = load_audience_profile(audience_id)
     limit = {"highlight_only": 2, "condensed": 3, "summary": 4}.get(profile.detail_level, 6)
-    sections: list[GeneratedReportSection] = []
+    section_ids: list[str] = []
+    kwargs_list: list[dict[str, list]] = []
     for section_id in report_plan.sections:
         key_points = synthesis.key_points or synthesis.highlights
         kwargs: dict[str, list] = {}
@@ -231,6 +247,28 @@ def _fallback_report(
         else:
             kwargs["key_points"] = _take(key_points, limit)
             kwargs["evidence"] = _take(synthesis.evidence, limit)
+        section_ids.append(section_id)
+        kwargs_list.append(kwargs)
+
+    # Single ownership: the same evidence-stated metric/comparison shouldn't
+    # get mechanically copied into every section whose branch above happens
+    # to request "metric_points"/"comparison_points" from the same synthesis
+    # list - keep it only in the first (i.e. earliest in report_plan.sections
+    # order) section that asked for it.
+    deduped_metric_points = dedupe_structured_across_sections(
+        [kwargs.get("metric_points", []) for kwargs in kwargs_list]
+    )
+    deduped_comparison_points = dedupe_structured_across_sections(
+        [kwargs.get("comparison_points", []) for kwargs in kwargs_list]
+    )
+    for kwargs, metric_points, comparison_points in zip(kwargs_list, deduped_metric_points, deduped_comparison_points):
+        if "metric_points" in kwargs:
+            kwargs["metric_points"] = metric_points
+        if "comparison_points" in kwargs:
+            kwargs["comparison_points"] = comparison_points
+
+    sections: list[GeneratedReportSection] = []
+    for section_id, kwargs in zip(section_ids, kwargs_list):
         summary_values = next(
             (kwargs[field] for field in _TEXT_SUMMARY_FIELDS if kwargs.get(field)), []
         )
@@ -246,6 +284,7 @@ def _fallback_report(
     limitations = _diversity_limitations(synthesis)
     if synthesis.source_count == 0:
         limitations.append("분석에 사용할 수집 문서가 없어 결론을 확정할 수 없습니다.")
+    limitations.extend(_missing_needs_limitation(missing_information_needs))
     if limitation:
         limitations.append(limitation)
     purpose_id = report_plan.report_purpose.purpose_id if report_plan.report_purpose else report_plan.primary_intent
@@ -270,11 +309,12 @@ def generate_report(
     report_plan: ReportPlan,
     audience_id: str,
     canonical_entities: list[str] | None = None,
+    missing_information_needs: list[str] | None = None,
 ) -> GeneratedReport:
     """Use structured output when configured; otherwise create an evidence-safe report."""
     api_key = os.getenv("TRENDSPARC_REPORT_GENERATOR_API_KEY") or os.getenv("OPENAI_API_KEY")
     if not api_key or synthesis.source_count == 0:
-        return _fallback_report(synthesis, report_plan, audience_id)
+        return _fallback_report(synthesis, report_plan, audience_id, missing_information_needs=missing_information_needs)
 
     try:
         from openai import OpenAI
@@ -363,7 +403,15 @@ def generate_report(
             for section_id in report_plan.sections
         ]
         sections = _ensure_all_actions_reachable(sections, synthesis)
-        limitations = list(dict.fromkeys([*parsed["limitations"], *_diversity_limitations(synthesis)]))
+        limitations = list(
+            dict.fromkeys(
+                [
+                    *parsed["limitations"],
+                    *_diversity_limitations(synthesis),
+                    *_missing_needs_limitation(missing_information_needs),
+                ]
+            )
+        )
         if missing:
             limitations.append(
                 "OpenAI가 누락한 섹션을 수집 근거 기반 규칙 결과로 보완했습니다: " + ", ".join(missing)
@@ -390,4 +438,5 @@ def generate_report(
                 "OpenAI 보고서 생성에 실패해 규칙 기반 결과를 사용했습니다: "
                 f"{type(exc).__name__}: {str(exc)[:240]}"
             ),
+            missing_information_needs=missing_information_needs,
         )

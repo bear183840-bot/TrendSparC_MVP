@@ -52,6 +52,12 @@ _SYSTEM_PROMPT = (
     "analysis. Treat suggested terms as hints, not a query that must be "
     "copied verbatim. Only report URLs actually retrieved "
     "through the tool — never fabricate a URL, title, or date.\n"
+    "When search_context.company_name is present, that is the specific "
+    "company/organization this question is about — resolve any generic "
+    "self-reference in the question (\"우리회사\", \"our company\", \"we\", "
+    "\"the company\") to that name and include it (or an unambiguous synonym) "
+    "in every search query, this round and every later round. Never search "
+    "generically once company_name is given.\n"
     "Use the supplied as_of_date and the question's requested time range. "
     "For current-status questions prefer the newest reliable evidence, while "
     "keeping older material only when it is necessary historical context.\n"
@@ -126,7 +132,16 @@ def _initial_query(
     search_context: WebSearchContext | None = None,
 ) -> str | None:
     if search_context and search_context.question.strip():
-        return search_context.question.strip()
+        question = search_context.question.strip()
+        company_name = (search_context.company_name or "").strip()
+        # Defense in depth alongside the system-prompt instruction: a vague
+        # self-reference ("우리회사"/"our company") in the raw question text
+        # shouldn't rely solely on the model reading company_name out of the
+        # structured payload every round - anchor round 1's literal query
+        # string to the company explicitly whenever it isn't already there.
+        if company_name and company_name not in question:
+            return f"{company_name} {question}"
+        return question
     terms = (
         build_source_search_terms(source, question_keywords)
         if source is not None

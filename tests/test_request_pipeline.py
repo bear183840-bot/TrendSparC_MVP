@@ -114,6 +114,39 @@ def test_analyzer_documents_flagged_irrelevant_are_dropped_before_synthesis(monk
     assert [analysis.doc_id for analysis in result.document_analyses] == ["d1"]
 
 
+def test_progress_sink_is_the_same_object_as_result_collection_events_and_receives_live_events(monkeypatch):
+    from core.collection_progress import emit_collection_event
+
+    def fake_collect(source_plan):
+        emit_collection_event("소스 A", 1, 1, "started")
+        emit_collection_event("소스 A", 1, 1, "completed", document_count=1)
+        return [SourceDocument(doc_id="d1", source_id="소스 A", title="t1", content="c1")]
+
+    monkeypatch.setattr(sk_hynix_collector, "collect", fake_collect)
+    monkeypatch.setattr(sk_hynix_processor, "process", lambda documents: documents)
+    monkeypatch.setattr(sk_hynix_validator, "validate", lambda documents, search_context=None: documents)
+    monkeypatch.setattr(
+        sk_hynix_analyzer,
+        "analyze",
+        lambda documents, question, information_needs=None: [
+            DocumentAnalysis(
+                doc_id="d1", summary="s", key_points=["p"], sentiment="neutral", relevant_to_question=True
+            )
+        ],
+    )
+
+    request = _make_request("SK하이닉스 HBM 시장 전망", requested_sector_id="sk_hynix")
+    sink: list = []
+
+    result = run_pipeline(request, dry_run=False, progress_sink=sink)
+
+    # A caller polling `sink` from another thread while run_pipeline is still
+    # executing must see the exact same list run_pipeline itself is
+    # appending to - not a copy that only gets synced at the very end.
+    assert sink is result.collection_events
+    assert [event.status for event in sink] == ["started", "completed"]
+
+
 def test_pipeline_recollects_when_validation_leaves_fewer_than_profile_minimum(monkeypatch):
     first_documents = [
         SourceDocument(doc_id="d1", source_id="source-1", title="자료 1", url="https://one.example.com/a", content="가" * 300),

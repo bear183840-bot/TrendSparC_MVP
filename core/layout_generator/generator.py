@@ -11,6 +11,7 @@ import logging
 import re
 from typing import Any
 
+from common.content_quality_validator import dated_items
 from common.contracts import AudienceAdaptation, DashboardBlock, DynamicLayout, ReportPlan
 
 _LOGGER = logging.getLogger("trendsparc.layout_generator")
@@ -122,6 +123,24 @@ def _candidate_content_types(content: dict) -> list[str]:
     return candidates
 
 
+# block_types the static per-section table assigns purely by section name
+# that also make an implicit claim about the content's *shape* - never
+# trust these without checking, since a section named "market_status"/
+# "near_term_outlook" doesn't guarantee its content is actually chartable
+# or chronologically ordered.
+_MIN_TIMELINE_DATED_ITEMS = 2
+
+
+def _has_genuine_timeline_data(content: dict) -> bool:
+    """"timeline" is only earned by >= 2 distinct dated items (key_points/
+    evidence carrying a concrete year/quarter/date marker, see
+    content_quality_validator.dated_items) - a single-period metric or
+    undated prose isn't a real timeline, just a section that happens to be
+    *named* one."""
+    candidate_items = [*(content.get("key_points") or []), *(content.get("evidence") or [])]
+    return len(dated_items(candidate_items)) >= _MIN_TIMELINE_DATED_ITEMS
+
+
 def _block_type(section: str, content: dict, audience_id: str | None = None) -> str:
     """Choose a semantic UI slot from the section's actual structured content
     first; only fall back to the static per-section table when nothing
@@ -136,8 +155,17 @@ def _block_type(section: str, content: dict, audience_id: str | None = None) -> 
                 return preferred
     if candidates:
         return candidates[0]
-    if section in _SECTION_BLOCK_TYPES:
-        return _SECTION_BLOCK_TYPES[section]
+    static_type = _SECTION_BLOCK_TYPES.get(section)
+    if static_type == "chart":
+        # _candidate_content_types() above is the one true test for "chart"
+        # (2+ distinct periods for one metric label) and already didn't
+        # qualify, or we wouldn't have reached this fallback - never assign
+        # it just because the section is *named* market_status/trend.
+        static_type = None
+    elif static_type == "timeline" and not _has_genuine_timeline_data(content):
+        static_type = None
+    if static_type:
+        return static_type
     if content.get("actions"):
         return "list"
     if content.get("evidence"):

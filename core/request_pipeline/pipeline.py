@@ -151,8 +151,15 @@ def run_pipeline(
     dry_run: bool = True,
     requested_sector_id: Optional[str] = None,
     force_fail_stage: Optional[str] = None,
+    progress_sink: Optional[list[SourceCollectionEvent]] = None,
 ) -> PipelineResult:
     result = PipelineResult(request_id=request.request_id)
+    if progress_sink is not None:
+        # Let a caller (e.g. the Streamlit UI, polling this list from another
+        # thread while run_pipeline is still executing) observe collection
+        # progress live instead of only after the whole call returns - same
+        # list object throughout, no separate accumulate-then-copy step.
+        result.collection_events = progress_sink
     requested_sector_id = requested_sector_id if requested_sector_id is not None else request.requested_sector_id
     profiles = scan_sectors(SECTORS_DIR)
 
@@ -272,6 +279,10 @@ def run_pipeline(
             result.entities.information_needs,
             WebSearchContext(
                 question=request.question,
+                company_name=(
+                    result.sector_route.matched_profile.canonical_name
+                    or result.sector_route.matched_profile.display_name
+                ),
                 perspective=result.entities.perspective,
                 report_purpose_id=result.report_purpose.purpose_id,
                 information_needs=result.entities.information_needs,
@@ -321,13 +332,11 @@ def run_pipeline(
             else:
                 args = (documents,)
             if role == "collector":
-                collection_events: list[SourceCollectionEvent] = []
-                progress_token = bind_collection_events(collection_events)
+                progress_token = bind_collection_events(result.collection_events)
                 try:
                     output = _call_sector_adapter_stage(result.sector_route, role, *args)
                 finally:
                     reset_collection_events(progress_token)
-                    result.collection_events.extend(collection_events)
             else:
                 output = _call_sector_adapter_stage(result.sector_route, role, *args)
             if role == "collector":
@@ -370,15 +379,13 @@ def run_pipeline(
                     )
                     retry_plan = result.source_plan.model_copy(update={"search_context": retry_context})
 
-                    retry_events: list[SourceCollectionEvent] = []
-                    progress_token = bind_collection_events(retry_events)
+                    progress_token = bind_collection_events(result.collection_events)
                     try:
                         retry_raw = _call_sector_adapter_stage(
                             result.sector_route, "collector", retry_plan
                         )
                     finally:
                         reset_collection_events(progress_token)
-                        result.collection_events.extend(retry_events)
                     result.collected_source_documents.extend(retry_raw)
                     result.trace.append(
                         StageTrace(stage="sector_adapter.collector.recollection", status=StageStatus.OK)
@@ -459,8 +466,7 @@ def run_pipeline(
                     )
                     retry_plan = result.source_plan.model_copy(update={"search_context": retry_context})
 
-                    retry_events: list[SourceCollectionEvent] = []
-                    progress_token = bind_collection_events(retry_events)
+                    progress_token = bind_collection_events(result.collection_events)
                     try:
                         retry_raw = _call_sector_adapter_stage(
                             result.sector_route,
@@ -469,7 +475,6 @@ def run_pipeline(
                         )
                     finally:
                         reset_collection_events(progress_token)
-                        result.collection_events.extend(retry_events)
                     result.collected_source_documents.extend(retry_raw)
                     result.trace.append(
                         StageTrace(stage="sector_adapter.collector.analysis_recollection", status=StageStatus.OK)
@@ -577,12 +582,21 @@ def run_pipeline(
     # 7. report_generator
     try:
         _maybe_force_fail("report_generator")
+        # What's left after best-effort collection/analysis (including the
+        # recollection loops above) - never fabricated to fill these, just
+        # disclosed honestly in the report's limitations (see
+        # report_generator._missing_needs_limitation).
+        still_missing = _missing_analysis_needs(
+            result.document_analyses,
+            result.source_plan.information_needs if result.source_plan else [],
+        )
         result.generated_report = generate_report(
             request.question,
             result.synthesis,
             result.report_plan,
             audience_id,
             canonical_entities=[*result.entities.organizations, *result.entities.technologies],
+            missing_information_needs=still_missing,
         )
         result.trace.append(StageTrace(stage="report_generator", status=StageStatus.OK))
     except PipelineStageError as exc:

@@ -8,6 +8,10 @@ and recommended actions.
 
 from __future__ import annotations
 
+from common.content_quality_validator import (
+    dedupe_structured_across_sections,
+    extract_metric_points_from_evidence,
+)
 from common.contracts import DocumentAnalysis, SynthesisClaim, SynthesisSource, TrendSynthesis
 
 
@@ -170,6 +174,22 @@ def synthesize(
             )
             for point in analysis.metric_points
         )
+        # The analyzer's own structured-output pass doesn't catch every
+        # number - a revenue/profit figure stated inline as prose in this
+        # document's own evidence sentences (e.g. "2025년 매출: 4조
+        # 5,406억원 (전년 대비 3% 증가)") would otherwise stay untouched free
+        # text, invisible to KPI ranking/chart shape classification. Regex-
+        # extracted, never estimated - see content_quality_validator.
+        metric_series.extend(
+            point.model_copy(
+                update={
+                    "doc_id": analysis.doc_id,
+                    "source_id": source_id,
+                    "source_url": analysis.source_url,
+                }
+            )
+            for point in extract_metric_points_from_evidence(analysis_evidence)
+        )
         comparison_points.extend(
             point.model_copy(
                 update={
@@ -190,6 +210,12 @@ def synthesize(
         evidence.extend(_tag(value, analysis.doc_id) for value in analysis_evidence if value)
         if analysis.analysis_confidence:
             confidence_labels.append(_tag(analysis.analysis_confidence, analysis.doc_id))
+
+    # The regex extraction above can rediscover a fact the analyzer's own
+    # structured-output pass already captured for the same document -
+    # collapse exact duplicates (same label/period/value/unit/doc_id) rather
+    # than showing the identical number twice in one KPI row/chart.
+    metric_series = dedupe_structured_across_sections([metric_series])[0]
 
     return TrendSynthesis(
         request_id=request_id,

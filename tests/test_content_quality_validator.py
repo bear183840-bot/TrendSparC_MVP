@@ -1,10 +1,14 @@
 from common.contracts import ComparisonPoint, MetricPoint
 from common.content_quality_validator import (
     classify_metric_shape,
+    dated_items,
     detect_secondary_purpose,
     dedupe_across_blocks,
+    dedupe_structured_across_sections,
+    extract_metric_points_from_evidence,
     filter_shared_comparison_axis,
     group_metric_points_by_label,
+    parse_korean_amount,
     period_sort_key,
     rank_by_relevance,
     select_chartable_series,
@@ -160,3 +164,107 @@ class TestPeriodSortKey:
     def test_unparseable_period_sorts_after_parseable_ones(self):
         periods = ["2024년 1분기", "도입 후"]
         assert sorted(periods, key=period_sort_key) == ["2024년 1분기", "도입 후"]
+
+
+class TestDedupeStructuredAcrossSections:
+    def test_keeps_only_first_section_when_metric_point_identical(self):
+        point = MetricPoint(label="특수관계자 매출 비중", period="2025년 1분기", value=15.9, unit="%")
+        sections = [[point], [point], []]
+
+        result = dedupe_structured_across_sections(sections)
+
+        assert result[0] == [point]
+        assert result[1] == []
+        assert result[2] == []
+
+    def test_distinct_metric_points_survive_in_every_section(self):
+        subscriber = MetricPoint(label="가입자 수", period="2024년", value=650.0, unit="만 명")
+        revenue = MetricPoint(label="매출", period="2025년", value=45406.0, unit="억원")
+        sections = [[subscriber], [revenue]]
+
+        result = dedupe_structured_across_sections(sections)
+
+        assert result == [[subscriber], [revenue]]
+
+    def test_works_for_comparison_points_too(self):
+        point = ComparisonPoint(entity="자사", criterion="요금제 가격", value="9,900원")
+        sections = [[point], [point]]
+
+        result = dedupe_structured_across_sections(sections)
+
+        assert result[0] == [point]
+        assert result[1] == []
+
+
+class TestParseKoreanAmount:
+    def test_jo_and_eok_combination(self):
+        assert parse_korean_amount("4조 5,406억원") == 45406.0
+
+    def test_eok_and_cheonman_combination(self):
+        assert parse_korean_amount("1,414억 8천만원") == 1414.8
+
+    def test_eok_only(self):
+        assert parse_korean_amount("500억원") == 500.0
+
+    def test_plain_prose_returns_none(self):
+        assert parse_korean_amount("그냥 텍스트입니다") is None
+
+    def test_empty_string_returns_none(self):
+        assert parse_korean_amount("") is None
+
+    def test_bare_won_amount_with_no_unit_word_returns_none(self):
+        # Deliberately out of scope - only 조/억/천만/만-denominated amounts
+        # are handled; a bare "5000원" is not this pattern.
+        assert parse_korean_amount("5000원") is None
+
+
+class TestExtractMetricPointsFromEvidence:
+    def test_extracts_all_three_real_example_sentences(self):
+        evidence = [
+            "2025년 매출: 4조 5,406억원 (전년 대비 3% 증가) [doc_id=www.jobkorea.co.kr:abc]",
+            "2024년 2분기 매출: 4조 4,540억원 (전년 대비 3.4% 증가 예상) [doc_id=www.sks.co.kr:def]",
+            "2025년 순이익: 1,414억 8천만원 (전년 대비 46% 감소) [doc_id=www.jobkorea.co.kr:abc]",
+        ]
+
+        points = extract_metric_points_from_evidence(evidence)
+
+        assert len(points) == 3
+        assert (points[0].label, points[0].period, points[0].value, points[0].unit) == ("매출", "2025년", 45406.0, "억원")
+        assert (points[1].label, points[1].period, points[1].value) == ("매출", "2024년 2분기", 44540.0)
+        assert (points[2].label, points[2].period, points[2].value) == ("순이익", "2025년", 1414.8)
+
+    def test_two_periods_of_the_same_label_are_chartable_as_a_bar(self):
+        evidence = [
+            "2025년 매출: 4조 5,406억원 (전년 대비 3% 증가)",
+            "2024년 2분기 매출: 4조 4,540억원 (전년 대비 3.4% 증가 예상)",
+        ]
+
+        points = extract_metric_points_from_evidence(evidence)
+
+        assert classify_metric_shape(points) == "bar"
+
+    def test_never_back_calculates_a_value_from_the_yoy_percentage_alone(self):
+        # Only one dated figure is stated - no second point should ever be
+        # invented from "전년 대비 3% 증가" alone.
+        evidence = ["2025년 매출: 4조 5,406억원 (전년 대비 3% 증가)"]
+
+        points = extract_metric_points_from_evidence(evidence)
+
+        assert len(points) == 1
+
+    def test_sentence_without_the_pattern_yields_nothing(self):
+        evidence = ["특수관계자에 대한 매출액 비중은 15.9%이다 (2025년 1분기말 기준)"]
+
+        assert extract_metric_points_from_evidence(evidence) == []
+
+    def test_empty_evidence_list_yields_nothing(self):
+        assert extract_metric_points_from_evidence([]) == []
+
+
+class TestDatedItems:
+    def test_keeps_only_items_with_a_year_quarter_or_date_marker(self):
+        items = ["2025년 3월 서비스 개편", "검증된 신호가 없습니다.", "2025년 4분기 출시 예정"]
+        assert dated_items(items) == ["2025년 3월 서비스 개편", "2025년 4분기 출시 예정"]
+
+    def test_empty_input_returns_empty(self):
+        assert dated_items([]) == []

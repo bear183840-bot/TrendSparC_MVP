@@ -209,6 +209,12 @@ class WebSearchContext(BaseModel):
     """
 
     question: str
+    # The routed sector's canonical company name (e.g. "SK브로드밴드"), so a
+    # question that only says "우리회사"/"our company" still resolves to a
+    # specific, searchable company instead of leaving the search model to
+    # guess from the raw question text alone. None for sectors with no single
+    # company (e.g. "general").
+    company_name: Optional[str] = None
     perspective: Optional[str] = None
     report_purpose_id: Optional[str] = None
     information_needs: list[str] = Field(default_factory=list)

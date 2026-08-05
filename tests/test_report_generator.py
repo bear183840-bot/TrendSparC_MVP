@@ -109,6 +109,37 @@ def test_fallback_report_carries_structured_fields_into_market_status_section():
     assert len(market_section.comparison_points) == 2
 
 
+def test_fallback_report_gives_each_metric_point_single_ownership_across_sections(monkeypatch):
+    monkeypatch.delenv("TRENDSPARC_REPORT_GENERATOR_API_KEY", raising=False)
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    # "external" audience's fixed report_structure is
+    # ["overview", "market_status", "opportunity", "sources"] - both
+    # market_status and opportunity independently ask for metric_points from
+    # the same synthesis.metric_series, so without single-ownership dedup
+    # the one real data point would get mechanically copied into both.
+    analysis = DocumentAnalysis(
+        doc_id="attachment:brief",
+        summary="요약",
+        metric_points=[MetricPoint(label="특수관계자 매출 비중", period="2025년 1분기", value=15.9, unit="%")],
+    )
+    synthesis = synthesize("req_dedup", "sk_broadband", [analysis])
+    purpose = ReportPurposeClassification(
+        request_id="req_dedup",
+        purpose_id="current_status",
+        display_name="현황 파악",
+        recommended_sections=["market_status"],
+    )
+    plan = plan_report(synthesis, "external", purpose)
+    assert plan.sections == ["overview", "market_status", "opportunity", "sources"]
+
+    report = generate_report("매출 추이는?", synthesis, plan, "external")
+    market_status = next(s for s in report.sections if s.section_id == "market_status")
+    opportunity = next(s for s in report.sections if s.section_id == "opportunity")
+
+    assert len(market_status.metric_points) == 1
+    assert opportunity.metric_points == []
+
+
 def test_report_planner_keeps_problem_and_root_cause_but_removes_audience_aliases():
     synthesis = _synthesis()
     purpose = ReportPurposeClassification(
@@ -322,6 +353,35 @@ def test_generate_report_openai_path_keeps_every_recommended_action_reachable(mo
     }
     expected_doc_ids = {generator_module._doc_id(action) for action in synthesis.recommended_actions}
     assert expected_doc_ids <= reachable_doc_ids
+
+
+def test_fallback_report_discloses_missing_information_needs_honestly(monkeypatch):
+    monkeypatch.delenv("TRENDSPARC_REPORT_GENERATOR_API_KEY", raising=False)
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    synthesis = _synthesis()
+    plan = _issue_response_plan(synthesis, "req_report")
+
+    report = generate_report(
+        "어떻게 대응해야 하나?",
+        synthesis,
+        plan,
+        "executive",
+        missing_information_needs=["customer_market"],
+    )
+
+    assert any("customer_market" in limitation for limitation in report.limitations)
+    assert any("확인 안 됨" in limitation for limitation in report.limitations)
+
+
+def test_fallback_report_has_no_missing_needs_limitation_when_nothing_missing(monkeypatch):
+    monkeypatch.delenv("TRENDSPARC_REPORT_GENERATOR_API_KEY", raising=False)
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    synthesis = _synthesis()
+    plan = _issue_response_plan(synthesis, "req_report")
+
+    report = generate_report("어떻게 대응해야 하나?", synthesis, plan, "executive")
+
+    assert not any("확인 안 됨" in limitation for limitation in report.limitations)
 
 
 def test_ensure_all_actions_reachable_is_a_no_op_when_nothing_missing(monkeypatch):

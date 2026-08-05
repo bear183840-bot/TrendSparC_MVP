@@ -72,12 +72,75 @@ def test_two_of_four_swot_fields_renders_as_matrix_even_when_static_table_says_o
 
 
 def test_single_swot_field_is_not_enough_to_trigger_matrix():
-    plan = _plan("_default", ["timeline"])
-    adaptation = _adaptation("_default", {"timeline": {"title": "Partial", "strengths": ["IPTV 인프라 우위"]}})
+    # "problem" is statically mapped to "text" - a type with no data-shape
+    # claim to validate, so this purely isolates the matrix threshold
+    # (unlike "chart"/"timeline", which now require real qualifying data
+    # even from the static table - see the two tests below).
+    plan = _plan("_default", ["problem"])
+    adaptation = _adaptation("_default", {"problem": {"title": "Partial", "strengths": ["IPTV 인프라 우위"]}})
 
     layout = generate_layout(plan, adaptation)
 
-    assert layout.blocks[0].block_type == "timeline"  # falls back to the static table, unchanged
+    assert layout.blocks[0].block_type == "text"  # falls back to the static table, unchanged
+
+
+def test_market_status_with_single_period_metric_does_not_get_chart():
+    # Real bug case: "특수관계자에 대한 매출액 비중" is a single 2025년-1Q
+    # point - not chartable, but "market_status" statically maps to "chart".
+    plan = _plan("_default", ["market_status"])
+    adaptation = _adaptation(
+        "_default",
+        {
+            "market_status": {
+                "title": "Market Status",
+                "metric_points": [
+                    {"label": "특수관계자 매출 비중", "period": "2025년 1분기", "value": 15.9, "unit": "%"}
+                ],
+            }
+        },
+    )
+
+    layout = generate_layout(plan, adaptation)
+
+    assert layout.blocks[0].block_type != "chart"
+
+
+def test_near_term_outlook_with_undated_prose_does_not_get_timeline():
+    plan = _plan("_default", ["near_term_outlook"])
+    adaptation = _adaptation(
+        "_default",
+        {
+            "near_term_outlook": {
+                "title": "Near-term Outlook",
+                "key_points": ["검증된 신호가 없습니다."],
+                "evidence": ["유료방송시장 경쟁 심화로 인한 리스크가 존재한다."],
+            }
+        },
+    )
+
+    layout = generate_layout(plan, adaptation)
+
+    assert layout.blocks[0].block_type != "timeline"
+
+
+def test_timeline_with_genuinely_dated_evidence_still_gets_timeline():
+    plan = _plan("_default", ["near_term_outlook"])
+    adaptation = _adaptation(
+        "_default",
+        {
+            "near_term_outlook": {
+                "title": "Near-term Outlook",
+                "evidence": [
+                    "2025년 3월 서비스 개편이 예정되어 있다.",
+                    "2025년 4분기 신규 요금제 출시가 예정되어 있다.",
+                ],
+            }
+        },
+    )
+
+    layout = generate_layout(plan, adaptation)
+
+    assert layout.blocks[0].block_type == "timeline"
 
 
 def test_no_structured_data_falls_back_to_the_existing_static_table():

@@ -7,6 +7,7 @@ from sources.collectors.ai_search_harness import (
     HarnessConfig,
     _attribute_source,
     _doc_id,
+    _initial_query,
     _parse_round_judgment,
     run_ai_search_harness,
     run_question_search_harness,
@@ -633,3 +634,33 @@ def test_parse_round_judgment_returns_false_and_empty_on_garbage_text():
 
     assert sufficient is False
     assert next_queries == []
+
+
+def test_initial_query_anchors_vague_self_reference_to_company_name():
+    context = WebSearchContext(
+        question="우리회사 매출 추이 알려주고 앞으로 전망 알려줘",
+        company_name="SK브로드밴드",
+    )
+
+    query = _initial_query(None, [], context)
+
+    assert query == "SK브로드밴드 우리회사 매출 추이 알려주고 앞으로 전망 알려줘"
+
+
+def test_initial_query_does_not_duplicate_company_name_already_in_question():
+    context = WebSearchContext(
+        question="SK브로드밴드 매출 추이는?",
+        company_name="SK브로드밴드",
+    )
+
+    query = _initial_query(None, [], context)
+
+    assert query == "SK브로드밴드 매출 추이는?"
+
+
+def test_initial_query_unchanged_when_no_company_name():
+    context = WebSearchContext(question="시장 동향은?")
+
+    query = _initial_query(None, [], context)
+
+    assert query == "시장 동향은?"

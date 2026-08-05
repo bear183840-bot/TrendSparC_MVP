@@ -130,6 +130,104 @@ def test_broadband_kofic_source_uses_pdf_helper(monkeypatch):
     assert docs[0].content.startswith("KOFIC PDF 본문")
 
 
+# Trimmed excerpt of kofic.or.kr's real listing-page JS (live-verified
+# 2026-08-06): the only literal "selectBoardDetail.do?boardNumber=2" text on
+# the page is inside this function *definition* - missing boardSeqNumber
+# entirely, and a URL built from it 420s. The real per-post id only exists
+# in each row's own onclick handler further down.
+_KOFIC_LISTING_JS_EXCERPT = """
+    function fn_detailPage(boardSeqNumber){
+        var form = $("#form_searchBoardList")[0];
+        form.method = "post";
+        form.action =
+            "selectBoardDetail.do?boardNumber=2"
+            + "&boardSeqNumber=" + encodeURIComponent(boardSeqNumber);
+        form.submit();
+    }
+"""
+_KOFIC_LISTING_ROW_EXCERPT = (
+    '<a href="#none" onclick="fn_goDetailPage(74481 , \'10031001\' , \'\');return false;">'
+    "2026년 상반기 한국 영화산업 결산 보고서</a>"
+    '<a href="#none" onclick="fn_zipFileDownload(\'2\',\'74481\',\'1\')">'
+    '<img src="/kofic/comm/img/common/icon_diskette.png" /></a>'
+)
+
+
+def test_extract_kofic_board_seq_numbers_ignores_the_js_template_and_finds_real_row_ids():
+    seq_numbers = collector_module._extract_kofic_board_seq_numbers(
+        _KOFIC_LISTING_JS_EXCERPT + _KOFIC_LISTING_ROW_EXCERPT
+    )
+
+    # "2" (from the broken template's "boardNumber=2") must never appear -
+    # only the real per-post id from fn_goDetailPage/fn_zipFileDownload.
+    assert seq_numbers == ["74481"]
+
+
+def test_extract_kofic_board_seq_numbers_dedupes_same_id_from_both_handlers():
+    html = (
+        '<a onclick="fn_goDetailPage(74481, \'10031001\', \'\');return false;">제목</a>'
+        '<a onclick="fn_zipFileDownload(\'2\',\'74481\',\'1\')"><img /></a>'
+    )
+
+    assert collector_module._extract_kofic_board_seq_numbers(html) == ["74481"]
+
+
+def test_build_kofic_detail_url_uses_board_number_from_registered_source_url():
+    url = collector_module._build_kofic_detail_url(
+        "https://www.kofic.or.kr/kofic/business/board/selectBoardList.do?boardNumber=2",
+        "74481",
+    )
+
+    assert url == (
+        "https://www.kofic.or.kr/kofic/business/board/selectBoardDetail.do"
+        "?boardNumber=2&boardSeqNumber=74481"
+    )
+
+
+def test_build_kofic_detail_url_returns_none_without_a_board_number():
+    url = collector_module._build_kofic_detail_url(
+        "https://www.kofic.or.kr/kofic/business/board/selectBoardList.do", "74481"
+    )
+
+    assert url is None
+
+
+def test_discover_kofic_detail_urls_from_listing_builds_real_urls_not_the_broken_template(monkeypatch):
+    source = PlannedSource(
+        name="영화진흥위원회(KOFIC)",
+        url="https://www.kofic.or.kr/kofic/business/board/selectBoardList.do?boardNumber=2",
+        collection_method=["kofic_pdf_post_download"],
+    )
+    fake_response = types.SimpleNamespace(
+        text=_KOFIC_LISTING_JS_EXCERPT + _KOFIC_LISTING_ROW_EXCERPT,
+        encoding="utf-8",
+        raise_for_status=lambda: None,
+    )
+    monkeypatch.setattr(collector_module.requests, "get", lambda *a, **k: fake_response)
+
+    urls = collector_module._discover_kofic_detail_urls_from_listing(source)
+
+    assert urls == [
+        "https://www.kofic.or.kr/kofic/business/board/selectBoardDetail.do"
+        "?boardNumber=2&boardSeqNumber=74481"
+    ]
+
+
+def test_crawl_kofic_pdf_source_logs_when_no_post_ids_are_discovered(monkeypatch, capsys):
+    source = PlannedSource(
+        name="영화진흥위원회(KOFIC)",
+        url="https://www.kofic.or.kr/kofic/business/board/selectBoardList.do?boardNumber=2",
+        collection_method=["kofic_pdf_post_download"],
+    )
+    monkeypatch.setattr(collector_module, "_discover_kofic_detail_urls_from_search", lambda *a, **k: [])
+    monkeypatch.setattr(collector_module, "_discover_kofic_detail_urls_from_listing", lambda *a, **k: [])
+
+    docs = collector_module._crawl_kofic_pdf_source(_FastClient([]), source, "test-key", ["영화산업"])
+
+    assert docs == []
+    assert "no post ids discovered" in capsys.readouterr().err
+
+
 def test_broadband_collect_continues_when_one_source_fails(monkeypatch):
     monkeypatch.setenv("FIRECRAWL_API_KEY", "test-key")
     sources = [
@@ -322,6 +420,87 @@ def test_broadband_question_harness_rejects_fewer_than_two_documents(monkeypatch
 
     with pytest.raises(PipelineStageError, match="insufficient relevant evidence"):
         collect(plan)
+
+
+def test_broadband_question_harness_accepts_partial_coverage_instead_of_all_or_nothing(monkeypatch):
+    # Not all-or-nothing: two documents from two independent sources is a
+    # real corroborated core of evidence, even though the harness itself
+    # couldn't cover every information_need (missing customer_market here).
+    # The report should surface that gap honestly rather than the whole
+    # collector stage refusing to produce anything.
+    monkeypatch.setenv("FIRECRAWL_API_KEY", "test-key")
+    monkeypatch.setenv(collector_module._HARNESS_API_KEY_ENV_VAR, "test-key")
+    source = PlannedSource(name="뉴스", url="https://news.example.com", collection_method=["firecrawl_search"])
+    plan = SourcePlan(
+        request_id="req",
+        sector_id="sk_broadband",
+        planned_sources=[source],
+        registered_sources=[source],
+        question_keywords=["매출"],
+    )
+    monkeypatch.setattr(collector_module, "Firecrawl", lambda api_key: object())
+    monkeypatch.setattr(
+        collector_module,
+        "_run_question_ai_harness",
+        lambda *args: WebSearchHarnessResult(
+            documents=[
+                SourceDocument(doc_id="a", source_id="전자신문", url="https://a.example.com", content="본문" * 100),
+                SourceDocument(doc_id="b", source_id="미래에셋증권", url="https://b.example.com", content="본문" * 100),
+            ],
+            sufficient=False,
+            covered_information_needs=["financial_performance", "strategy_investment"],
+            missing_information_needs=["customer_market"],
+        ),
+    )
+
+    docs = collect(plan)
+
+    assert [doc.doc_id for doc in docs] == ["a", "b"]
+
+
+def test_broadband_question_harness_counts_kofic_toward_sufficiency(monkeypatch):
+    # Real bug this reproduces: the harness alone found only 1 document (not
+    # enough on its own), but KOFIC (a special source run in the same
+    # collect() call) independently supplied a second, real document - the
+    # combined evidence pool is sufficient and must not be rejected just
+    # because the harness's own document count was checked in isolation.
+    monkeypatch.setenv("FIRECRAWL_API_KEY", "test-key")
+    monkeypatch.setenv(collector_module._HARNESS_API_KEY_ENV_VAR, "test-key")
+    news_source = PlannedSource(name="뉴스", url="https://news.example.com", collection_method=["firecrawl_search"])
+    kofic_source = PlannedSource(
+        name="영화진흥위원회(KOFIC)",
+        url="https://www.kofic.or.kr/kofic/business/board/selectBoardList.do?boardNumber=2",
+        collection_method=["kofic_pdf_post_download"],
+    )
+    plan = SourcePlan(
+        request_id="req",
+        sector_id="sk_broadband",
+        planned_sources=[news_source],
+        registered_sources=[news_source, kofic_source],
+        question_keywords=["가입자"],
+    )
+    monkeypatch.setattr(collector_module, "Firecrawl", lambda api_key: object())
+    monkeypatch.setattr(
+        collector_module,
+        "_run_question_ai_harness",
+        lambda *args: WebSearchHarnessResult(
+            documents=[SourceDocument(doc_id="a", source_id="전자신문", url="https://a.example.com", content="본문" * 100)],
+            sufficient=False,
+            covered_information_needs=["customer_market"],
+            missing_information_needs=["competition"],
+        ),
+    )
+    monkeypatch.setattr(
+        collector_module,
+        "_crawl_kofic_pdf_source",
+        lambda *args: [
+            SourceDocument(doc_id="k1", source_id="영화진흥위원회(KOFIC)", url="https://kofic.example.com/1", content="본문" * 100)
+        ],
+    )
+
+    docs = collect(plan)
+
+    assert {doc.doc_id for doc in docs} == {"a", "k1"}
 
 
 def test_broadband_collect_passes_all_planned_sources_to_crawl_source(monkeypatch):

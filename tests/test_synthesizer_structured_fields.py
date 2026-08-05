@@ -52,6 +52,45 @@ def test_synthesis_aggregates_structured_fields_regardless_of_sector(sector_id):
     assert {point.entity for point in synthesis.comparison_points} == {"SK브로드밴드", "KT"}
 
 
+def test_synthesis_extracts_metric_points_from_revenue_prose_in_evidence():
+    analysis = DocumentAnalysis(
+        doc_id="doc:revenue",
+        source_id="잡코리아",
+        evidence=[
+            "2025년 매출: 4조 5,406억원 (전년 대비 3% 증가)",
+            "2025년 순이익: 1,414억 8천만원 (전년 대비 46% 감소)",
+        ],
+    )
+
+    synthesis = synthesize("req_revenue", "sk_broadband", [analysis])
+
+    labels = {point.label for point in synthesis.metric_series}
+    assert labels == {"매출", "순이익"}
+    revenue_point = next(point for point in synthesis.metric_series if point.label == "매출")
+    assert revenue_point.period == "2025년"
+    assert revenue_point.value == 45406.0
+    assert revenue_point.unit == "억원"
+    assert revenue_point.doc_id == "doc:revenue"
+    assert revenue_point.source_id == "잡코리아"
+
+
+def test_synthesis_does_not_duplicate_a_metric_the_analyzer_already_extracted():
+    # Same fact available both as a structured metric_point (from the
+    # analyzer's own pass) and restated in evidence prose for the same
+    # document - must collapse to one point, not show the identical number
+    # twice in a KPI row/chart.
+    analysis = DocumentAnalysis(
+        doc_id="doc:both",
+        source_id="잡코리아",
+        metric_points=[MetricPoint(label="매출", period="2025년", value=45406.0, unit="억원")],
+        evidence=["2025년 매출: 4조 5,406억원 (전년 대비 3% 증가)"],
+    )
+
+    synthesis = synthesize("req_both", "sk_broadband", [analysis])
+
+    assert len(synthesis.metric_series) == 1
+
+
 def test_synthesis_leaves_structured_fields_empty_when_no_document_provides_them():
     synthesis = synthesize("req_2", "general", [DocumentAnalysis(doc_id="doc:1", summary="요약")])
 

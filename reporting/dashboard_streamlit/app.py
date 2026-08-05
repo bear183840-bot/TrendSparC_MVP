@@ -10,6 +10,8 @@ import io
 import re
 import sys
 import textwrap
+import threading
+import time
 import uuid
 from contextlib import redirect_stderr, redirect_stdout
 from html import escape
@@ -30,7 +32,7 @@ from common.contracts import Attachment, UserRequest
 from common.errors import StageStatus
 from core.request_pipeline.pipeline import run_pipeline
 from core.sector_router.router import scan_sectors
-from reporting.dashboard_streamlit.collection_progress_view import render_execution_record
+from reporting.dashboard_streamlit.collection_progress_view import _STATUS_LABELS, render_execution_record
 from reporting.dashboard_streamlit.generic_dashboard import render_generic_dashboard
 from reporting.dashboard_streamlit.issue_response_view import render_issue_response_dashboard
 from reporting.dashboard_streamlit.logo import wordmark_html
@@ -221,15 +223,54 @@ if result is None:
                 requested_sector_id=selected_sector,
                 attachments=attachments,
             )
-            with st.spinner("관련 근거를 수집하고 의사결정 흐름을 구성하고 있습니다..."):
-                log_buffer = io.StringIO()
-                tee_out = _TeeStream(sys.stdout, log_buffer)
-                tee_err = _TeeStream(sys.stderr, log_buffer)
-                with redirect_stdout(tee_out), redirect_stderr(tee_err):
-                    st.session_state.result = run_pipeline(request, dry_run=False, requested_sector_id=selected_sector)
+            log_buffer = io.StringIO()
+            tee_out = _TeeStream(sys.stdout, log_buffer)
+            tee_err = _TeeStream(sys.stderr, log_buffer)
+            progress_events: list = []
+            run_outcome: dict = {}
+
+            def _run_pipeline_in_background() -> None:
+                try:
+                    with redirect_stdout(tee_out), redirect_stderr(tee_err):
+                        run_outcome["result"] = run_pipeline(
+                            request,
+                            dry_run=False,
+                            requested_sector_id=selected_sector,
+                            progress_sink=progress_events,
+                        )
+                except Exception as exc:  # noqa: BLE001
+                    run_outcome["error"] = exc
+
+            worker = threading.Thread(target=_run_pipeline_in_background, daemon=True)
+            worker.start()
+
+            with st.status("관련 근거를 수집하고 의사결정 흐름을 구성하고 있습니다...", expanded=True) as status:
+                shown = 0
+                while worker.is_alive():
+                    pending = progress_events[shown:]
+                    for event in pending:
+                        icon, label, _ = _STATUS_LABELS.get(event.status, ("·", event.status, ""))
+                        detail = f" · {event.document_count}건" if event.status == "completed" else ""
+                        status.update(
+                            label=f"[{event.source_index}/{event.source_total}] {event.source_name} — {label}{detail}"
+                        )
+                        st.write(f"{icon} [{event.source_index}/{event.source_total}] {event.source_name} — {label}{detail}")
+                    shown = len(progress_events)
+                    time.sleep(0.4)
+                worker.join()
+                if run_outcome.get("error") is not None:
+                    status.update(label="오류가 발생했습니다.", state="error", expanded=True)
+                else:
+                    status.update(label="수집·분석이 끝났습니다.", state="complete", expanded=False)
+
+            if run_outcome.get("error") is not None:
                 st.session_state.terminal_log = log_buffer.getvalue()
-                st.session_state.submitted_question = question
-                st.session_state.recent_questions.append(question)
+                raise run_outcome["error"]
+
+            st.session_state.result = run_outcome["result"]
+            st.session_state.terminal_log = log_buffer.getvalue()
+            st.session_state.submitted_question = question
+            st.session_state.recent_questions.append(question)
             st.rerun()
     st.stop()
 

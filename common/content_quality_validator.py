@@ -18,10 +18,24 @@ import difflib
 import re
 from typing import Any, Literal
 
+from common.contracts import MetricPoint
+
 MetricShape = Literal["kpi", "bar", "line"]
 
 _YEAR_RE = re.compile(r"(20\d{2}|\d{2})")
 _QUARTER_RE = re.compile(r"([1-4])\s*(?:Q|분기)", re.I)
+_TIMELINE_DATE_RE = re.compile(r"(20\d{2}\s*년(?:\s*\d{1,2}\s*월)?|[1-4]\s*분기|\d{1,2}\s*월\s*\d{1,2}\s*일)")
+
+
+def dated_items(items: list[str]) -> list[str]:
+    """Items that contain a concrete date/period marker (year, quarter, or
+    month-day) - the shared way to tell genuinely time-anchored content
+    apart from prose that merely sits in a "timeline"-named section. Used
+    both to build an honest timeline section (report_generator.py) and to
+    decide whether a section actually earns the "timeline" block_type
+    (layout_generator.py) instead of getting it just because of its name.
+    """
+    return [item for item in items if item and _TIMELINE_DATE_RE.search(item)]
 
 
 def period_sort_key(period: str) -> tuple:
@@ -173,6 +187,30 @@ def dedupe_across_blocks(blocks: list[list[str]], threshold: float = 0.6) -> lis
     return result
 
 
+def dedupe_structured_across_sections(section_items: list[list[Any]]) -> list[list[Any]]:
+    """Structured-field counterpart of `dedupe_across_blocks`: given several
+    sections' candidate MetricPoint/ComparisonPoint lists (in section
+    order), keep an item only in the first section it appears in - single
+    ownership per fact, instead of the same evidence-stated number getting
+    mechanically copied into every section that happens to ask for
+    "metric_points"/"comparison_points". Equality is exact (same field
+    values), not fuzzy - these are structured Pydantic objects, not prose,
+    so there's no paraphrase to catch, only literal duplication.
+    """
+    seen: set[tuple] = set()
+    result: list[list[Any]] = []
+    for items in section_items:
+        kept: list[Any] = []
+        for item in items:
+            key = tuple(sorted(item.model_dump().items()))
+            if key in seen:
+                continue
+            seen.add(key)
+            kept.append(item)
+        result.append(kept)
+    return result
+
+
 def detect_secondary_purpose(scores: dict[str, int], winner: str, threshold: int = 4) -> str | None:
     """`scores` is the per-purpose score dict `classify_report_purpose()`
     already computes internally - this just asks whether any purpose OTHER
@@ -186,3 +224,92 @@ def detect_secondary_purpose(scores: dict[str, int], winner: str, threshold: int
     if not candidates:
         return None
     return max(candidates, key=lambda purpose_id: candidates[purpose_id])
+
+
+# --- Text-to-structured extraction (evidence sentences -> MetricPoint) ---
+#
+# Analyzers already extract metric_points via their own OpenAI structured-
+# output pass, but they don't catch every number - a revenue/profit figure
+# stated inline as prose within an `evidence` sentence (e.g. "2025년 매출:
+# 4조 5,406억원 (전년 대비 3% 증가)") stays untouched free text otherwise,
+# invisible to KPI ranking, chart shape classification, etc. This is a
+# second, narrow, regex-based pass over already-collected evidence text -
+# never an estimate: a sentence that doesn't cleanly match is left as prose,
+# not guessed at, and a YoY percentage is never used to back-calculate a
+# prior-year value that isn't itself stated somewhere.
+
+_KOREAN_AMOUNT_RE = re.compile(
+    r"(?:(?P<jo>\d[\d,]*(?:\.\d+)?)\s*조)?\s*"
+    r"(?:(?P<eok>\d[\d,]*(?:\.\d+)?)\s*억)?\s*"
+    r"(?:(?P<cheonman>\d[\d,]*(?:\.\d+)?)\s*천만)?\s*"
+    r"(?:(?P<man>\d[\d,]*(?:\.\d+)?)\s*만)?\s*원"
+)
+# Multipliers expressed in 억 (100,000,000 won) units, not raw won - a raw
+# won float for a trillion-won company (e.g. 4540600000000.0) is unreadable
+# and doesn't match how these figures are actually reported/read; 억원 is
+# the conventional scale for Korean corporate financials, and matches this
+# codebase's existing convention of storing MetricPoint.value pre-scaled to
+# whatever unit is natural (e.g. "만 명" for subscriber counts).
+_KOREAN_AMOUNT_UNIT_MULTIPLIERS = {
+    "jo": 1_0000.0,
+    "eok": 1.0,
+    "cheonman": 0.1,
+    "man": 0.0001,
+}
+
+# "2025년", "2024년 2분기" style period, then a known financial-statement
+# label, then an amount ending in "원", then (optionally) a YoY change
+# clause. Intentionally narrow to the pattern actually observed in
+# sk_broadband evidence rather than a general-purpose sentence parser -
+# widen the label alternation only when a genuinely new recurring pattern
+# is confirmed, not speculatively.
+_METRIC_SENTENCE_RE = re.compile(
+    r"(?P<period>20\d{2}\s*년(?:\s*[1-4]\s*분기)?)\s*"
+    r"(?P<label>매출액?|순이익|영업이익률?)\s*[:：]?\s*"
+    r"(?P<amount>[^()]+?원)\s*"
+    r"(?:\(\s*전년\s*대비\s*(?P<pct>\d+(?:\.\d+)?)\s*%\s*(?P<direction>증가|감소))?"
+)
+_METRIC_LABEL_NORMALIZATION = {"매출액": "매출", "영업이익률": "영업이익률"}
+
+
+def parse_korean_amount(text: str) -> float | None:
+    """Convert a 조/억/천만/만-unit Korean currency string (e.g. "4조
+    5,406억원" -> 45406.0, "1,414억 8천만원" -> 1414.8) into a number of 억원
+    (100M won) - the scale these figures are conventionally reported and
+    read in, not a raw won integer. Returns None for anything that doesn't
+    cleanly match this specific unit grammar - never a best-effort guess,
+    since a wrong parsed number is worse than no number (it looks exactly
+    as trustworthy as a correct one downstream).
+    """
+    match = _KOREAN_AMOUNT_RE.fullmatch(text.strip())
+    if not match or not any(match.groupdict().values()):
+        return None
+    total = 0.0
+    for group_name, multiplier in _KOREAN_AMOUNT_UNIT_MULTIPLIERS.items():
+        value = match.group(group_name)
+        if value:
+            total += float(value.replace(",", "")) * multiplier
+    return total
+
+
+def extract_metric_points_from_evidence(evidence: list[str]) -> list[MetricPoint]:
+    """Pull real, evidence-stated "<year>(<quarter>) <매출/순이익/영업이익>:
+    <amount>원" facts out of prose evidence sentences into MetricPoint
+    objects, so a stated financial figure becomes chartable/rankable
+    structured data instead of only ever appearing as an unstructured
+    sentence. A YoY percentage in the same sentence, if present, is not
+    turned into a second point - only literal, directly-stated period+value
+    pairs are extracted (see module docstring above)."""
+    extracted: list[MetricPoint] = []
+    for text in evidence:
+        if not text:
+            continue
+        for match in _METRIC_SENTENCE_RE.finditer(text):
+            amount = parse_korean_amount(match.group("amount"))
+            if amount is None:
+                continue
+            label = match.group("label")
+            label = _METRIC_LABEL_NORMALIZATION.get(label, label)
+            period = re.sub(r"\s+", " ", match.group("period")).strip()
+            extracted.append(MetricPoint(label=label, period=period, value=amount, unit="억원"))
+    return extracted
