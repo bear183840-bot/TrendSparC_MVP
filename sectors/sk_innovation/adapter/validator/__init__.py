@@ -50,7 +50,7 @@ def _quality_sort_key(document: SourceDocument) -> tuple[int, float]:
     return (rank, -(published_at.timestamp() if published_at else float("-inf")))
 
 
-def validate(source_documents: list[SourceDocument]) -> list[SourceDocument]:
+def validate(source_documents: list[SourceDocument], search_context=None) -> list[SourceDocument]:
     """수집/전처리된 SK이노베이션 문서 중 출처 정보가 명확하고 유의미한 정보량을 가진 문서만 검증합니다."""
     seen_titles: set[str] = set()
     kept: list[SourceDocument] = []

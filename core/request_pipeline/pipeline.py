@@ -43,6 +43,7 @@ from common.contracts import (
     SourcePlan,
     TrendSynthesis,
     UserRequest,
+    WebSearchContext,
 )
 from common.errors import PipelineStageError, StageStatus, StageTrace
 from core.attachments.extractor import build_question_context, extract_attachments
@@ -73,6 +74,48 @@ _ADAPTER_ROLE_ORDER = ("collector", "processor", "validator", "analyzer")
 _DEFAULT_AUDIENCE_ID = "_default"
 
 
+def _enrich_document_analyses(
+    analyses: list[DocumentAnalysis],
+    source_documents: list[SourceDocument],
+) -> list[DocumentAnalysis]:
+    document_by_id = {document.doc_id: document for document in source_documents}
+    enriched: list[DocumentAnalysis] = []
+    for analysis in analyses:
+        document = document_by_id.get(analysis.doc_id)
+        if document is not None:
+            analysis = analysis.model_copy(
+                update={
+                    "source_id": document.source_id,
+                    "source_title": document.title,
+                    "source_url": document.url,
+                    "reliability_tier": document.reliability_tier,
+                }
+            )
+        enriched.append(analysis)
+    return enriched
+
+
+def _usable_analyses(analyses: list[DocumentAnalysis]) -> list[DocumentAnalysis]:
+    return [
+        analysis
+        for analysis in analyses
+        if analysis.relevant_to_question is not False
+        and analysis.usable_for_synthesis is not False
+    ]
+
+
+def _missing_analysis_needs(
+    analyses: list[DocumentAnalysis],
+    information_needs: list[str],
+) -> list[str]:
+    covered = {
+        need
+        for analysis in analyses
+        for need in analysis.covered_information_needs
+    }
+    return [need for need in information_needs if need not in covered]
+
+
 class PipelineResult(BaseModel):
     request_id: str
     trace: list[StageTrace] = []
@@ -82,6 +125,10 @@ class PipelineResult(BaseModel):
     source_plan: Optional[SourcePlan] = None
     collection_events: list[SourceCollectionEvent] = Field(default_factory=list)
     report_purpose: Optional[ReportPurposeClassification] = None
+    # Raw documents exactly as returned by the sector collector, before the
+    # processor strips boilerplate or the validator drops documents. Kept so
+    # operators can audit the actual Firecrawl markdown behind a report.
+    collected_source_documents: list[SourceDocument] = Field(default_factory=list)
     document_analyses: list[DocumentAnalysis] = []
     synthesis: Optional[TrendSynthesis] = None
     report_plan: Optional[ReportPlan] = None
@@ -223,6 +270,14 @@ def run_pipeline(
             search_terms,
             result.entities.perspective,
             result.entities.information_needs,
+            WebSearchContext(
+                question=request.question,
+                perspective=result.entities.perspective,
+                report_purpose_id=result.report_purpose.purpose_id,
+                information_needs=result.entities.information_needs,
+                suggested_terms=search_terms,
+                as_of_date=request.created_at.date().isoformat(),
+            ),
         )
         result.source_plan = select_top_sources(
             result.source_plan,
@@ -256,7 +311,13 @@ def run_pipeline(
             if role == "collector":
                 args = (result.source_plan,)
             elif role == "analyzer":
-                args = ([*documents, *attachment_documents], question_with_context)
+                args = (
+                    [*documents, *attachment_documents],
+                    question_with_context,
+                    result.source_plan.information_needs,
+                )
+            elif role == "validator":
+                args = (documents, result.source_plan.search_context)
             else:
                 args = (documents,)
             if role == "collector":
@@ -269,30 +330,209 @@ def run_pipeline(
                     result.collection_events.extend(collection_events)
             else:
                 output = _call_sector_adapter_stage(result.sector_route, role, *args)
-            if role == "analyzer":
-                document_by_id = {document.doc_id: document for document in [*documents, *attachment_documents]}
-                enriched_output = []
-                for analysis in output:
-                    document = document_by_id.get(analysis.doc_id)
-                    if document is not None:
-                        analysis = analysis.model_copy(
-                            update={
-                                "source_id": document.source_id,
-                                "source_title": document.title,
-                                "source_url": document.url,
-                                "reliability_tier": document.reliability_tier,
-                            }
+            if role == "collector":
+                result.collected_source_documents = list(output)
+            if role == "validator":
+                profile = result.sector_route.matched_profile
+                minimum = profile.min_validated_documents
+                max_recollections = profile.max_validation_recollection_attempts
+                recollection_attempt = 0
+                while minimum > 0 and len(output) < minimum and recollection_attempt < max_recollections:
+                    recollection_attempt += 1
+                    retained_documents = list(output)
+                    excluded_urls = list(
+                        dict.fromkeys(
+                            document.url
+                            for document in result.collected_source_documents
+                            if document.url
                         )
-                    enriched_output.append(analysis)
-                output = enriched_output
-                relevant = [analysis for analysis in output if analysis.relevant_to_question is not False]
+                    )
+                    previous_context = result.source_plan.search_context
+                    if previous_context is None:
+                        raise PipelineStageError(
+                            stage=stage_name,
+                            reason="validation recollection requires search context",
+                        )
+                    feedback = [
+                        *previous_context.validation_feedback,
+                        (
+                            f"Validation retained {len(retained_documents)} of {len(documents)} documents; "
+                            f"find replacement evidence so at least {minimum} valid documents remain."
+                        ),
+                    ]
+                    retry_context = previous_context.model_copy(
+                        update={
+                            "excluded_urls": list(
+                                dict.fromkeys([*previous_context.excluded_urls, *excluded_urls])
+                            ),
+                            "validation_feedback": feedback,
+                        }
+                    )
+                    retry_plan = result.source_plan.model_copy(update={"search_context": retry_context})
+
+                    retry_events: list[SourceCollectionEvent] = []
+                    progress_token = bind_collection_events(retry_events)
+                    try:
+                        retry_raw = _call_sector_adapter_stage(
+                            result.sector_route, "collector", retry_plan
+                        )
+                    finally:
+                        reset_collection_events(progress_token)
+                        result.collection_events.extend(retry_events)
+                    result.collected_source_documents.extend(retry_raw)
+                    result.trace.append(
+                        StageTrace(stage="sector_adapter.collector.recollection", status=StageStatus.OK)
+                    )
+
+                    # Retained documents already passed processor + validator.
+                    # Process only newly collected raw pages, then validate the
+                    # combined evidence set.
+                    retry_processed = _call_sector_adapter_stage(
+                        result.sector_route,
+                        "processor",
+                        retry_raw,
+                    )
+                    result.trace.append(
+                        StageTrace(stage="sector_adapter.processor.recollection", status=StageStatus.OK)
+                    )
+                    output = _call_sector_adapter_stage(
+                        result.sector_route,
+                        "validator",
+                        [*retained_documents, *retry_processed],
+                        retry_context,
+                    )
+                    result.trace.append(
+                        StageTrace(stage="sector_adapter.validator.recollection", status=StageStatus.OK)
+                    )
+                    documents = [*retained_documents, *retry_processed]
+                    result.source_plan = retry_plan
+
+                if minimum > 0 and len(output) < minimum:
+                    raise PipelineStageError(
+                        stage=stage_name,
+                        reason=(
+                            "insufficient documents after validation and bounded recollection "
+                            f"({len(output)} < {minimum})"
+                        ),
+                    )
+            if role == "analyzer":
+                analysis_documents = [*documents, *attachment_documents]
+                output = _enrich_document_analyses(output, analysis_documents)
+                usable = _usable_analyses(output)
+                profile = result.sector_route.matched_profile
+                minimum = profile.min_analyzed_documents
+                max_recollections = profile.max_analysis_recollection_attempts
+                recollection_attempt = 0
+
+                while minimum > 0 and len(usable) < minimum and recollection_attempt < max_recollections:
+                    recollection_attempt += 1
+                    previous_context = result.source_plan.search_context
+                    if previous_context is None:
+                        raise PipelineStageError(
+                            stage=stage_name,
+                            reason="analysis recollection requires search context",
+                        )
+                    excluded_urls = list(
+                        dict.fromkeys(
+                            document.url
+                            for document in result.collected_source_documents
+                            if document.url
+                        )
+                    )
+                    missing_needs = _missing_analysis_needs(
+                        usable,
+                        result.source_plan.information_needs,
+                    )
+                    retry_context = previous_context.model_copy(
+                        update={
+                            "excluded_urls": list(
+                                dict.fromkeys([*previous_context.excluded_urls, *excluded_urls])
+                            ),
+                            "validation_feedback": [
+                                *previous_context.validation_feedback,
+                                (
+                                    f"Analyzer retained {len(usable)} usable documents; "
+                                    f"collect replacement evidence for missing needs: {missing_needs}."
+                                ),
+                            ],
+                        }
+                    )
+                    retry_plan = result.source_plan.model_copy(update={"search_context": retry_context})
+
+                    retry_events: list[SourceCollectionEvent] = []
+                    progress_token = bind_collection_events(retry_events)
+                    try:
+                        retry_raw = _call_sector_adapter_stage(
+                            result.sector_route,
+                            "collector",
+                            retry_plan,
+                        )
+                    finally:
+                        reset_collection_events(progress_token)
+                        result.collection_events.extend(retry_events)
+                    result.collected_source_documents.extend(retry_raw)
+                    result.trace.append(
+                        StageTrace(stage="sector_adapter.collector.analysis_recollection", status=StageStatus.OK)
+                    )
+
+                    retry_processed = _call_sector_adapter_stage(
+                        result.sector_route,
+                        "processor",
+                        retry_raw,
+                    )
+                    result.trace.append(
+                        StageTrace(stage="sector_adapter.processor.analysis_recollection", status=StageStatus.OK)
+                    )
+                    retry_validated = _call_sector_adapter_stage(
+                        result.sector_route,
+                        "validator",
+                        retry_processed,
+                        retry_context,
+                    )
+                    result.trace.append(
+                        StageTrace(stage="sector_adapter.validator.analysis_recollection", status=StageStatus.OK)
+                    )
+                    retry_output = _call_sector_adapter_stage(
+                        result.sector_route,
+                        "analyzer",
+                        retry_validated,
+                        question_with_context,
+                        retry_plan.information_needs,
+                    )
+                    retry_output = _enrich_document_analyses(retry_output, retry_validated)
+                    result.trace.append(
+                        StageTrace(stage="sector_adapter.analyzer.recollection", status=StageStatus.OK)
+                    )
+                    output = [*output, *retry_output]
+                    usable_by_doc_id = {
+                        analysis.doc_id: analysis
+                        for analysis in _usable_analyses(output)
+                    }
+                    usable = list(usable_by_doc_id.values())
+                    documents.extend(retry_validated)
+                    result.source_plan = retry_plan
+
+                if minimum > 0 and len(usable) < minimum:
+                    raise PipelineStageError(
+                        stage=stage_name,
+                        reason=(
+                            "insufficient usable analyses after bounded recollection "
+                            f"({len(usable)} < {minimum})"
+                        ),
+                    )
+
                 for analysis in output:
-                    if analysis.relevant_to_question is False:
+                    if analysis not in usable:
+                        exclusion_reason = (
+                            "not relevant to the question"
+                            if analysis.relevant_to_question is False
+                            else f"analysis grounding status={analysis.analysis_validation_status}"
+                        )
                         print(
-                            f"[synthesis] doc '{analysis.doc_id}' excluded: not relevant to the question",
+                            f"[synthesis] doc '{analysis.doc_id}' excluded: {exclusion_reason}",
                             file=sys.stderr,
                         )
-                result.document_analyses = relevant
+                result.document_analyses = usable
             else:
                 documents = output
             result.trace.append(StageTrace(stage=stage_name, status=StageStatus.OK))

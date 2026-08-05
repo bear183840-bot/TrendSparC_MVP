@@ -117,6 +117,12 @@ class SectorProfile(BaseModel):
     # branches on a sector id; adding a new sector only requires profile data.
     key_metrics: list[str] = Field(default_factory=list)
     strategic_dimensions: list[str] = Field(default_factory=list)
+    # Optional, registry-owned post-validation recovery policy. Core reads
+    # these values generically and never branches on a sector id.
+    min_validated_documents: int = 0
+    max_validation_recollection_attempts: int = 0
+    min_analyzed_documents: int = 0
+    max_analysis_recollection_attempts: int = 0
     pipeline_entrypoint: Optional[str] = None
     system_prompt_path: Optional[str] = None
 
@@ -193,12 +199,37 @@ class PlannedSource(BaseModel):
     planning_priority: Optional[Literal["core", "standard", "supporting"]] = None
 
 
+class WebSearchContext(BaseModel):
+    """Question-level context supplied to an AI web-search stage.
+
+    Suggested terms are hints from the deterministic entity/search-term
+    stages, not a query the model must copy verbatim.  The original question
+    and evidence needs remain authoritative so the search model can choose a
+    better first query when the precomputed terms are too narrow.
+    """
+
+    question: str
+    perspective: Optional[str] = None
+    report_purpose_id: Optional[str] = None
+    information_needs: list[str] = Field(default_factory=list)
+    suggested_terms: list[str] = Field(default_factory=list)
+    as_of_date: Optional[str] = None
+    country_code: str = "KR"
+    excluded_urls: list[str] = Field(default_factory=list)
+    validation_feedback: list[str] = Field(default_factory=list)
+
+
 class SourcePlan(BaseModel):
     request_id: str
     sector_id: str
     planned_sources: list[PlannedSource] = Field(default_factory=list)
+    # Complete registry snapshot used for attribution/validation after an
+    # open-web discovery pass. `planned_sources` may be narrowed for legacy
+    # per-source collectors; this list deliberately remains untrimmed.
+    registered_sources: list[PlannedSource] = Field(default_factory=list)
     question_keywords: list[str] = Field(default_factory=list)
     information_needs: list[str] = Field(default_factory=list)
+    search_context: Optional[WebSearchContext] = None
     notes: Optional[str] = None
 
 
@@ -228,6 +259,26 @@ class SourceDocument(BaseModel):
     reliability_tier: Optional[str] = None
 
 
+class EvidenceCoverageAssessment(BaseModel):
+    """LLM judgment over successfully scraped source text, not search snippets."""
+
+    sufficient: bool
+    relevant_doc_ids: list[str]
+    covered_information_needs: list[str]
+    missing_information_needs: list[str]
+    next_queries: list[str]
+    reason: str
+
+
+class WebSearchHarnessResult(BaseModel):
+    documents: list[SourceDocument] = Field(default_factory=list)
+    sufficient: bool = False
+    covered_information_needs: list[str] = Field(default_factory=list)
+    missing_information_needs: list[str] = Field(default_factory=list)
+    rounds_completed: int = 0
+    scrape_call_count: int = 0
+
+
 class MetricPoint(BaseModel):
     """One evidence-stated number tied to a time period (e.g. subscriber count in a given
     year). Never estimated or interpolated — only populated when a document states it."""
@@ -236,6 +287,9 @@ class MetricPoint(BaseModel):
     period: str
     value: float
     unit: Optional[str] = None
+    doc_id: Optional[str] = None
+    source_id: Optional[str] = None
+    source_url: Optional[str] = None
 
 
 class ComparisonPoint(BaseModel):
@@ -247,6 +301,34 @@ class ComparisonPoint(BaseModel):
     criterion: str
     value: str
     level: Optional[Literal["low", "medium", "high"]] = None
+    evidence_claim_id: Optional[str] = None
+    evidence_synthesis_claim_id: Optional[str] = None
+    doc_id: Optional[str] = None
+    source_id: Optional[str] = None
+    source_url: Optional[str] = None
+
+
+class GroundedClaim(BaseModel):
+    """A claim whose supporting quote was verified against one source document."""
+
+    claim_id: str
+    claim_type: Literal[
+        "key_point",
+        "business_impact",
+        "risk",
+        "opportunity",
+        "strength",
+        "weakness",
+        "comparison",
+        "action",
+        "monitoring",
+    ]
+    claim: str
+    evidence_quote: str
+    evidence_location: Optional[str] = None
+    as_of_date: Optional[str] = None
+    source_url: Optional[str] = None
+    confidence: Literal["low", "medium", "high"]
 
 
 class DocumentAnalysis(BaseModel):
@@ -277,6 +359,15 @@ class DocumentAnalysis(BaseModel):
     evidence: list[str] = Field(default_factory=list)
     action_level: Optional[Literal["Monitor", "Review", "Prepare", "Act", "insufficient_data"]] = None
     analysis_confidence: Optional[Literal["low", "medium", "high"]] = None
+    relevance_level: Optional[Literal["direct", "partial", "background", "irrelevant"]] = None
+    relevance_reason: Optional[str] = None
+    grounded_claims: list[GroundedClaim] = Field(default_factory=list)
+    covered_information_needs: list[str] = Field(default_factory=list)
+    missing_information_needs: list[str] = Field(default_factory=list)
+    analysis_validation_status: Optional[
+        Literal["verified", "partial_grounding", "insufficient_grounding", "not_applicable"]
+    ] = None
+    usable_for_synthesis: Optional[bool] = None
     # None until a question-aware analyzer actually judges this document;
     # True/False once it does. The pipeline drops False entries before they
     # ever reach synthesis — see core/request_pipeline/pipeline.py.
@@ -300,6 +391,44 @@ class Contradiction(BaseModel):
 
     topic: str
     conflicting_claims: list[ContradictingClaim] = Field(default_factory=list)
+
+
+class SynthesisSource(BaseModel):
+    """Auditable source metadata preserved at the synthesis handoff boundary."""
+
+    doc_id: str
+    source_id: str
+    source_title: Optional[str] = None
+    source_url: Optional[str] = None
+    reliability_tier: Optional[str] = None
+
+
+class SynthesisClaim(BaseModel):
+    """A verified analyzer claim with document and source provenance intact."""
+
+    synthesis_claim_id: str
+    claim_id: str
+    claim_type: Literal[
+        "key_point",
+        "business_impact",
+        "risk",
+        "opportunity",
+        "strength",
+        "weakness",
+        "comparison",
+        "action",
+        "monitoring",
+    ]
+    claim: str
+    evidence_quote: str
+    evidence_location: Optional[str] = None
+    as_of_date: Optional[str] = None
+    confidence: Literal["low", "medium", "high"]
+    doc_id: str
+    source_id: str
+    source_title: Optional[str] = None
+    source_url: Optional[str] = None
+    reliability_tier: Optional[str] = None
 
 
 class CorroboratedPoint(BaseModel):
@@ -339,6 +468,14 @@ class TrendSynthesis(BaseModel):
     # bookkeeping, no LLM) so the AI refinement pass can verify how many
     # *independent* sources back a claim without re-deriving this mapping.
     doc_source_map: dict[str, str] = Field(default_factory=dict)
+    # Stable handoff for downstream report planning/generation. Unlike the
+    # legacy tagged strings above, these preserve the verified quote and full
+    # document/source provenance without requiring string parsing.
+    grounded_claims: list[SynthesisClaim] = Field(default_factory=list)
+    sources: list[SynthesisSource] = Field(default_factory=list)
+    covered_information_needs: list[str] = Field(default_factory=list)
+    missing_information_needs: list[str] = Field(default_factory=list)
+    analysis_validation_status_by_doc_id: dict[str, str] = Field(default_factory=dict)
     # Claims backed by >= 2 independent sources. Empty unless the AI
     # refinement pass ran and found some — never fabricated.
     corroborated_points: list[CorroboratedPoint] = Field(default_factory=list)

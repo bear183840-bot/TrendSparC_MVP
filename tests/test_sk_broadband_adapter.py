@@ -3,7 +3,13 @@ import types
 
 import pytest
 
-from common.contracts import PlannedSource, SourceDocument, SourcePlan
+from common.contracts import (
+    PlannedSource,
+    SourceDocument,
+    SourcePlan,
+    WebSearchContext,
+    WebSearchHarnessResult,
+)
 from common.errors import PipelineStageError
 from core.source_planner.query_strategy import build_source_search_terms
 from sectors.sk_broadband.adapter import analyzer as analyzer_module
@@ -172,62 +178,7 @@ def test_broadband_collect_caps_total_documents_at_twelve(monkeypatch):
     assert len(docs) == 12
 
 
-def _no_legacy_search_client():
-    class _NoSearchClient:
-        def search(self, *args, **kwargs):
-            raise AssertionError("legacy Firecrawl search must not run when the harness is enabled (판단 5)")
-
-    return _NoSearchClient()
-
-
-def test_broadband_crawl_source_uses_harness_when_enabled_and_sufficient(monkeypatch):
-    monkeypatch.setenv(collector_module._HARNESS_API_KEY_ENV_VAR, "test-key")
-    harness_doc = SourceDocument(
-        doc_id="d1", source_id="SK브로드밴드 뉴스룸", title="B tv 신규 서비스",
-        url="https://news.sktelecom.com/a", content="본문" * 100, reliability_tier="official",
-    )
-    calls = []
-
-    def fake_harness(openai_client, firecrawl_client, source, all_sources, keywords, config):
-        calls.append((source.name, all_sources, keywords))
-        return [harness_doc]
-
-    monkeypatch.setattr(collector_module, "run_ai_search_harness", fake_harness)
-    source = PlannedSource(name="SK브로드밴드 뉴스룸", url="https://news.sktelecom.com/tag/skbroadband", role="official")
-
-    docs = _crawl_source(_no_legacy_search_client(), source, "test-key", ["IPTV"], (source,))
-
-    assert docs == [harness_doc]
-    assert len(calls) == 1
-    assert calls[0][0] == "SK브로드밴드 뉴스룸"
-
-
-def test_broadband_crawl_source_fails_without_legacy_fallback_when_harness_insufficient(monkeypatch):
-    monkeypatch.setenv(collector_module._HARNESS_API_KEY_ENV_VAR, "test-key")
-    monkeypatch.setattr(collector_module, "run_ai_search_harness", lambda *args, **kwargs: [])
-    source = PlannedSource(name="SK브로드밴드 뉴스룸", url="https://news.sktelecom.com/tag/skbroadband")
-
-    with pytest.raises(PipelineStageError):
-        _crawl_source(_no_legacy_search_client(), source, "test-key", ["IPTV"], (source,))
-
-
-def test_broadband_crawl_source_wraps_harness_exception_as_stage_error(monkeypatch):
-    monkeypatch.setenv(collector_module._HARNESS_API_KEY_ENV_VAR, "test-key")
-
-    def fake_harness(*args, **kwargs):
-        raise RuntimeError("simulated unsupported model/tool error")
-
-    monkeypatch.setattr(collector_module, "run_ai_search_harness", fake_harness)
-    source = PlannedSource(name="SK브로드밴드 뉴스룸", url="https://news.sktelecom.com/tag/skbroadband")
-
-    with pytest.raises(PipelineStageError):
-        _crawl_source(_no_legacy_search_client(), source, "test-key", ["IPTV"], (source,))
-
-
-def test_broadband_crawl_source_skips_harness_entirely_when_key_unset(monkeypatch):
-    monkeypatch.delenv(collector_module._HARNESS_API_KEY_ENV_VAR, raising=False)
-    calls = []
-    monkeypatch.setattr(collector_module, "run_ai_search_harness", lambda *a, **k: calls.append(1) or [])
+def test_broadband_crawl_source_keeps_legacy_firecrawl_path():
     source = PlannedSource(
         name="전자신문 (통신)", url="https://www.etnews.com/news/section.html?id1=03",
         collection_method=["firecrawl_search"], reliability_tier="analyst_media",
@@ -236,14 +187,11 @@ def test_broadband_crawl_source_skips_harness_entirely_when_key_unset(monkeypatc
 
     docs = _crawl_source(_FastClient([result]), source, "test-key", ["OTT", "IPTV"])
 
-    assert calls == []  # harness never touched
     assert len(docs) == 1  # legacy path still works exactly as before this change
 
 
 def test_broadband_kofic_source_bypasses_harness_even_when_enabled(monkeypatch):
     monkeypatch.setenv(collector_module._HARNESS_API_KEY_ENV_VAR, "test-key")
-    calls = []
-    monkeypatch.setattr(collector_module, "run_ai_search_harness", lambda *a, **k: calls.append(1) or [])
     source = PlannedSource(
         name="영화진흥위원회(KOFIC)",
         url="https://www.kofic.or.kr/kofic/business/board/selectBoardList.do?boardNumber=2",
@@ -260,11 +208,10 @@ def test_broadband_kofic_source_bypasses_harness_even_when_enabled(monkeypatch):
 
     docs = _crawl_source(_FastClient([search_result]), source, "test-key", ["영화산업", "OTT"])
 
-    assert calls == []  # responses.create-equivalent never invoked for KOFIC
     assert len(docs) == 1
 
 
-def test_broadband_collect_continues_when_harness_fails_for_one_source(monkeypatch):
+def test_broadband_collect_runs_question_harness_once_for_all_sources(monkeypatch):
     monkeypatch.setenv("FIRECRAWL_API_KEY", "test-key")
     monkeypatch.setenv(collector_module._HARNESS_API_KEY_ENV_VAR, "test-key")
     sources = [
@@ -272,19 +219,109 @@ def test_broadband_collect_continues_when_harness_fails_for_one_source(monkeypat
         PlannedSource(name="ok", url="https://ok.example.com", collection_method=["firecrawl_search"]),
     ]
     plan = SourcePlan(request_id="req", sector_id="sk_broadband", planned_sources=sources, question_keywords=["OTT"])
-    monkeypatch.setattr(collector_module, "Firecrawl", lambda api_key: object())  # never called by the fake harness
+    plan.registered_sources = list(sources)
+    monkeypatch.setattr(collector_module, "Firecrawl", lambda api_key: object())
+    calls = []
 
-    def fake_harness(openai_client, firecrawl_client, source, all_sources, keywords, config):
-        if source.name == "broken":
-            return []  # insufficient -> _run_ai_harness raises PipelineStageError
-        return [SourceDocument(doc_id="d1", source_id="ok", url="https://ok.example.com/a", content="본문" * 100)]
+    def fake_harness(openai_client, firecrawl_client, registered_sources, keywords, config, search_context=None):
+        calls.append((registered_sources, keywords, config))
+        return WebSearchHarnessResult(
+            documents=[
+                SourceDocument(doc_id="d1", source_id="broken", url="https://broken.example.com/a", content="본문" * 100),
+                SourceDocument(doc_id="d2", source_id="ok", url="https://ok.example.com/b", content="본문" * 100),
+            ],
+            sufficient=True,
+            covered_information_needs=[],
+            missing_information_needs=[],
+            rounds_completed=1,
+            scrape_call_count=2,
+        )
 
-    monkeypatch.setattr(collector_module, "run_ai_search_harness", fake_harness)
+    monkeypatch.setattr(collector_module, "run_question_search_harness_result", fake_harness)
 
     docs = collect(plan)
 
-    assert len(docs) == 1
-    assert docs[0].source_id == "ok"
+    assert len(docs) == 2
+    assert docs[0].source_id == "broken"
+    assert len(calls) == 1
+    assert calls[0][0] == sources
+    assert calls[0][2].target_docs == 6
+    assert calls[0][2].min_scraped_docs_for_sufficient == 2
+    assert calls[0][2].min_independent_sources_for_sufficient == 2
+    assert calls[0][2].assess_scraped_evidence is True
+
+
+def test_broadband_question_harness_keeps_special_kofic_collector(monkeypatch):
+    monkeypatch.setenv("FIRECRAWL_API_KEY", "test-key")
+    monkeypatch.setenv(collector_module._HARNESS_API_KEY_ENV_VAR, "test-key")
+    web_source = PlannedSource(name="뉴스", url="https://news.example.com", collection_method=["firecrawl_search"])
+    kofic = PlannedSource(
+        name="영화진흥위원회(KOFIC)",
+        url="https://www.kofic.or.kr/board",
+        collection_method=["kofic_pdf_post_download", "firecrawl_parse"],
+    )
+    plan = SourcePlan(
+        request_id="req",
+        sector_id="sk_broadband",
+        planned_sources=[web_source],  # KOFIC may be outside the legacy top-N
+        registered_sources=[web_source, kofic],
+        question_keywords=["OTT"],
+    )
+    monkeypatch.setattr(collector_module, "Firecrawl", lambda api_key: object())
+    monkeypatch.setattr(
+        collector_module,
+        "_run_question_ai_harness",
+        lambda *args: WebSearchHarnessResult(
+            documents=[
+                SourceDocument(doc_id="w1", source_id="뉴스1", url="https://news.example.com/1", content="본문" * 100),
+                SourceDocument(doc_id="w2", source_id="뉴스2", url="https://other.example.com/2", content="본문" * 100),
+            ],
+            sufficient=True,
+        ),
+    )
+    special_calls = []
+
+    def fake_kofic(client, source, api_key, keywords):
+        special_calls.append(source.name)
+        return [
+            SourceDocument(doc_id="k1", source_id=source.name, url="https://www.kofic.or.kr/report-1", content="본문" * 100),
+            SourceDocument(doc_id="k2", source_id=source.name, url="https://www.kofic.or.kr/report-2", content="본문" * 100),
+        ]
+
+    monkeypatch.setattr(collector_module, "_crawl_kofic_pdf_source", fake_kofic)
+
+    docs = collect(plan)
+
+    assert special_calls == ["영화진흥위원회(KOFIC)"]
+    assert [doc.doc_id for doc in docs] == ["w1", "w2", "k1", "k2"]
+
+
+def test_broadband_question_harness_rejects_fewer_than_two_documents(monkeypatch):
+    monkeypatch.setenv("FIRECRAWL_API_KEY", "test-key")
+    monkeypatch.setenv(collector_module._HARNESS_API_KEY_ENV_VAR, "test-key")
+    source = PlannedSource(name="뉴스", url="https://news.example.com", collection_method=["firecrawl_search"])
+    plan = SourcePlan(
+        request_id="req",
+        sector_id="sk_broadband",
+        planned_sources=[source],
+        registered_sources=[source],
+        question_keywords=["OTT"],
+    )
+    monkeypatch.setattr(collector_module, "Firecrawl", lambda api_key: object())
+    monkeypatch.setattr(
+        collector_module,
+        "_run_question_ai_harness",
+        lambda *args: WebSearchHarnessResult(
+            documents=[
+                SourceDocument(doc_id="only", source_id="뉴스", url="https://news.example.com/only", content="본문" * 100)
+            ],
+            sufficient=False,
+            missing_information_needs=["competition"],
+        ),
+    )
+
+    with pytest.raises(PipelineStageError, match="insufficient relevant evidence"):
+        collect(plan)
 
 
 def test_broadband_collect_passes_all_planned_sources_to_crawl_source(monkeypatch):
@@ -377,6 +414,69 @@ def test_broadband_validator_drops_cross_source_title_duplicates():
     assert result[0].doc_id == "1"
 
 
+def test_broadband_validator_keeps_untitled_documents_when_urls_differ():
+    first = SourceDocument(
+        doc_id="1", source_id="출처 A", title="Untitled",
+        url="https://a.example.com/one", content="가" * 300,
+    )
+    second = SourceDocument(
+        doc_id="2", source_id="출처 B", title="Untitled",
+        url="https://b.example.com/two", content="나" * 300,
+    )
+
+    result = validate([first, second])
+
+    assert [document.doc_id for document in result] == ["1", "2"]
+
+
+def test_broadband_validator_uses_question_specific_recency_window():
+    from datetime import datetime, timezone
+
+    recent = SourceDocument(
+        doc_id="recent", source_id="source", title="최근 자료",
+        url="https://example.com/recent", content="가" * 300,
+        published_at=datetime(2026, 7, 20, tzinfo=timezone.utc),
+    )
+    medium_age = SourceDocument(
+        doc_id="medium", source_id="source", title="몇 달 전 자료",
+        url="https://example.com/medium", content="다" * 300,
+        published_at=datetime(2026, 5, 1, tzinfo=timezone.utc),
+    )
+    older = SourceDocument(
+        doc_id="older", source_id="source", title="과거 자료",
+        url="https://example.com/older", content="나" * 300,
+        published_at=datetime(2024, 1, 1, tzinfo=timezone.utc),
+    )
+    undated = SourceDocument(
+        doc_id="undated", source_id="source", title="날짜 없는 자료",
+        url="https://example.com/undated", content="라" * 300,
+    )
+    latest_context = WebSearchContext(
+        question="가장 최신 IPTV 현황은?",
+        report_purpose_id="current_status",
+        as_of_date="2026-08-05",
+    )
+    current_context = WebSearchContext(
+        question="현재 IPTV 현황은?",
+        report_purpose_id="current_status",
+        as_of_date="2026-08-05",
+    )
+    historical_context = WebSearchContext(
+        question="IPTV 도입 배경과 과거 변화는?",
+        report_purpose_id="root_cause",
+        as_of_date="2026-08-05",
+    )
+
+    documents = [recent, medium_age, older, undated]
+    assert validate(documents, latest_context) == [recent]
+    assert {document.doc_id for document in validate(documents, current_context)} == {
+        "recent", "medium", "undated"
+    }
+    assert {document.doc_id for document in validate(documents, historical_context)} == {
+        "recent", "medium", "older", "undated"
+    }
+
+
 def test_broadband_validator_caps_at_eight_and_prefers_official_sources():
     documents = []
     for i in range(10):
@@ -410,17 +510,71 @@ def _document():
     )
 
 
-def _make_response(summary="요약", key_points=None, sentiment="mixed", relevant_to_question=True, refusal=None):
+def _make_response(
+    summary="요약",
+    key_points=None,
+    sentiment="mixed",
+    relevance_level="direct",
+    grounded_claims=None,
+    metric_points=None,
+    comparison_points=None,
+    refusal=None,
+):
     message = types.SimpleNamespace(
         content=json.dumps(
             {
                 "summary": summary,
                 "key_points": key_points or ["시장 변화: OTT 경쟁 심화", "Action: 경쟁사 전략 모니터링"],
                 "sentiment": sentiment,
-                "relevant_to_question": relevant_to_question,
+                "relevance_level": relevance_level,
+                "relevance_reason": "IPTV 경쟁 변화에 관한 직접 근거를 포함함",
+                "grounded_claims": grounded_claims if grounded_claims is not None else [
+                    {
+                        "claim_id": "c1",
+                        "claim_type": "key_point",
+                        "claim": "OTT 시장 변화가 IPTV 경쟁에 영향을 준다.",
+                        "evidence_quote": "OTT 시장 변화와 IPTV 경쟁에 관한 본문입니다.",
+                        "evidence_location": "본문",
+                        "as_of_date": None,
+                        "confidence": "high",
+                    },
+                    {
+                        "claim_id": "c2",
+                        "claim_type": "risk",
+                        "claim": "OTT 경쟁 심화로 가입자 이탈 가능성",
+                        "evidence_quote": "OTT 시장 변화와 IPTV 경쟁에 관한 본문입니다.",
+                        "evidence_location": "본문",
+                        "as_of_date": None,
+                        "confidence": "medium",
+                    },
+                    {
+                        "claim_id": "c3",
+                        "claim_type": "action",
+                        "claim": "Review: 경쟁사 OTT 번들링 전략 비교",
+                        "evidence_quote": "OTT 시장 변화와 IPTV 경쟁에 관한 본문입니다.",
+                        "evidence_location": "본문",
+                        "as_of_date": None,
+                        "confidence": "medium",
+                    },
+                    {
+                        "claim_id": "c4",
+                        "claim_type": "opportunity",
+                        "claim": "AI 추천 기반 개인화 서비스 강화 기회",
+                        "evidence_quote": "OTT 시장 변화와 IPTV 경쟁에 관한 본문입니다.",
+                        "evidence_location": "본문",
+                        "as_of_date": None,
+                        "confidence": "medium",
+                    },
+                ],
+                "covered_information_needs": ["OTT와 IPTV 경쟁 변화"],
+                "missing_information_needs": ["경쟁사별 가입자 수치"],
                 "business_impact": "IPTV 경쟁력과 콘텐츠 투자 판단에 영향",
                 "risk": "OTT 경쟁 심화로 가입자 이탈 가능성",
                 "opportunity": "AI 추천 기반 개인화 서비스 강화 기회",
+                "strength": "",
+                "weakness": "",
+                "metric_points": metric_points or [],
+                "comparison_points": comparison_points or [],
                 "recommended_actions": ["Review: 경쟁사 OTT 번들링 전략 비교"],
                 "monitoring_indicators": ["OTT 가입자 변화", "B tv ARPU 변화"],
                 "evidence": ["문서에서 OTT 경쟁과 IPTV 서비스 변화가 언급됨"],
@@ -455,14 +609,127 @@ def test_broadband_analyzer_uses_structured_schema(monkeypatch):
     monkeypatch.setattr(analyzer_module, "OpenAI", lambda api_key: fake_openai)
     monkeypatch.setattr(analyzer_module, "_load_system_prompt", lambda: "system prompt")
 
-    result = analyze([_document()], "OTT 시장 변화가 SK브로드밴드에 주는 영향은?")
+    result = analyze(
+        [_document()],
+        "OTT 시장 변화가 SK브로드밴드에 주는 영향은?",
+        ["OTT와 IPTV 경쟁 변화", "경쟁사별 가입자 수치"],
+    )
 
     assert result[0].summary == "요약"
     assert result[0].relevant_to_question is True
+    assert result[0].relevance_level == "direct"
+    assert result[0].relevance_reason
+    assert result[0].grounded_claims[0].source_url == "https://example.com/a"
+    assert result[0].covered_information_needs == ["OTT와 IPTV 경쟁 변화"]
+    assert result[0].missing_information_needs == ["경쟁사별 가입자 수치"]
+    assert "OTT 시장 변화와 IPTV 경쟁에 관한 본문입니다." in result[0].evidence
     assert result[0].risk == "OTT 경쟁 심화로 가입자 이탈 가능성"
+    assert result[0].opportunity == "AI 추천 기반 개인화 서비스 강화 기회"
     assert result[0].recommended_actions == ["Review: 경쟁사 OTT 번들링 전략 비교"]
     schema = fake_openai.chat.completions.last_kwargs["response_format"]["json_schema"]["schema"]
     assert schema["additionalProperties"] is False
+    assert "relevant_to_question" not in schema["properties"]
+    assert "risk" not in schema["properties"]
+    assert "recommended_actions" not in schema["properties"]
+    user_payload = json.loads(fake_openai.chat.completions.last_kwargs["messages"][1]["content"])
+    assert user_payload["required_information_needs"] == [
+        "OTT와 IPTV 경쟁 변화",
+        "경쟁사별 가입자 수치",
+    ]
+
+
+def test_broadband_analyzer_rejects_claim_quote_not_found_in_source(monkeypatch):
+    monkeypatch.setenv("TRENDSPARC_SK_BROADBAND_ANALYZER_API_KEY", "test-key")
+    response = _make_response(
+        grounded_claims=[
+            {
+                "claim_id": "bad1",
+                "claim_type": "key_point",
+                "claim": "원문에 없는 주장",
+                "evidence_quote": "원문에는 존재하지 않는 인용문",
+                "evidence_location": None,
+                "as_of_date": None,
+                "confidence": "high",
+            }
+        ]
+    )
+    fake_openai = _FakeOpenAI(response)
+    monkeypatch.setattr(analyzer_module, "OpenAI", lambda api_key: fake_openai)
+    monkeypatch.setattr(analyzer_module, "_load_system_prompt", lambda: "system prompt")
+
+    result = analyze([_document()], "OTT 시장 변화는?")[0]
+
+    assert result.grounded_claims == []
+    assert result.evidence == []
+    assert result.covered_information_needs == []
+    assert result.relevant_to_question is True
+    assert result.relevance_level == "direct"
+    assert result.analysis_validation_status == "insufficient_grounding"
+    assert result.usable_for_synthesis is False
+
+
+def test_broadband_analyzer_keeps_only_metrics_found_in_source(monkeypatch):
+    monkeypatch.setenv("TRENDSPARC_SK_BROADBAND_ANALYZER_API_KEY", "test-key")
+    document = _document().model_copy(
+        update={"content": "2025년 IPTV 가입자는 100만 명이다. OTT 시장 변화와 IPTV 경쟁에 관한 본문입니다."}
+    )
+    response = _make_response(
+        metric_points=[
+            {"label": "IPTV 가입자", "period": "2025년", "value": 100, "unit": "만 명"},
+            {"label": "매출", "period": "2024년", "value": 999, "unit": "억원"},
+        ]
+    )
+    fake_openai = _FakeOpenAI(response)
+    monkeypatch.setattr(analyzer_module, "OpenAI", lambda api_key: fake_openai)
+    monkeypatch.setattr(analyzer_module, "_load_system_prompt", lambda: "system prompt")
+
+    result = analyze([document], "IPTV 가입자는?")[0]
+
+    assert len(result.metric_points) == 1
+    assert result.metric_points[0].period == "2025년"
+    assert result.metric_points[0].value == 100
+
+
+def test_broadband_analyzer_keeps_only_comparisons_linked_to_verified_claims(monkeypatch):
+    monkeypatch.setenv("TRENDSPARC_SK_BROADBAND_ANALYZER_API_KEY", "test-key")
+    response = _make_response(
+        grounded_claims=[
+            {
+                "claim_id": "cmp1",
+                "claim_type": "comparison",
+                "claim": "IPTV와 OTT의 경쟁이 심화됐다.",
+                "evidence_quote": "OTT 시장 변화와 IPTV 경쟁에 관한 본문입니다.",
+                "evidence_location": "본문",
+                "as_of_date": None,
+                "confidence": "high",
+            }
+        ],
+        comparison_points=[
+            {
+                "entity": "OTT",
+                "criterion": "경쟁 강도",
+                "value": "심화",
+                "level": "high",
+                "evidence_claim_id": "cmp1",
+            },
+            {
+                "entity": "근거 없는 대상",
+                "criterion": "가격",
+                "value": "낮음",
+                "level": "low",
+                "evidence_claim_id": "missing",
+            },
+        ],
+    )
+    fake_openai = _FakeOpenAI(response)
+    monkeypatch.setattr(analyzer_module, "OpenAI", lambda api_key: fake_openai)
+    monkeypatch.setattr(analyzer_module, "_load_system_prompt", lambda: "system prompt")
+
+    result = analyze([_document()], "OTT와 IPTV 경쟁은?")[0]
+
+    assert len(result.comparison_points) == 1
+    assert result.comparison_points[0].entity == "OTT"
+    assert result.comparison_points[0].evidence_claim_id == "cmp1"
 
 
 def test_broadband_analyzer_missing_key_raises_stage_error(monkeypatch):

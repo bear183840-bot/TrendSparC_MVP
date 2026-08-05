@@ -241,7 +241,11 @@ def _analyze_document(client: OpenAI, system_prompt: str, document: SourceDocume
     )
 
 
-def analyze(source_documents: list[SourceDocument], question: str) -> list[DocumentAnalysis]:
+def analyze(
+    source_documents: list[SourceDocument],
+    question: str,
+    information_needs: list[str] | None = None,
+) -> list[DocumentAnalysis]:
     """입력된 SK텔레콤 관련 문서 목록을 분석하여 DocumentAnalysis 리스트로 반환합니다."""
     api_key = os.environ.get(_API_KEY_ENV_VAR)
     if not api_key:

@@ -20,11 +20,20 @@ import requests
 from firecrawl import Firecrawl
 from firecrawl.v2.types import ScrapeOptions
 
-from common.contracts import PlannedSource, SourceDocument, SourcePlan
+from common.contracts import (
+    PlannedSource,
+    SourceDocument,
+    SourcePlan,
+    WebSearchContext,
+    WebSearchHarnessResult,
+)
 from common.errors import PipelineStageError
 from core.collection_progress import emit_collection_event
 from core.source_planner.query_strategy import build_search_queries, build_source_search_terms
-from sources.collectors.ai_search_harness import HarnessConfig, run_ai_search_harness
+from sources.collectors.ai_search_harness import (
+    HarnessConfig,
+    run_question_search_harness_result,
+)
 from sources.collectors.kofic_pdf import collect_pdf_markdown_from_detail_url
 from sources.collectors.firecrawl_web import response_markdown
 
@@ -38,15 +47,15 @@ _MAX_QUERY_TERMS = 5
 _MAX_RESULTS_PER_SOURCE = 2
 # AI search harness (grounded web_search + Firecrawl scrape, see
 # sources/collectors/ai_search_harness.py) — optional, opt-in via env var.
-# When enabled, a source uses the harness ONLY: insufficient/failed results
-# raise PipelineStageError instead of falling back to the legacy Firecrawl
-# search below, since retrying with a lower-quality method after already
-# spending harness tokens wastes money for little chance of success. When
-# disabled (the default), sources use the legacy Firecrawl search unchanged.
+# When enabled, collect() runs one bounded question-level search session and
+# does not fall back to the legacy Firecrawl search. When disabled (the
+# default), planned sources use the legacy per-source path unchanged.
 _HARNESS_API_KEY_ENV_VAR = "TRENDSPARC_SK_BROADBAND_COLLECTOR_HARNESS_API_KEY"
 _HARNESS_MODEL_ENV_VAR = "TRENDSPARC_SK_BROADBAND_COLLECTOR_HARNESS_MODEL"
 _HARNESS_DEFAULT_MODEL = "gpt-4o"
-_HARNESS_MIN_DOCS_PER_SOURCE = 1
+_QUESTION_SEARCH_EVENT_NAME = "OpenAI 웹검색"
+_QUESTION_HARNESS_MAX_DOCS = 6  # 2 candidates/round * at most 3 rounds
+_MIN_REQUIRED_SOURCE_DOCUMENTS = 2
 # Defensive cap on top of source_planner.select_top_sources()'s 6-source
 # selection (6 sources * _MAX_RESULTS_PER_SOURCE = 12) — stops collection
 # once reached even if a future config change lets more sources or results
@@ -255,60 +264,133 @@ def _crawl_kofic_pdf_source(client: Firecrawl, source: PlannedSource, api_key: s
     return documents
 
 
-def _run_ai_harness(
-    client: Firecrawl,
-    source: PlannedSource,
-    all_sources: list[PlannedSource],
-    keywords: list[str],
-    api_key: str,
-) -> list[SourceDocument]:
-    """The only path taken when the harness is enabled for this source —
-    insufficient/failed results raise PipelineStageError instead of falling
-    back to legacy Firecrawl search. collect()'s existing per-source
-    try/except catches this, logs the source as failed, and moves on."""
-    try:
-        from openai import OpenAI
-
-        openai_client = OpenAI(api_key=api_key)
-        model = os.environ.get(_HARNESS_MODEL_ENV_VAR) or _HARNESS_DEFAULT_MODEL
-        docs = run_ai_search_harness(
-            openai_client,
-            client,
-            source,
-            all_sources,
-            keywords,
-            HarnessConfig(model=model),
-        )
-    except Exception as exc:  # noqa: BLE001
-        raise PipelineStageError(
-            stage=_STAGE,
-            reason=f"ai_search_harness call failed for '{source.name}'",
-            detail=str(exc),
-        ) from exc
-    if len(docs) < _HARNESS_MIN_DOCS_PER_SOURCE:
-        raise PipelineStageError(
-            stage=_STAGE,
-            reason=(
-                f"ai_search_harness found insufficient documents for "
-                f"'{source.name}' ({len(docs)} < {_HARNESS_MIN_DOCS_PER_SOURCE})"
-            ),
-        )
-    return docs
-
-
 def _crawl_source(
     client: Firecrawl,
     source: PlannedSource,
     api_key: str,
     keywords: list[str],
     all_sources: tuple[PlannedSource, ...] = (),
-) -> list[SourceDocument]:
+    search_context: WebSearchContext | None = None,
+) -> WebSearchHarnessResult:
     if "kofic_pdf_post_download" in set(source.collection_method):
         return _crawl_kofic_pdf_source(client, source, api_key, keywords)
-    harness_key = os.environ.get(_HARNESS_API_KEY_ENV_VAR)
-    if not harness_key:
-        return _crawl_web_source(client, source, keywords)  # harness disabled — legacy is the default
-    return _run_ai_harness(client, source, list(all_sources), keywords, harness_key)  # enabled — never falls back
+    return _crawl_web_source(client, source, keywords)
+
+
+def _run_question_ai_harness(
+    client: Firecrawl,
+    registered_sources: list[PlannedSource],
+    keywords: list[str],
+    api_key: str,
+    search_context: WebSearchContext | None,
+) -> list[SourceDocument]:
+    try:
+        from openai import OpenAI
+
+        openai_client = OpenAI(api_key=api_key)
+        model = os.environ.get(_HARNESS_MODEL_ENV_VAR) or _HARNESS_DEFAULT_MODEL
+        return run_question_search_harness_result(
+            openai_client,
+            client,
+            registered_sources,
+            keywords,
+            HarnessConfig(
+                model=model,
+                target_docs=_QUESTION_HARNESS_MAX_DOCS,
+                assess_scraped_evidence=True,
+            ),
+            search_context=search_context,
+        )
+    except Exception as exc:  # noqa: BLE001
+        raise PipelineStageError(
+            stage=_STAGE,
+            reason="question-level ai_search_harness call failed",
+            detail=str(exc),
+        ) from exc
+
+
+def _collect_with_question_harness(
+    client: Firecrawl,
+    source_plan: SourcePlan,
+    firecrawl_api_key: str,
+    harness_api_key: str,
+) -> list[SourceDocument]:
+    """One OpenAI search session plus any registry-declared special collectors."""
+    registered_sources = source_plan.registered_sources or source_plan.planned_sources
+    special_sources = [
+        source
+        for source in registered_sources
+        if source.url and "kofic_pdf_post_download" in set(source.collection_method)
+    ]
+    total = 1 + len(special_sources)
+    documents: list[SourceDocument] = []
+    search_result: WebSearchHarnessResult | None = None
+
+    emit_collection_event(_QUESTION_SEARCH_EVENT_NAME, 1, total, "started")
+    print(f"[1/{total}] {_QUESTION_SEARCH_EVENT_NAME} 수집 중...", file=sys.stderr)
+    try:
+        search_result = _run_question_ai_harness(
+            client,
+            list(registered_sources),
+            source_plan.question_keywords,
+            harness_api_key,
+            source_plan.search_context,
+        )
+        documents.extend(search_result.documents)
+        detail = (
+            f"rounds={search_result.rounds_completed}, "
+            f"scrape_calls={search_result.scrape_call_count}, "
+            f"covered={search_result.covered_information_needs}, "
+            f"missing={search_result.missing_information_needs}"
+        )
+        emit_collection_event(
+            _QUESTION_SEARCH_EVENT_NAME,
+            1,
+            total,
+            "completed" if search_result.sufficient else "failed",
+            document_count=len(search_result.documents),
+            detail=detail,
+        )
+    except PipelineStageError as exc:
+        emit_collection_event(
+            _QUESTION_SEARCH_EVENT_NAME, 1, total, "failed", detail=exc.detail or exc.reason
+        )
+        print(f"[1/{total}] {_QUESTION_SEARCH_EVENT_NAME} 실패: {exc.reason}", file=sys.stderr)
+
+    for index, source in enumerate(special_sources, start=2):
+        emit_collection_event(source.name, index, total, "started")
+        try:
+            found = _crawl_kofic_pdf_source(
+                client,
+                source,
+                firecrawl_api_key,
+                build_source_search_terms(source, source_plan.question_keywords),
+            )
+            documents.extend(found)
+            emit_collection_event(source.name, index, total, "completed", document_count=len(found))
+        except Exception as exc:  # noqa: BLE001
+            detail = exc.detail or exc.reason if isinstance(exc, PipelineStageError) else str(exc)
+            emit_collection_event(source.name, index, total, "failed", detail=detail)
+            print(f"[{index}/{total}] {source.name} 실패: {detail}", file=sys.stderr)
+    if (
+        search_result is None
+        or not search_result.sufficient
+        or len(search_result.documents) < _MIN_REQUIRED_SOURCE_DOCUMENTS
+    ):
+        missing = search_result.missing_information_needs if search_result else []
+        raise PipelineStageError(
+            stage=_STAGE,
+            reason=(
+                "insufficient relevant evidence after bounded collection "
+                f"(documents={len(search_result.documents) if search_result else 0}, "
+                f"missing={missing})"
+            ),
+            detail=(
+                "At least two question-relevant documents from independent sources "
+                "and coverage of every required information need are required."
+            ),
+        )
+    return documents[:_MAX_COLLECTED_DOCUMENTS]
 
 
 def collect(source_plan: SourcePlan) -> list[SourceDocument]:
@@ -318,6 +400,9 @@ def collect(source_plan: SourcePlan) -> list[SourceDocument]:
     if not api_key:
         raise PipelineStageError(stage=_STAGE, reason=f"{_API_KEY_ENV_VAR} is not configured")
     client = Firecrawl(api_key=api_key)
+    harness_key = os.environ.get(_HARNESS_API_KEY_ENV_VAR)
+    if harness_key:
+        return _collect_with_question_harness(client, source_plan, api_key, harness_key)
     total = len(source_plan.planned_sources)
     documents: list[SourceDocument] = []
     for index, source in enumerate(source_plan.planned_sources):
@@ -326,13 +411,20 @@ def collect(source_plan: SourcePlan) -> list[SourceDocument]:
         emit_collection_event(source.name, index + 1, total, "started")
         print(f"[{index + 1}/{total}] {source.name} 수집 중...", file=sys.stderr)
         try:
-            source_documents = _crawl_source(
+            crawl_args = (
                 client,
                 source,
                 api_key,
                 build_source_search_terms(source, source_plan.question_keywords),
                 tuple(source_plan.planned_sources),
             )
+            if source_plan.search_context is None:
+                source_documents = _crawl_source(*crawl_args)
+            else:
+                source_documents = _crawl_source(
+                    *crawl_args,
+                    search_context=source_plan.search_context,
+                )
             documents.extend(source_documents)
             emit_collection_event(
                 source.name, index + 1, total, "completed", document_count=len(source_documents)

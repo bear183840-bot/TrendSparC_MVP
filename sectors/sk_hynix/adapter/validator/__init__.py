@@ -73,7 +73,7 @@ def _quality_sort_key(document: SourceDocument) -> tuple[int, float]:
     return (reliability_rank, -recency)
 
 
-def validate(source_documents: list[SourceDocument]) -> list[SourceDocument]:
+def validate(source_documents: list[SourceDocument], search_context=None) -> list[SourceDocument]:
     structurally_valid = [document for document in source_documents if _is_valid(document)]
     recent_enough = [document for document in structurally_valid if _is_recent_enough(document)]
     deduplicated = _drop_cross_source_title_duplicates(recent_enough)

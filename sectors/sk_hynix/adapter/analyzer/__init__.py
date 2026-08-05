@@ -237,7 +237,11 @@ def _analyze_document(client: OpenAI, system_prompt: str, document: SourceDocume
     )
 
 
-def analyze(source_documents: list[SourceDocument], question: str) -> list[DocumentAnalysis]:
+def analyze(
+    source_documents: list[SourceDocument],
+    question: str,
+    information_needs: list[str] | None = None,
+) -> list[DocumentAnalysis]:
     api_key = os.environ.get(_API_KEY_ENV_VAR)
     if not api_key:
         raise PipelineStageError(

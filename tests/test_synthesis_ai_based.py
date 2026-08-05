@@ -1,12 +1,16 @@
 import json
 import types
 
-from common.contracts import TrendSynthesis
+from common.contracts import SynthesisClaim, TrendSynthesis
 from core.synthesis import ai_based as synthesis_ai_module
 from core.synthesis.ai_based import refine_synthesis_ai
 
 
-def _rule_based_result(highlights: list[str], doc_source_map: dict[str, str] | None = None) -> TrendSynthesis:
+def _rule_based_result(
+    highlights: list[str],
+    doc_source_map: dict[str, str] | None = None,
+    **kwargs,
+) -> TrendSynthesis:
     return TrendSynthesis(
         request_id="req_test",
         sector_id="sk_hynix",
@@ -14,6 +18,7 @@ def _rule_based_result(highlights: list[str], doc_source_map: dict[str, str] | N
         synthesis_text=None,
         source_count=len(highlights),
         doc_source_map=doc_source_map or {},
+        **kwargs,
     )
 
 
@@ -81,7 +86,21 @@ def test_uses_ai_output_when_api_key_configured(monkeypatch):
     monkeypatch.setenv("TRENDSPARC_SYNTHESIS_AI_API_KEY", "test-key")
     response = _make_response(["요약된 핵심 포인트"], "종합하면 이런 상황이다.")
     monkeypatch.setattr(synthesis_ai_module, "OpenAI", lambda api_key: _FakeOpenAI(response))
-    rule_based = _rule_based_result(["점 A", "점 A와 같은 말", "점 B"])
+    grounded_claim = SynthesisClaim(
+        synthesis_claim_id="doc1:c1",
+        claim_id="c1",
+        claim_type="key_point",
+        claim="검증된 주장",
+        evidence_quote="검증된 원문",
+        confidence="high",
+        doc_id="doc1",
+        source_id="출처1",
+    )
+    rule_based = _rule_based_result(
+        ["점 A", "점 A와 같은 말", "점 B"],
+        grounded_claims=[grounded_claim],
+        covered_information_needs=["현황"],
+    )
 
     result = refine_synthesis_ai(rule_based, "테스트 질문")
 
@@ -90,6 +109,8 @@ def test_uses_ai_output_when_api_key_configured(monkeypatch):
     # unrelated fields carried over unchanged from the rule-based result
     assert result.request_id == rule_based.request_id
     assert result.sector_id == rule_based.sector_id
+    assert result.grounded_claims == [grounded_claim]
+    assert result.covered_information_needs == ["현황"]
 
 
 def test_falls_back_to_rule_based_on_api_failure(monkeypatch):

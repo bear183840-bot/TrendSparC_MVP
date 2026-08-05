@@ -31,7 +31,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from common.contracts import PlannedSource, SourcePlan
+from common.contracts import PlannedSource, SourcePlan, WebSearchContext
 
 _COMMON_REGISTRY_DIR_NAME = "common"
 
@@ -280,6 +280,7 @@ def plan_sources(
     question_keywords: list[str] | None = None,
     perspective: str | None = None,
     information_needs: list[str] | None = None,
+    search_context: WebSearchContext | None = None,
 ) -> SourcePlan:
     planned_sources = _load_registry_dir(registry_root / sector_id) + _load_registry_dir(
         registry_root / _COMMON_REGISTRY_DIR_NAME
@@ -294,7 +295,9 @@ def plan_sources(
         request_id=request_id,
         sector_id=sector_id,
         planned_sources=planned_sources,
+        registered_sources=list(planned_sources),
         question_keywords=question_keywords or [],
         information_needs=information_needs or [],
+        search_context=search_context,
         notes=notes,
     )
