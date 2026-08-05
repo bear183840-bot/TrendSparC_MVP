@@ -268,7 +268,15 @@ def run_ai_search_harness(
                 documents.append(document)
 
         sufficient, next_queries = _parse_round_judgment(response)
-        if sufficient or len(documents) >= config.target_docs:
+        if len(documents) >= config.target_docs:
+            break
+        if sufficient and documents:
+            # The model's "sufficient" judgment is made right after seeing
+            # citations, before scrape success is known -- honor it only
+            # once at least one citation actually became a usable document.
+            # A model saying "sufficient" over citations that all failed to
+            # scrape (e.g. a domain Firecrawl can't reach) is not actually
+            # sufficient; keep searching instead of returning nothing.
             break
         if not new_citations and round_index > 0:
             break  # diminishing returns — round 1 finding nothing isn't compared yet

@@ -162,6 +162,29 @@ def test_harness_stops_once_target_docs_reached_within_one_round():
     assert len(openai_client.responses.calls) == 1  # target hit within round 1, no round 2
 
 
+def test_harness_does_not_stop_on_sufficient_when_every_citation_failed_to_scrape():
+    # Live-verified gap (2026-08-05): the model judges "sufficient" right
+    # after seeing citations, before it's known whether Firecrawl can even
+    # scrape them (e.g. a domain Firecrawl can't reach at all). If every
+    # citation in the round fails to scrape, "sufficient" must not be
+    # trusted -- the harness should keep going instead of returning nothing.
+    source = _source(topics=["B tv 신규 서비스"])
+    unscrapable_citation = _citation_annotation("https://news.sktelecom.com/blocked")
+    round1 = _response(citations=[unscrapable_citation], sufficient=True, next_queries=[])
+    round2_citation = _citation_annotation("https://news.sktelecom.com/found")
+    round2 = _response(citations=[round2_citation], sufficient=True)
+    openai_client = _FakeOpenAI([round1, round2])
+    firecrawl_client = _FakeFirecrawl(markdown_by_url={unscrapable_citation.url: None})  # raises -> scrape fails
+
+    docs = run_ai_search_harness(openai_client, firecrawl_client, source, [source], _KEYWORDS)
+
+    assert len(docs) == 1
+    assert docs[0].url == round2_citation.url
+    assert len(openai_client.responses.calls) == 2  # round 1's false "sufficient" did not end the loop
+    round2_user_message = openai_client.responses.calls[1]["input"][1]["content"]
+    assert "B tv 신규 서비스" in round2_user_message  # fell back to source.topics since next_queries was empty
+
+
 def test_harness_stops_when_model_says_sufficient_even_below_target_docs():
     source = _source()
     citation = _citation_annotation("https://news.sktelecom.com/a1")
