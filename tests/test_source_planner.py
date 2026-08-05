@@ -234,6 +234,7 @@ def test_select_top_sources_narrows_broadband_registry_to_six(tmp_path):
 
     narrowed = select_top_sources(plan)
     assert len(narrowed.planned_sources) == 6
+    assert len(narrowed.registered_sources) == 9
 
 
 def test_real_broadband_registry_select_top_sources_respects_quotas():

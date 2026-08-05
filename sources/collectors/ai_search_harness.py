@@ -1,30 +1,25 @@
-"""AI-driven grounded search harness for one registered source.
+"""AI-driven grounded search harness for a question or registered source.
 
 Uses OpenAI's Responses API `web_search` tool to find candidate URLs — not
 restricted to the triggering source's own domain, since a registered source's
 domain can itself mix unrelated content (e.g. a shared corporate newsroom
 tag page) that keyword/domain filtering alone can't separate. Only URLs
-actually returned as `url_citation` annotations are trusted (never text the
-model states without one — the hallucination guard, and now the *only* one
-since there's no domain filter to fall back on). Each grounded URL is then
+returned as `url_citation` annotations or grounded
+`web_search_call.action.sources` are trusted (never text the model states
+without tool backing — the hallucination guard). Each grounded URL is then
 scraped via Firecrawl into markdown and attributed to whichever registered
 source's domain it actually matches (or left unattributed, honestly, if it
 matches none — never a fabricated reliability tier).
 
-Runs a bounded number of rounds: after each round the model judges whether
-it found enough strictly on-topic results and, if not, proposes several
-candidate follow-up queries — genuine gap-driven re-search, not a fixed
-query ladder. A small deterministic fallback query exists only for when the
-model's judgment can't be parsed or offers nothing new, so the loop always
-terminates.
+Runs a bounded number of rounds. The question-level mode evaluates the
+successfully scraped Firecrawl text with Structured Outputs after each round,
+then uses missing evidence categories to generate the next query. Search-result
+snippets alone cannot end that mode. A deterministic fallback query exists
+only when the assessment offers nothing usable, so the loop always terminates.
 
-This module never decides whether its output is "enough" for a caller's
-purposes and never falls back to anything itself — it returns whatever valid
-documents it found (0 to `HarnessConfig.target_docs`) and lets the caller (a
-sector collector) apply its own sufficiency threshold and fallback policy.
-This keeps the module a pure, reusable building block, not a sk_broadband-
-specific policy — see sectors/sk_broadband/adapter/collector/__init__.py for
-that sector's policy on top of it.
+The detailed question-level result records sufficiency, covered/missing needs,
+round count, and scrape calls. The sector collector still owns the final policy
+for whether an insufficient result halts its pipeline.
 """
 
 from __future__ import annotations
@@ -34,19 +29,34 @@ import json
 import re
 import sys
 import threading
-from dataclasses import dataclass
+from dataclasses import dataclass, replace as dataclass_replace
 from queue import Queue
 from urllib.parse import urlparse
 
-from common.contracts import PlannedSource, SourceDocument
+from common.contracts import (
+    EvidenceCoverageAssessment,
+    PlannedSource,
+    SourceDocument,
+    WebSearchContext,
+    WebSearchHarnessResult,
+)
 from core.source_planner.query_strategy import build_source_search_terms
 from sources.collectors.firecrawl_web import response_markdown
 
 _SYSTEM_PROMPT = (
     "You are a grounded web-search assistant working in rounds. Use the "
-    "web_search tool to find real, currently-live news articles anywhere on "
-    "the web matching the query. Only report URLs actually retrieved "
+    "web_search tool to find the strongest currently accessible evidence "
+    "anywhere on the web for the user's original question. Evidence may "
+    "include news articles, official announcements, regulatory documents, "
+    "IR materials, statistical reports, technical documents, and industry "
+    "analysis. Treat suggested terms as hints, not a query that must be "
+    "copied verbatim. Only report URLs actually retrieved "
     "through the tool — never fabricate a URL, title, or date.\n"
+    "Use the supplied as_of_date and the question's requested time range. "
+    "For current-status questions prefer the newest reliable evidence, while "
+    "keeping older material only when it is necessary historical context.\n"
+    "Never return a URL listed in search_context.excluded_urls. Use any "
+    "validation_feedback to replace documents rejected by downstream checks.\n"
     "STRICT RELEVANCE RULE: only cite an article if it is substantively "
     "ABOUT the query's core subject. Do not cite an article that merely "
     "mentions the subject in passing while primarily covering something "
@@ -72,6 +82,14 @@ class HarnessConfig:
     min_content_length: int = 250  # mirrors validator._MIN_CONTENT_LENGTH
     search_context_size: str = "medium"
     call_timeout_seconds: int = 30
+    max_candidates_per_round: int = 2
+    # 2 candidates/round * 3 rounds * (initial attempt + one error retry).
+    max_total_scrape_calls: int = 12
+    max_scrape_retries_per_url: int = 1
+    min_scraped_docs_for_sufficient: int = 2
+    min_independent_sources_for_sufficient: int = 2
+    assess_scraped_evidence: bool = False
+    max_evidence_chars_per_document: int = 8_000
 
 
 @dataclass(frozen=True)
@@ -102,16 +120,26 @@ def _run_with_timeout(func, timeout_seconds: int):
     return result.get()
 
 
-def _initial_query(source: PlannedSource, question_keywords: list[str]) -> str | None:
-    terms = build_source_search_terms(source, question_keywords)
+def _initial_query(
+    source: PlannedSource | None,
+    question_keywords: list[str],
+    search_context: WebSearchContext | None = None,
+) -> str | None:
+    if search_context and search_context.question.strip():
+        return search_context.question.strip()
+    terms = (
+        build_source_search_terms(source, question_keywords)
+        if source is not None
+        else question_keywords
+    )
     query = " ".join(dict.fromkeys(term.strip() for term in terms if term and term.strip()))
     return query or None
 
 
 def _fallback_next_query(
-    source: PlannedSource, question_keywords: list[str], tried_queries: list[str]
+    source: PlannedSource | None, question_keywords: list[str], tried_queries: list[str]
 ) -> str | None:
-    topics = [topic.strip() for topic in source.topics if topic and topic.strip()]
+    topics = [topic.strip() for topic in source.topics if topic and topic.strip()] if source else []
     fallback_terms = topics if topics else [term for term in question_keywords[:2] if term]
     query = " ".join(dict.fromkeys(fallback_terms))
     if not query or query in tried_queries:
@@ -168,6 +196,48 @@ def _extract_url_citations(response) -> list[_Citation]:
     return citations
 
 
+def _field(value, name: str):
+    if isinstance(value, dict):
+        return value.get(name)
+    return getattr(value, name, None)
+
+
+def _extract_tool_sources(response) -> list[_Citation]:
+    """Extract grounded candidates returned by the web-search tool itself.
+
+    Responses API returns these only when the request includes
+    ``web_search_call.action.sources``.  They are lower-priority candidates
+    than explicit message citations, but unlike URLs in model prose they are
+    still tool-grounded and safe to consider for scraping.
+    """
+    sources: list[_Citation] = []
+    seen: set[str] = set()
+    for item in getattr(response, "output", None) or []:
+        if _field(item, "type") != "web_search_call":
+            continue
+        action = _field(item, "action")
+        for source in _field(action, "sources") or []:
+            url = _field(source, "url")
+            if not url or url in seen:
+                continue
+            seen.add(url)
+            sources.append(_Citation(url=url, title=_field(source, "title")))
+    return sources
+
+
+def _grounded_candidates(response) -> list[_Citation]:
+    """Return explicit citations first, then any additional tool sources."""
+    candidates = [*_extract_url_citations(response), *_extract_tool_sources(response)]
+    deduped: list[_Citation] = []
+    seen: set[str] = set()
+    for candidate in candidates:
+        if candidate.url in seen:
+            continue
+        seen.add(candidate.url)
+        deduped.append(candidate)
+    return deduped
+
+
 def _attribute_source(url: str, all_sources: list[PlannedSource]) -> tuple[str, str | None]:
     """Match a grounded URL's domain against every registered source in this
     pipeline run (not just the one that triggered this search round) and
@@ -191,15 +261,26 @@ def _scrape_candidate(
     citation: _Citation,
     all_sources: list[PlannedSource],
     config: HarnessConfig,
-) -> SourceDocument | None:
-    status, payload = _run_with_timeout(
-        lambda: firecrawl_client.scrape(citation.url, formats=["markdown"]),
-        config.call_timeout_seconds,
-    )
-    if status != "ok":
+) -> tuple[SourceDocument | None, int]:
+    attempts = 0
+    payload = None
+    max_attempts = 1 + max(0, config.max_scrape_retries_per_url)
+    while attempts < max_attempts:
+        attempts += 1
+        status, payload = _run_with_timeout(
+            lambda: firecrawl_client.scrape(citation.url, formats=["markdown"]),
+            config.call_timeout_seconds,
+        )
+        if status == "ok":
+            break
+    if payload is None or status != "ok":
         detail = payload if status == "error" else "timed out"
-        print(f"[ai_search_harness] scrape failed for {citation.url}: {detail}", file=sys.stderr)
-        return None
+        print(
+            f"[ai_search_harness] scrape failed for {citation.url} "
+            f"after {attempts} attempt(s): {detail}",
+            file=sys.stderr,
+        )
+        return None, attempts
     markdown = response_markdown(payload)
     if not markdown or len(markdown.strip()) < config.min_content_length:
         length = len(markdown.strip()) if markdown else 0
@@ -208,83 +289,292 @@ def _scrape_candidate(
             f"({length} < {config.min_content_length} chars)",
             file=sys.stderr,
         )
-        return None
+        return None, attempts
     source_id, reliability_tier = _attribute_source(citation.url, all_sources)
-    return SourceDocument(
-        doc_id=_doc_id(source_id, citation.url),
-        source_id=source_id,
-        title=citation.title or "Untitled",
-        url=citation.url,
-        content=markdown,
-        reliability_tier=reliability_tier,
+    return (
+        SourceDocument(
+            doc_id=_doc_id(source_id, citation.url),
+            source_id=source_id,
+            title=citation.title or "Untitled",
+            url=citation.url,
+            content=markdown,
+            reliability_tier=reliability_tier,
+        ),
+        attempts,
     )
 
 
-def _call_round(openai_client, source: PlannedSource, query: str, config: HarnessConfig):
+def _call_round(
+    openai_client,
+    source: PlannedSource | None,
+    query: str,
+    config: HarnessConfig,
+    search_context: WebSearchContext | None = None,
+):
+    tool = {
+        "type": "web_search",
+        "search_context_size": config.search_context_size,
+        "external_web_access": True,
+    }
+    if search_context and search_context.country_code:
+        tool["user_location"] = {
+            "type": "approximate",
+            "country": search_context.country_code,
+        }
+    context_payload = search_context.model_dump() if search_context else {
+        "question": query,
+        "suggested_terms": [query],
+    }
+    request_payload = {
+        "search_context": context_payload,
+        "current_round_query": query,
+        "instructions": (
+            "Search anywhere on the live web. Return up to "
+            f"{config.max_candidates_per_round} distinct, strictly on-topic evidence URLs "
+            "for this round. Registered sources are attribution and reliability metadata, "
+            "not a list of domains that must each be searched."
+        ),
+    }
+    if source is not None:
+        request_payload["registered_source_hint"] = {
+            "name": source.name,
+            "role": source.role or "unspecified",
+            "topics": source.topics,
+        }
     return openai_client.responses.create(
         model=config.model,
-        tools=[{"type": "web_search", "search_context_size": config.search_context_size}],
-        tool_choice="auto",
+        tools=[tool],
+        tool_choice="required",
+        include=["web_search_call.action.sources"],
         input=[
             {"role": "system", "content": _SYSTEM_PROMPT},
             {
                 "role": "user",
-                "content": (
-                    f"Search query: {query}\n"
-                    f"Context: this query is being run for the registered source "
-                    f"\"{source.name}\" (role: {source.role or 'unspecified'}), but "
-                    f"you are not restricted to that source's own site — search "
-                    f"anywhere. Target: up to {config.target_docs} distinct, "
-                    f"strictly on-topic article URLs."
-                ),
+                "content": json.dumps(request_payload, ensure_ascii=False),
             },
         ],
     )
 
 
-def run_ai_search_harness(
+def _evidence_excerpt(document: SourceDocument, terms: list[str], max_chars: int) -> str:
+    content = document.content or ""
+    if len(content) <= max_chars:
+        return content
+    first_chunk = content[: min(2_000, max_chars)]
+    chunks = [first_chunk]
+    remaining = max_chars - len(first_chunk)
+    lowered = content.lower()
+    seen_positions: list[int] = []
+    for term in terms:
+        normalized = term.strip().lower()
+        if len(normalized) < 2:
+            continue
+        position = lowered.find(normalized)
+        if position < 0 or any(abs(position - seen) < 500 for seen in seen_positions):
+            continue
+        seen_positions.append(position)
+        start = max(0, position - 500)
+        chunk = content[start : start + min(1_500, remaining)]
+        if chunk:
+            chunks.append(chunk)
+            remaining -= len(chunk)
+        if remaining <= 0:
+            break
+    return "\n\n[...관련 구간...]\n\n".join(chunks)[:max_chars]
+
+
+def _assess_scraped_evidence(
+    openai_client,
+    documents: list[SourceDocument],
+    question_keywords: list[str],
+    config: HarnessConfig,
+    search_context: WebSearchContext | None,
+) -> EvidenceCoverageAssessment | None:
+    if not documents or search_context is None:
+        return None
+    terms = list(dict.fromkeys([*search_context.suggested_terms, *question_keywords]))
+    payload = {
+        "question": search_context.question,
+        "perspective": search_context.perspective,
+        "report_purpose_id": search_context.report_purpose_id,
+        "required_information_needs": search_context.information_needs,
+        "documents": [
+            {
+                "doc_id": document.doc_id,
+                "source_id": document.source_id,
+                "title": document.title,
+                "url": document.url,
+                "content_excerpt": _evidence_excerpt(
+                    document, terms, config.max_evidence_chars_per_document
+                ),
+            }
+            for document in documents
+        ],
+    }
+    status, response = _run_with_timeout(
+        lambda: openai_client.responses.parse(
+            model=config.model,
+            input=[
+                {
+                    "role": "system",
+                    "content": (
+                        "Evaluate only the supplied Firecrawl source text. Mark a document relevant "
+                        "only when it contains substantive evidence for the original question, not a "
+                        "passing mention. Identify which required information needs are actually covered. "
+                        "Set sufficient=true only when the evidence can support a defensible answer. "
+                        "If evidence is missing, propose 1-3 focused web queries targeting only those gaps."
+                    ),
+                },
+                {"role": "user", "content": json.dumps(payload, ensure_ascii=False)},
+            ],
+            text_format=EvidenceCoverageAssessment,
+        ),
+        config.call_timeout_seconds,
+    )
+    if status != "ok" or response is None:
+        return None
+    parsed = getattr(response, "output_parsed", None)
+    return parsed if isinstance(parsed, EvidenceCoverageAssessment) else None
+
+
+def _validate_assessment(
+    assessment: EvidenceCoverageAssessment,
+    documents: list[SourceDocument],
+    config: HarnessConfig,
+    information_needs: list[str],
+) -> EvidenceCoverageAssessment:
+    document_by_id = {document.doc_id: document for document in documents}
+    relevant_doc_ids = [
+        doc_id for doc_id in dict.fromkeys(assessment.relevant_doc_ids) if doc_id in document_by_id
+    ]
+    relevant_sources = {document_by_id[doc_id].source_id for doc_id in relevant_doc_ids}
+    required_needs = list(dict.fromkeys(information_needs))
+    covered = [need for need in required_needs if need in assessment.covered_information_needs]
+    missing = [need for need in required_needs if need not in covered]
+    sufficient = (
+        assessment.sufficient
+        and len(relevant_doc_ids) >= config.min_scraped_docs_for_sufficient
+        and len(relevant_sources) >= config.min_independent_sources_for_sufficient
+        and not missing
+    )
+    return assessment.model_copy(
+        update={
+            "sufficient": sufficient,
+            "relevant_doc_ids": relevant_doc_ids,
+            "covered_information_needs": covered,
+            "missing_information_needs": missing,
+        }
+    )
+
+
+def _run_search_harness_result(
     openai_client,
     firecrawl_client,
-    source: PlannedSource,
+    source: PlannedSource | None,
     all_sources: list[PlannedSource],
     question_keywords: list[str],
     config: HarnessConfig = HarnessConfig(),
-) -> list[SourceDocument]:
-    query = _initial_query(source, question_keywords)
+    search_context: WebSearchContext | None = None,
+) -> WebSearchHarnessResult:
+    query = _initial_query(source, question_keywords, search_context)
     if not query:
-        return []
+        return WebSearchHarnessResult()
 
     tried_queries: list[str] = []
     pending_queries: list[str] = []
     documents: list[SourceDocument] = []
-    seen_urls: set[str] = set()
+    attempted_urls: set[str] = set(search_context.excluded_urls) if search_context else set()
+    scrape_call_count = 0
+    rounds_completed = 0
+    final_sufficient = False
+    final_documents: list[SourceDocument] = []
+    covered_information_needs: list[str] = []
+    missing_information_needs = list(search_context.information_needs) if search_context else []
 
     for round_index in range(config.max_rounds):
         tried_queries.append(query)
         try:
-            response = _call_round(openai_client, source, query, config)
+            response = _call_round(openai_client, source, query, config, search_context)
         except Exception as exc:  # noqa: BLE001
-            print(f"[ai_search_harness] round call failed for '{source.name}': {exc}", file=sys.stderr)
+            label = source.name if source is not None else "question"
+            print(f"[ai_search_harness] round call failed for '{label}': {exc}", file=sys.stderr)
             break
+        rounds_completed += 1
 
-        citations = _extract_url_citations(response)
-        new_citations = [citation for citation in citations if citation.url not in seen_urls]
+        candidates = _grounded_candidates(response)
+        new_candidates = [candidate for candidate in candidates if candidate.url not in attempted_urls]
+        round_candidates = new_candidates[: max(0, config.max_candidates_per_round)]
+        label = source.name if source is not None else "question"
         print(
-            f"[ai_search_harness] round {round_index + 1} for '{source.name}' query='{query}': "
-            f"{len(citations)} citation(s) found",
+            f"[ai_search_harness] round {round_index + 1} for '{label}' query='{query}': "
+            f"{len(candidates)} grounded candidate(s), {len(round_candidates)} selected",
             file=sys.stderr,
         )
-        for citation in new_citations:
-            seen_urls.add(citation.url)
-            document = _scrape_candidate(firecrawl_client, citation, all_sources, config)
+        for citation in round_candidates:
+            remaining_calls = config.max_total_scrape_calls - scrape_call_count
+            if remaining_calls <= 0:
+                break
+            attempted_urls.add(citation.url)
+            per_url_config = dataclass_replace(
+                config,
+                max_scrape_retries_per_url=min(
+                    config.max_scrape_retries_per_url,
+                    max(0, remaining_calls - 1),
+                ),
+            )
+            document, attempts = _scrape_candidate(
+                firecrawl_client, citation, all_sources, per_url_config
+            )
+            scrape_call_count += attempts
             if document is not None:
                 documents.append(document)
+            if len(documents) >= config.target_docs:
+                break
 
         sufficient, next_queries = _parse_round_judgment(response)
-        if sufficient or len(documents) >= config.target_docs:
+        if config.assess_scraped_evidence:
+            try:
+                assessment = _assess_scraped_evidence(
+                    openai_client, documents, question_keywords, config, search_context
+                )
+            except Exception as exc:  # noqa: BLE001
+                print(f"[ai_search_harness] evidence assessment failed: {exc}", file=sys.stderr)
+                assessment = None
+            if assessment is not None:
+                assessment = _validate_assessment(
+                    assessment,
+                    documents,
+                    config,
+                    search_context.information_needs if search_context else [],
+                )
+                relevant_ids = set(assessment.relevant_doc_ids)
+                final_documents = [document for document in documents if document.doc_id in relevant_ids]
+                covered_information_needs = assessment.covered_information_needs
+                missing_information_needs = assessment.missing_information_needs
+                sufficient = assessment.sufficient
+                next_queries = assessment.next_queries
+            else:
+                sufficient = False
+                next_queries = []
+            if sufficient:
+                final_sufficient = True
+                break
+        else:
+            final_documents = list(documents)
+            if len(documents) >= config.target_docs:
+                final_sufficient = True
+                break
+            if sufficient and len(documents) >= config.min_scraped_docs_for_sufficient:
+                final_sufficient = True
+                break
+        if scrape_call_count >= config.max_total_scrape_calls:
             break
-        if not new_citations and round_index > 0:
-            break  # diminishing returns — round 1 finding nothing isn't compared yet
+        if (
+            not new_candidates
+            and round_index > 0
+            and (not config.assess_scraped_evidence or not next_queries)
+        ):
+            break
 
         pending_queries = [q for q in next_queries if q not in tried_queries] or pending_queries
         if pending_queries:
@@ -297,4 +587,84 @@ def run_ai_search_harness(
         if query in tried_queries:
             break
 
-    return documents[: config.target_docs]
+    return WebSearchHarnessResult(
+        documents=final_documents[: config.target_docs],
+        sufficient=final_sufficient,
+        covered_information_needs=covered_information_needs,
+        missing_information_needs=missing_information_needs,
+        rounds_completed=rounds_completed,
+        scrape_call_count=scrape_call_count,
+    )
+
+
+def _run_search_harness(
+    openai_client,
+    firecrawl_client,
+    source: PlannedSource | None,
+    all_sources: list[PlannedSource],
+    question_keywords: list[str],
+    config: HarnessConfig = HarnessConfig(),
+    search_context: WebSearchContext | None = None,
+) -> list[SourceDocument]:
+    return _run_search_harness_result(
+        openai_client, firecrawl_client, source, all_sources, question_keywords, config, search_context
+    ).documents
+
+
+def run_question_search_harness_result(
+    openai_client,
+    firecrawl_client,
+    registered_sources: list[PlannedSource],
+    question_keywords: list[str],
+    config: HarnessConfig = HarnessConfig(),
+    search_context: WebSearchContext | None = None,
+) -> WebSearchHarnessResult:
+    return _run_search_harness_result(
+        openai_client,
+        firecrawl_client,
+        None,
+        registered_sources,
+        question_keywords,
+        config,
+        search_context,
+    )
+
+
+def run_question_search_harness(
+    openai_client,
+    firecrawl_client,
+    registered_sources: list[PlannedSource],
+    question_keywords: list[str],
+    config: HarnessConfig = HarnessConfig(),
+    search_context: WebSearchContext | None = None,
+) -> list[SourceDocument]:
+    """Backward-compatible list-only wrapper around the detailed result."""
+    return run_question_search_harness_result(
+        openai_client,
+        firecrawl_client,
+        registered_sources,
+        question_keywords,
+        config,
+        search_context,
+    ).documents
+
+
+def run_ai_search_harness(
+    openai_client,
+    firecrawl_client,
+    source: PlannedSource,
+    all_sources: list[PlannedSource],
+    question_keywords: list[str],
+    config: HarnessConfig = HarnessConfig(),
+    search_context: WebSearchContext | None = None,
+) -> list[SourceDocument]:
+    """Backward-compatible source-hinted entrypoint for legacy callers."""
+    return _run_search_harness(
+        openai_client,
+        firecrawl_client,
+        source,
+        all_sources,
+        question_keywords,
+        config,
+        search_context,
+    )

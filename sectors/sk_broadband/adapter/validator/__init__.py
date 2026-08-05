@@ -1,14 +1,9 @@
 """SK Broadband sector validator.
 
-Checks 4 things before a document reaches the analyzer: structural validity
-(existing), recency, cross-source near-duplicates, and source quality (via a
-final rank + cap). Relevance to the actual question is intentionally NOT
-judged here — `validate()` only receives documents, not the question or its
-keywords, so a keyword-match "relevance" check here would just be an
-unfounded guess. Real relevance judgment already happens downstream in the
-analyzer's `relevant_to_question` field, which core/request_pipeline/
-pipeline.py uses to drop irrelevant documents after analysis — see
-CLAUDE.md's "no fabrication" principle.
+Checks structural validity, question-sensitive recency, cross-source title
+duplicates, and source quality before a document reaches the analyzer.
+`WebSearchContext` is used only to choose an age window; semantic relevance
+is still judged downstream by the analyzer's `relevant_to_question` field.
 
 Exact duplicates (same URL + near-identical content) are already deduped in
 processor.py via a content fingerprint; the near-duplicate check here is a
@@ -18,10 +13,11 @@ syndicated copies across outlets) carrying the same headline.
 
 from __future__ import annotations
 
+import re
 from datetime import datetime, timedelta, timezone
 from urllib.parse import urlparse
 
-from common.contracts import SourceDocument
+from common.contracts import SourceDocument, WebSearchContext
 
 _MIN_CONTENT_LENGTH = 250
 _MAX_DOCUMENT_AGE_DAYS = 730
@@ -50,20 +46,75 @@ def _is_structurally_valid(document: SourceDocument) -> bool:
     return True
 
 
-def _is_recent_enough(document: SourceDocument) -> bool:
-    # Missing published_at is common (Firecrawl doesn't always extract a
-    # date) and must not be penalized — only reject when we actually know
-    # the document is stale, never guess staleness from absence of a date.
+def _max_age_days(search_context: WebSearchContext | None) -> int | None:
+    if search_context is None:
+        return _MAX_DOCUMENT_AGE_DAYS
+    question = search_context.question.lower()
+    ranged_years = re.search(r"(?:최근|지난)\s*(\d+)\s*년", question)
+    if ranged_years:
+        return max(365, int(ranged_years.group(1)) * 366)
+    ranged_months = re.search(r"(?:최근|지난)\s*(\d+)\s*개월", question)
+    if ranged_months:
+        return max(30, int(ranged_months.group(1)) * 31)
+    if any(term in question for term in ("역사", "과거", "도입 배경", "장기 추이")):
+        return None
+    if any(
+        term in question
+        for term in ("오늘", "금일", "실시간", "방금", "이번 주", "금주", "가장 최신", "가장 최근")
+    ):
+        return 30
+    if "최신" in question:
+        return 90
+    if any(term in question for term in ("최근", "현재", "지금", "요즘", "이번 달")):
+        return 180
+    if search_context.as_of_date and search_context.as_of_date[:4] in question:
+        return 365
+    if search_context.report_purpose_id == "current_status":
+        return 365
+    return _MAX_DOCUMENT_AGE_DAYS
+
+
+def _reference_time(search_context: WebSearchContext | None) -> datetime:
+    if search_context and search_context.as_of_date:
+        try:
+            return datetime.fromisoformat(search_context.as_of_date).replace(tzinfo=timezone.utc)
+        except ValueError:
+            pass
+    return datetime.now(timezone.utc)
+
+
+def _requires_verified_published_at(search_context: WebSearchContext | None) -> bool:
+    if search_context is None:
+        return False
+    question = search_context.question.lower()
+    return any(
+        term in question
+        for term in ("오늘", "금일", "실시간", "방금", "이번 주", "금주", "가장 최신", "가장 최근")
+    )
+
+
+def _is_recent_enough(
+    document: SourceDocument,
+    search_context: WebSearchContext | None = None,
+) -> bool:
+    # Firecrawl does not always extract a date. Keep undated evidence by
+    # default, but a strong "latest" request requires a verifiable date.
     if document.published_at is None:
-        return True
+        return not _requires_verified_published_at(search_context)
     published_at = document.published_at
     if published_at.tzinfo is None:
         published_at = published_at.replace(tzinfo=timezone.utc)
-    return datetime.now(timezone.utc) - published_at <= timedelta(days=_MAX_DOCUMENT_AGE_DAYS)
+    max_age_days = _max_age_days(search_context)
+    if max_age_days is None:
+        return True
+    return _reference_time(search_context) - published_at <= timedelta(days=max_age_days)
 
 
 def _title_key(document: SourceDocument) -> str:
-    return " ".join(document.title.split()).lower()
+    title_key = " ".join(document.title.split()).lower()
+    if title_key == "untitled":
+        return f"untitled::{document.url or document.doc_id}"
+    return title_key
 
 
 def _drop_cross_source_title_duplicates(documents: list[SourceDocument]) -> list[SourceDocument]:
@@ -87,9 +138,14 @@ def _quality_sort_key(document: SourceDocument) -> tuple[int, float]:
     return (reliability_rank, -recency)
 
 
-def validate(source_documents: list[SourceDocument]) -> list[SourceDocument]:
+def validate(
+    source_documents: list[SourceDocument],
+    search_context: WebSearchContext | None = None,
+) -> list[SourceDocument]:
     structurally_valid = [document for document in source_documents if _is_structurally_valid(document)]
-    recent_enough = [document for document in structurally_valid if _is_recent_enough(document)]
+    recent_enough = [
+        document for document in structurally_valid if _is_recent_enough(document, search_context)
+    ]
     deduplicated = _drop_cross_source_title_duplicates(recent_enough)
     ranked = sorted(deduplicated, key=_quality_sort_key)
     return ranked[:_MAX_VALIDATED_DOCUMENTS]

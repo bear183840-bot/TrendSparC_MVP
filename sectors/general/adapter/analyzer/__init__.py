@@ -136,7 +136,11 @@ def _analyze(client: OpenAI, prompt: str, document: SourceDocument, question: st
         ) from exc
 
 
-def analyze(source_documents: list[SourceDocument], question: str) -> list[DocumentAnalysis]:
+def analyze(
+    source_documents: list[SourceDocument],
+    question: str,
+    information_needs: list[str] | None = None,
+) -> list[DocumentAnalysis]:
     api_key = os.getenv(_API_KEY_ENV_VAR) or os.getenv("OPENAI_API_KEY")
     if not api_key:
         raise PipelineStageError(stage=_STAGE, reason=f"template_only: {_API_KEY_ENV_VAR} is not configured")
