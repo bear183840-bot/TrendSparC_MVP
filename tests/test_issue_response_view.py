@@ -1,6 +1,6 @@
 from types import SimpleNamespace
 
-from common.contracts import DocumentAnalysis, PlannedSource, SourcePlan, TrendSynthesis
+from common.contracts import DocumentAnalysis, GeneratedReport, GeneratedReportSection, PlannedSource, SourcePlan, TrendSynthesis
 from reporting.dashboard_streamlit import issue_response_view as view
 
 
@@ -89,4 +89,49 @@ def test_dashboard_does_not_invent_reference_mockup_scores_or_time_series(monkey
     assert "Medium" not in output
     assert "2025E" not in output
     assert "https://example.com/kt" in output
+
+
+def test_dashboard_prefers_audience_tailored_generated_report_over_raw_synthesis(monkeypatch):
+    """Once report_generator.py's OpenAI pass actually writes audience-tailored
+    risks/opportunities/actions, the dashboard should show that writing, not
+    the raw audience-agnostic synthesis list it was built from - proves the
+    audience-content wiring actually reaches the rendered page, not just the
+    unread audience_adaptation/layout debug dump."""
+    captured = []
+    monkeypatch.setattr(view.st, "markdown", lambda body, **kwargs: captured.append(body))
+
+    result = _result()
+    result.generated_report = GeneratedReport(
+        request_id="req_ui",
+        sector_id="sk_broadband",
+        audience_id="executive",
+        purpose_id="issue_response",
+        title="경영진 보고서",
+        generation_mode="openai",
+        sections=[
+            GeneratedReportSection(
+                section_id="issue",
+                title="Issue",
+                risks=["경영진 관점 압축 위험 서술 [doc_id=kt:1]"],
+                opportunities=["경영진 관점 압축 기회 서술 [doc_id=market:1]"],
+                actions=["경영진 관점 실행안 [doc_id=kt:1]"],
+            ),
+        ],
+    )
+
+    view.render_issue_response_dashboard(
+        result,
+        "IPTV와 OTT 경쟁 심화의 영향은?",
+        "SK브로드밴드",
+        "경영진",
+        "이슈 대응",
+    )
+
+    output = "\n".join(captured)
+    assert "경영진 관점 압축 위험 서술" in output
+    assert "경영진 관점 압축 기회 서술" in output
+    assert "경영진 관점 실행안" in output
+    assert "가입자 이탈 위험" not in output
+    assert "AI 추천 강화 기회" not in output
+    assert "추천 서비스를 고도화한다" not in output
 

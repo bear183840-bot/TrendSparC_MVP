@@ -16,6 +16,7 @@ from pathlib import Path
 
 from audience.contracts import load_audience_profile
 from common.contracts import ReportPlan, ReportPurposeClassification, TrendSynthesis
+from core.report_purpose.classifier import recommended_sections_for
 
 _BASE_SECTIONS = ["overview"]
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
@@ -103,6 +104,11 @@ def plan_report(
     raw_purpose_id = report_purpose if isinstance(report_purpose, str) else report_purpose.purpose_id
     purpose_id = purpose.purpose_id if purpose is not None else raw_purpose_id
     purpose_sections = purpose.recommended_sections if purpose is not None else []
+    if purpose is not None and purpose.secondary_purpose_id:
+        # A compound question (e.g. "현황은? 그리고 어떻게 개선하지?") needs both
+        # purposes' sections, not just the winner's - see
+        # content_quality_validator.detect_secondary_purpose.
+        purpose_sections = [*purpose_sections, *recommended_sections_for(purpose.secondary_purpose_id)]
     if profile.report_structure:
         # A fixed report_structure is a deliberate, stable page shape for this
         # audience (today: executive) — purpose still shapes the CONTENT written

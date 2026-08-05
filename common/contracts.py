@@ -93,6 +93,13 @@ class ReportPurposeClassification(BaseModel):
     recommended_sections: list[str] = Field(default_factory=list)
     dashboard_block_hints: list[str] = Field(default_factory=list)
     prompt_path: Optional[str] = None
+    # Set when a runner-up purpose independently clears its own signal threshold
+    # (see content_quality_validator.detect_secondary_purpose) - a compound
+    # question like "현황은? 그리고 어떻게 개선하지?" is both current_status and
+    # root_cause/future_business at once, not a single winner-take-all purpose.
+    secondary_purpose_id: Optional[
+        Literal["current_status", "issue_response", "future_business", "root_cause"]
+    ] = None
 
 
 class SectorProfile(BaseModel):

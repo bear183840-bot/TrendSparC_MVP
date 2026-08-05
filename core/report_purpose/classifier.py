@@ -15,6 +15,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from common.content_quality_validator import PRESCRIPTIVE_INTENT_SIGNALS, detect_secondary_purpose
 from common.contracts import EntityExtractionResult, ReportPurposeClassification, SectorRoute
 
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
@@ -77,11 +78,23 @@ _EXPLICIT_ISSUE_RESPONSE_SIGNALS = ("이슈", "리스크", "위험", "대응", "
 
 _PURPOSE_SIGNALS: dict[str, tuple[str, ...]] = {
     "issue_response": ("이슈", "리스크", "위험", "대응", "조치", "완화", "규제 대응", "issue", "risk", "response"),
-    "future_business": ("미래", "전망", "신사업", "투자", "기회", "성장", "로드맵", "future", "outlook", "forecast", "opportunity"),
+    "future_business": (
+        "미래", "전망", "신사업", "투자", "기회", "성장", "로드맵", "future", "outlook", "forecast", "opportunity",
+        *PRESCRIPTIVE_INTENT_SIGNALS,
+    ),
     "root_cause": ("원인", "왜", "이유", "근본", "병목", "하락 원인", "감소 원인", "root cause", "why"),
     "current_status": ("현황", "현재", "동향", "시장", "경쟁 구도", "점유율", "실적", "추이", "status", "trend"),
 }
 _PURPOSE_TIE_PRIORITY = ("issue_response", "root_cause", "future_business", "current_status")
+_SECONDARY_PURPOSE_THRESHOLD = 4
+
+
+def recommended_sections_for(purpose_id: str) -> list[str]:
+    """Public lookup so other stages (report_planner) can pull a purpose's
+    recommended sections - e.g. for a detected secondary purpose - without
+    duplicating _PURPOSE_DEFINITIONS."""
+    definition = _PURPOSE_DEFINITIONS.get(purpose_id)
+    return list(definition["recommended_sections"]) if definition else []
 
 
 def _prompt_path_for(purpose_id: str) -> str | None:
@@ -145,6 +158,8 @@ def classify_report_purpose(
         )
         confidence = "high" if top_score >= 4 and top_score - runner_up >= 2 else "medium"
 
+    secondary_purpose_id = detect_secondary_purpose(scores, purpose_id, threshold=_SECONDARY_PURPOSE_THRESHOLD)
+
     definition = _PURPOSE_DEFINITIONS[purpose_id]
     return ReportPurposeClassification(
         request_id=request_id,
@@ -157,4 +172,5 @@ def classify_report_purpose(
         recommended_sections=list(definition["recommended_sections"]),
         dashboard_block_hints=list(definition["dashboard_block_hints"]),
         prompt_path=_prompt_path_for(purpose_id),
+        secondary_purpose_id=secondary_purpose_id,
     )

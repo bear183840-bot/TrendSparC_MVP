@@ -7,7 +7,49 @@ reporting/{dashboard_streamlit,html,pdf}.
 
 from __future__ import annotations
 
+import logging
+import re
+from typing import Any
+
 from common.contracts import AudienceAdaptation, DashboardBlock, DynamicLayout, ReportPlan
+
+_LOGGER = logging.getLogger("trendsparc.layout_generator")
+_DOC_ID_RE = re.compile(r"\[doc_id=([^\]]+)\]")
+
+# Candidate new block_type detections - logged only, never used to pick a
+# type automatically ("detect, don't auto-generate" - a human decides whether
+# a section's unrecognized structured field is worth a real block; see
+# reporting/dashboard_streamlit/blocks/'s registration checklist). Kept local
+# to core/ rather than importing reporting/dashboard_streamlit's block
+# registry, since core must stay renderer-agnostic (this module's docstring:
+# rendering is owned by reporting/{dashboard_streamlit,html,pdf}, not core).
+SUGGESTED_BLOCK_TYPES: list[dict[str, Any]] = []
+
+_KNOWN_CONTENT_KEYS = {
+    "title", "section_id", "summary", "highlights", "key_points", "evidence",
+    "risks", "opportunities", "strengths", "weaknesses", "actions",
+    "metric_points", "comparison_points", "monitoring_indicators",
+    "business_impacts", "source_count", "unique_source_count", "limitations",
+    "label", "value", "delta", "items",
+}
+
+
+def _suggest_new_block_type(section: str, content: dict) -> None:
+    unknown_keys = sorted(
+        key
+        for key, value in content.items()
+        if key not in _KNOWN_CONTENT_KEYS
+        and isinstance(value, list)
+        and value
+        and all(isinstance(item, dict) for item in value)
+    )
+    if not unknown_keys:
+        return
+    entry = {"section": section, "content_keys": unknown_keys}
+    SUGGESTED_BLOCK_TYPES.append(entry)
+    _LOGGER.info(
+        "candidate new block type for section '%s': unrecognized structured field(s) %s", section, unknown_keys
+    )
 
 
 _SECTION_BLOCK_TYPES = {
@@ -54,14 +96,21 @@ def _candidate_content_types(content: dict) -> list[str]:
     """Which structured block_types this section's content actually supports.
 
     Never invents a type the content doesn't back - a "chart" only qualifies
-    when 2+ distinct time periods are present, a "table" only when 2+ distinct
-    entities are being compared, and "matrix" (SWOT) only when at least two of
-    the four strength/weakness/risk/opportunity fields have real content.
+    when a single metric has 2+ distinct time periods (two *different*
+    metrics each contributing one period is not a trend, it's two unrelated
+    numbers that would render as a disjointed, unreadable chart - see
+    reporting/dashboard_streamlit/components.py's has_timeseries()), a
+    "table" only when 2+ distinct entities are being compared, and "matrix"
+    (SWOT) only when at least two of the four
+    strength/weakness/risk/opportunity fields have real content.
     """
     candidates: list[str] = []
     metric_points = content.get("metric_points") or []
-    periods = {point.get("period") for point in metric_points if isinstance(point, dict)}
-    if len(periods) >= 2:
+    periods_by_label: dict[Any, set] = {}
+    for point in metric_points:
+        if isinstance(point, dict):
+            periods_by_label.setdefault(point.get("label"), set()).add(point.get("period"))
+    if any(len(periods) >= 2 for periods in periods_by_label.values()):
         candidates.append("chart")
     comparison_points = content.get("comparison_points") or []
     entities = {point.get("entity") for point in comparison_points if isinstance(point, dict)}
@@ -93,6 +142,7 @@ def _block_type(section: str, content: dict, audience_id: str | None = None) -> 
         return "list"
     if content.get("evidence"):
         return "evidence"
+    _suggest_new_block_type(section, content)
     return "auto"
 
 
@@ -100,13 +150,38 @@ def _block_title(section: str, content: dict) -> str:
     return content.get("title") or section.replace("_", " ").title()
 
 
-def generate_layout(report_plan: ReportPlan, adaptation: AudienceAdaptation) -> DynamicLayout:
+def _structure_evidence(evidence: list, doc_source_map: dict[str, str]) -> list[dict]:
+    """Turn raw '[doc_id=...]'-tagged evidence strings into {"text", "source_id"}
+    entries so the debug sources block exposes an actual source instead of raw
+    markup - the live UI already resolves real source links elsewhere
+    (reporting/dashboard_streamlit/components.py's evidence_url); this only
+    brings the debug-only layout.blocks JSON up to the same standard."""
+    structured = []
+    for item in evidence:
+        if not isinstance(item, str):
+            continue
+        match = _DOC_ID_RE.search(item)
+        doc_id = match.group(1) if match else None
+        structured.append({
+            "text": _DOC_ID_RE.sub("", item).strip(),
+            "source_id": doc_source_map.get(doc_id) if doc_id else None,
+        })
+    return structured
+
+
+def generate_layout(
+    report_plan: ReportPlan,
+    adaptation: AudienceAdaptation,
+    doc_source_map: dict[str, str] | None = None,
+) -> DynamicLayout:
     section_order = list(report_plan.sections)
     if "executive_summary" in adaptation.adapted_sections:
         section_order.insert(0, "executive_summary")
     blocks = []
     for index, section in enumerate(section_order):
         content = adaptation.adapted_sections.get(section, {})
+        if section == "sources" and content.get("evidence"):
+            content = {**content, "evidence": _structure_evidence(content["evidence"], doc_source_map or {})}
         blocks.append(
             DashboardBlock(
                 block_id=f"{index + 1:02d}_{section}",

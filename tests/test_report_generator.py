@@ -2,6 +2,7 @@ from common.contracts import ComparisonPoint, DocumentAnalysis, MetricPoint, Rep
 from core.report_generator.generator import generate_report
 from core.report_planner.planner import plan_report
 from core.synthesis.synthesizer import synthesize
+from core.report_generator import generator as generator_module
 
 
 def _synthesis():
@@ -178,7 +179,159 @@ def test_report_generator_openai_path_receives_full_synthesis(monkeypatch):
     assert user_payload["synthesis"]["recommended_actions"] == synthesis.recommended_actions
     assert "all narrative text must be Korean" in system_prompt
     assert "key metrics, timeline, decision required, risk, sources" in system_prompt
+    assert "authoritative style/structure rules" in system_prompt
+    assert "audience.description" in system_prompt
+    assert "purpose.instructions" in system_prompt
     assert report.generation_mode == "openai"
     assert report.executive_summary == "경영진 요약"
     assert [section.section_id for section in report.sections] == plan.sections
     assert any("누락한 섹션" in limitation for limitation in report.limitations)
+
+
+# --- Timeline fallback no longer duplicates Overview verbatim (problem 9) ---
+
+
+def _issue_response_plan(synthesis, request_id: str):
+    purpose = ReportPurposeClassification(
+        request_id=request_id,
+        purpose_id="issue_response",
+        display_name="이슈 대응",
+        recommended_sections=["issue", "impact", "response_actions"],
+    )
+    return plan_report(synthesis, "executive", purpose)
+
+
+def test_fallback_timeline_uses_dated_evidence_instead_of_overview_key_points(monkeypatch):
+    monkeypatch.delenv("TRENDSPARC_REPORT_GENERATOR_API_KEY", raising=False)
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    analysis = DocumentAnalysis(
+        doc_id="attachment:brief",
+        summary="요약",
+        key_points=["일반 핵심 요약 문장"],
+        evidence=["2024년 7월 서비스 개편이 있었다.", "시점이 명시되지 않은 일반 서술"],
+    )
+    synthesis = synthesize("req_timeline", "general", [analysis])
+    plan = _issue_response_plan(synthesis, "req_timeline")
+    assert "timeline" in plan.sections
+
+    report = generate_report("어떻게 대응해야 하나?", synthesis, plan, "executive")
+    timeline_section = next(s for s in report.sections if s.section_id == "timeline")
+    overview_section = next(s for s in report.sections if s.section_id == "overview")
+
+    assert timeline_section.key_points != overview_section.key_points
+    assert any("2024년 7월" in point for point in timeline_section.key_points)
+    assert not any("일반 핵심 요약 문장" in point for point in timeline_section.key_points)
+
+
+def test_fallback_timeline_uses_metric_period_labels_when_no_dated_evidence(monkeypatch):
+    monkeypatch.delenv("TRENDSPARC_REPORT_GENERATOR_API_KEY", raising=False)
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    analysis = DocumentAnalysis(
+        doc_id="attachment:brief",
+        summary="요약",
+        metric_points=[
+            MetricPoint(label="시청률", period="도입 전", value=3.2, unit="%"),
+            MetricPoint(label="시청률", period="도입 후", value=4.1, unit="%"),
+        ],
+        evidence=["시점이 명시되지 않은 일반 서술"],
+    )
+    synthesis = synthesize("req_timeline_metric", "general", [analysis])
+    plan = _issue_response_plan(synthesis, "req_timeline_metric")
+
+    report = generate_report("어떻게 대응해야 하나?", synthesis, plan, "executive")
+    timeline_section = next(s for s in report.sections if s.section_id == "timeline")
+
+    assert any("도입 전" in point for point in timeline_section.key_points)
+    assert any("도입 후" in point for point in timeline_section.key_points)
+
+
+def test_fallback_timeline_is_honestly_empty_when_nothing_extractable(monkeypatch):
+    monkeypatch.delenv("TRENDSPARC_REPORT_GENERATOR_API_KEY", raising=False)
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    analysis = DocumentAnalysis(
+        doc_id="attachment:brief",
+        summary="요약",
+        key_points=["일반 핵심 요약 문장"],
+        evidence=["시점이 명시되지 않은 일반 서술"],
+    )
+    synthesis = synthesize("req_timeline_empty", "general", [analysis])
+    plan = _issue_response_plan(synthesis, "req_timeline_empty")
+
+    report = generate_report("어떻게 대응해야 하나?", synthesis, plan, "executive")
+    timeline_section = next(s for s in report.sections if s.section_id == "timeline")
+
+    assert timeline_section.key_points == []
+
+
+# --- recommended_actions never silently dropped by the OpenAI writer (problem 8) ---
+
+
+def test_generate_report_openai_path_keeps_every_recommended_action_reachable(monkeypatch):
+    import json
+    import openai
+
+    analyses = [
+        DocumentAnalysis(doc_id=f"doc:{i}", summary="요약", recommended_actions=[f"조치 {i}를 수행한다"])
+        for i in range(1, 7)
+    ]
+    synthesis = synthesize("req_actions", "general", analyses)
+    assert len(synthesis.recommended_actions) == 6
+    plan = _issue_response_plan(synthesis, "req_actions")
+
+    class FakeResponses:
+        def create(self, **kwargs):
+            sections = []
+            for section_id in plan.sections:
+                # Only "decision_required" surfaces any actions, and only 2 of
+                # the 6 the analyzer actually extracted - simulates the OpenAI
+                # writer under-filling an action-role section.
+                actions = synthesis.recommended_actions[:2] if section_id == "decision_required" else []
+                sections.append(
+                    {
+                        "section_id": section_id,
+                        "title": section_id,
+                        "summary": f"{section_id} 완성 문장",
+                        "key_points": [],
+                        "evidence": [],
+                        "risks": [],
+                        "opportunities": [],
+                        "actions": actions,
+                        "monitoring_indicators": [],
+                        "confidence": "high",
+                    }
+                )
+            payload = {
+                "title": "완성 보고서",
+                "executive_summary": "경영진 요약",
+                "sections": sections,
+                "limitations": [],
+            }
+            return type("Response", (), {"output_text": json.dumps(payload, ensure_ascii=False)})()
+
+    class FakeOpenAI:
+        def __init__(self, **kwargs):
+            self.responses = FakeResponses()
+
+    monkeypatch.setenv("TRENDSPARC_REPORT_GENERATOR_API_KEY", "test-key")
+    monkeypatch.setattr(openai, "OpenAI", FakeOpenAI)
+
+    report = generate_report("어떻게 대응해야 하나?", synthesis, plan, "executive")
+
+    reachable_doc_ids = {
+        generator_module._doc_id(action) for section in report.sections for action in section.actions
+    }
+    expected_doc_ids = {generator_module._doc_id(action) for action in synthesis.recommended_actions}
+    assert expected_doc_ids <= reachable_doc_ids
+
+
+def test_ensure_all_actions_reachable_is_a_no_op_when_nothing_missing(monkeypatch):
+    monkeypatch.delenv("TRENDSPARC_REPORT_GENERATOR_API_KEY", raising=False)
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    synthesis = _synthesis()
+    plan = _issue_response_plan(synthesis, "req_report")
+
+    report = generate_report("어떻게 대응해야 하나?", synthesis, plan, "executive")
+    before = [section.model_copy() for section in report.sections]
+    after = generator_module._ensure_all_actions_reachable(report.sections, synthesis)
+
+    assert [s.actions for s in after] == [s.actions for s in before]

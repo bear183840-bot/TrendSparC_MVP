@@ -66,3 +66,50 @@ def test_report_purpose_scores_full_question_across_all_purpose_types():
             question=question,
         )
         assert result.purpose_id == expected
+
+
+def test_compound_status_and_prescriptive_question_gets_secondary_purpose():
+    """'현황은 어떻고, 어떻게 늘릴 수 있을까?' asks for both a status readout
+    AND a response plan - the single-winner purpose_id must not silently
+    drop the second half of the question (problem 6)."""
+    result = classify_report_purpose(
+        "req_test_report_purpose",
+        _entities("current_status", keywords=["가입자 수", "시장"]),
+        question="Btv 가입자 수 현황은 어떻고, 어떻게 늘릴 수 있을까?",
+    )
+
+    assert result.purpose_id == "current_status"
+    assert result.secondary_purpose_id == "future_business"
+
+
+def test_single_purpose_question_has_no_secondary_purpose():
+    result = classify_report_purpose(
+        "req_test_report_purpose",
+        _entities("current_status", keywords=["시장", "동향"]),
+        question="시장 동향이 어떻게 되나요?",
+    )
+
+    assert result.purpose_id == "current_status"
+    assert result.secondary_purpose_id is None
+
+
+def test_report_planner_unions_in_secondary_purpose_sections():
+    from core.report_planner.planner import plan_report
+    from core.synthesis.synthesizer import synthesize
+
+    synthesis = synthesize("req_secondary", "general", [])
+    purpose = classify_report_purpose(
+        "req_secondary",
+        _entities("current_status", keywords=["가입자 수", "시장"]),
+        question="Btv 가입자 수 현황은 어떻고, 어떻게 늘릴 수 있을까?",
+    )
+    assert purpose.secondary_purpose_id == "future_business"
+
+    # "_default" (used when no audience is explicitly selected - see
+    # pipeline.py's _DEFAULT_AUDIENCE_ID) is the only profile with no fixed
+    # report_structure, so purpose-recommended sections drive the section
+    # list directly instead of being suppressed by a fixed page shape (see
+    # planner.py's report_structure branch).
+    plan = plan_report(synthesis, "_default", purpose)
+
+    assert "opportunity" in plan.sections or "strategic_recommendation" in plan.sections

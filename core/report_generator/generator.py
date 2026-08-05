@@ -4,10 +4,14 @@ from __future__ import annotations
 
 import json
 import os
+import re
 from copy import deepcopy
 
 from audience.contracts import load_audience_profile
 from common.contracts import GeneratedReport, GeneratedReportSection, ReportPlan, TrendSynthesis
+
+_DOC_ID_RE = re.compile(r"\[doc_id=([^\]]+)\]")
+_TIMELINE_DATE_RE = re.compile(r"(20\d{2}\s*년(?:\s*\d{1,2}\s*월)?|[1-4]\s*분기|\d{1,2}\s*월\s*\d{1,2}\s*일)")
 
 _SECTION_TITLES = {
     "overview": "Executive Overview",
@@ -95,6 +99,58 @@ def _take_raw(values: list, limit: int) -> list:
     return list(values)[:limit]
 
 
+def _doc_id(value: str) -> str | None:
+    match = _DOC_ID_RE.search(value)
+    return match.group(1) if match else None
+
+
+def _timeline_key_points(synthesis: TrendSynthesis, limit: int) -> list[str]:
+    """Real dated evidence sentences + metric_series period labels only — never
+    copies overview's key_points (that just duplicated Overview verbatim). If
+    neither source yields a real point in time, returns [] so the timeline
+    block's own empty-state ("근거에서 확인된 일정이 없습니다") shows honestly."""
+    dated_evidence = [item for item in synthesis.evidence if item and _TIMELINE_DATE_RE.search(item)]
+    metric_labels = [
+        f"{point.period} — {point.label}: {point.value}{point.unit}"
+        for point in synthesis.metric_series
+        if point.period
+    ]
+    return _take([*dated_evidence, *metric_labels], limit)
+
+
+def _ensure_all_actions_reachable(
+    sections: list[GeneratedReportSection], synthesis: TrendSynthesis
+) -> list[GeneratedReportSection]:
+    """Guarantee every synthesis.recommended_actions item is reachable somewhere in
+    the assembled report. OpenAI may only surface a subset of the analyzer-extracted
+    actions per section; anything it dropped gets appended (with its original
+    [doc_id=...] marker intact) to the first action-role section instead of silently
+    disappearing. Matched by doc_id, not exact text, since the OpenAI writer may
+    paraphrase the action while keeping the marker attached."""
+    covered_doc_ids = {
+        doc_id
+        for section in sections
+        for action in section.actions
+        for doc_id in [_doc_id(action)]
+        if doc_id is not None
+    }
+    missing = [action for action in synthesis.recommended_actions if _doc_id(action) not in covered_doc_ids]
+    if not missing:
+        return sections
+    target_id = next(
+        (section.section_id for section in sections if section.section_id in _ACTION_SECTIONS),
+        None,
+    )
+    if target_id is None:
+        return sections
+    return [
+        section.model_copy(update={"actions": [*section.actions, *missing]})
+        if section.section_id == target_id
+        else section
+        for section in sections
+    ]
+
+
 def _diversity_limitations(synthesis: TrendSynthesis) -> list[str]:
     if synthesis.source_count and synthesis.unique_source_count == 1:
         source_label = synthesis.source_ids[0] if synthesis.source_ids else "단일 출처"
@@ -164,7 +220,7 @@ def _fallback_report(
             kwargs["monitoring_indicators"] = _take(synthesis.monitoring_indicators, limit)
             kwargs["evidence"] = _take(synthesis.evidence, limit)
         elif section_id == "timeline":
-            kwargs["key_points"] = _take(key_points, limit)
+            kwargs["key_points"] = _timeline_key_points(synthesis, limit)
             kwargs["evidence"] = _take(synthesis.evidence, limit)
         elif section_id == "sources":
             kwargs["evidence"] = _take(synthesis.evidence, limit)
@@ -231,6 +287,9 @@ def generate_report(
             "sector_id": synthesis.sector_id,
             "purpose": {
                 "id": purpose_id,
+                "secondary_id": (
+                    report_plan.report_purpose.secondary_purpose_id if report_plan.report_purpose else None
+                ),
                 "instructions": report_plan.intent_emphasis,
                 "required_sections": report_plan.sections,
             },
@@ -250,6 +309,21 @@ def generate_report(
                     "content": (
                         "You are TrendSparC's final report writer. Write distinct, complete content for every "
                         "requested section, calibrated to the audience and purpose. Use only the supplied synthesis. "
+                        "payload.audience.description and payload.purpose.instructions are not background color to "
+                        "skim - they are the authoritative style/structure rules for this exact report. "
+                        "audience.description lays out, in numbered sections, that audience's required information "
+                        "density, vocabulary level, section length, and closing call-to-action; follow it precisely "
+                        "rather than defaulting to a generic tone. purpose.instructions (when non-empty) specifies "
+                        "which of this purpose's angles to emphasize and how to structure each section's content - "
+                        "follow it for what to highlight and how to frame it, not just which section_ids to include. "
+                        "Two reports for the same synthesis but different audience_id or purpose_id must read "
+                        "differently in wording, emphasis, and depth, not just in which sections are present. "
+                        "When payload.purpose.secondary_id is set, the question asks for two things at once "
+                        "(e.g. current status AND how to respond) - do not let the primary purpose crowd out "
+                        "the secondary one. Sections with section_id in response_actions, improvement_plan, "
+                        "strategic_recommendation, recommended_action, or decision_required must then contain "
+                        "at least 4 distinct items in actions, each ending with its own [doc_id=...] citation "
+                        "drawn from synthesis.recommended_actions - do not under-fill them to 1-2 items. "
                         "Keep every [doc_id=...] marker attached to its claim, never invent facts, and state uncertainty. "
                         "Copy names in canonical_entities exactly; never abbreviate, translate, or respell them. "
                         "Put recommendations in actions, risks in risks, opportunities in opportunities, and sources in evidence. "
@@ -288,6 +362,7 @@ def generate_report(
             _repair_section(returned_by_id.get(section_id, fallback_by_id[section_id]), fallback_by_id[section_id])
             for section_id in report_plan.sections
         ]
+        sections = _ensure_all_actions_reachable(sections, synthesis)
         limitations = list(dict.fromkeys([*parsed["limitations"], *_diversity_limitations(synthesis)]))
         if missing:
             limitations.append(

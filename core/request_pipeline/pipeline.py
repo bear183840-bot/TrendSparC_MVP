@@ -366,7 +366,9 @@ def run_pipeline(
     # 9. layout_generator
     try:
         _maybe_force_fail("layout_generator")
-        result.layout = generate_layout(result.report_plan, result.audience_adaptation)
+        result.layout = generate_layout(
+            result.report_plan, result.audience_adaptation, result.synthesis.doc_source_map
+        )
         result.trace.append(StageTrace(stage="layout_generator", status=StageStatus.OK))
     except PipelineStageError as exc:
         _halt("layout_generator", exc.reason, exc.detail)
