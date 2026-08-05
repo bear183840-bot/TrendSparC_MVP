@@ -197,9 +197,17 @@ def _scrape_candidate(
         config.call_timeout_seconds,
     )
     if status != "ok":
+        detail = payload if status == "error" else "timed out"
+        print(f"[ai_search_harness] scrape failed for {citation.url}: {detail}", file=sys.stderr)
         return None
     markdown = response_markdown(payload)
     if not markdown or len(markdown.strip()) < config.min_content_length:
+        length = len(markdown.strip()) if markdown else 0
+        print(
+            f"[ai_search_harness] scraped content too short for {citation.url} "
+            f"({length} < {config.min_content_length} chars)",
+            file=sys.stderr,
+        )
         return None
     source_id, reliability_tier = _attribute_source(citation.url, all_sources)
     return SourceDocument(
@@ -261,6 +269,11 @@ def run_ai_search_harness(
 
         citations = _extract_url_citations(response)
         new_citations = [citation for citation in citations if citation.url not in seen_urls]
+        print(
+            f"[ai_search_harness] round {round_index + 1} for '{source.name}' query='{query}': "
+            f"{len(citations)} citation(s) found",
+            file=sys.stderr,
+        )
         for citation in new_citations:
             seen_urls.add(citation.url)
             document = _scrape_candidate(firecrawl_client, citation, all_sources, config)

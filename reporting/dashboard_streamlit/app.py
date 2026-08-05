@@ -6,10 +6,12 @@ Run with: python -m streamlit run reporting/dashboard_streamlit/app.py
 from __future__ import annotations
 
 import base64
+import io
 import re
 import sys
 import textwrap
 import uuid
+from contextlib import redirect_stderr, redirect_stdout
 from html import escape
 from pathlib import Path
 
@@ -59,12 +61,14 @@ AUDIENCE_LABELS = {
 
 st.set_page_config(page_title="TrendSparC", page_icon="◼", layout="wide", initial_sidebar_state="expanded")
 
-APP_STATE_VERSION = 4
+APP_STATE_VERSION = 7
 if st.session_state.get("app_state_version") != APP_STATE_VERSION:
     st.session_state.result = None
     st.session_state.submitted_question = None
     st.session_state.recent_questions = []
     st.session_state.dark_mode = False
+    st.session_state.accent_theme = "burgundy"
+    st.session_state.terminal_log = None
     st.session_state.app_state_version = APP_STATE_VERSION
 
 
@@ -72,11 +76,31 @@ def _html(markup: str) -> None:
     st.markdown(textwrap.dedent(markup).strip(), unsafe_allow_html=True)
 
 
+class _TeeStream:
+    """Writes to every wrapped stream - lets run_pipeline's stderr/stdout
+    prints keep reaching the real console while a copy is also captured for
+    display/download in the app itself."""
+
+    def __init__(self, *streams):
+        self._streams = streams
+
+    def write(self, data):
+        for stream in self._streams:
+            stream.write(data)
+            stream.flush()
+        return len(data)
+
+    def flush(self):
+        for stream in self._streams:
+            stream.flush()
 
 
 def _reset() -> None:
     st.session_state.result = None
     st.session_state.submitted_question = None
+    st.session_state.terminal_log = None
+    for key in ("intake_question", "intake_audience", "intake_sector"):
+        st.session_state.pop(key, None)
 
 
 result = st.session_state.result
@@ -86,11 +110,16 @@ if result is None:
         "<style>[data-testid='stSidebar'],[data-testid='collapsedControl']{display:none}"
         ".block-container{max-width:1120px}"
         "[data-testid='stAppViewContainer']{background:#ffffff!important;}"
-        "[class*='st-key-landing_toggle']{opacity:.45;transform:scale(.8);transform-origin:top right;}"
+        "[class*='st-key-landing_toggle_']{opacity:.45;transform:scale(.8);transform-origin:top right;}"
         "</style>"
     )
-    theme_col, toggle_col = st.columns([0.94, 0.06], vertical_alignment="center")
-    with toggle_col, st.container(key="landing_toggle"):
+    theme_col, accent_col, dark_col = st.columns([0.88, 0.06, 0.06], vertical_alignment="center")
+    with accent_col, st.container(key="landing_toggle_accent"):
+        is_orange = st.toggle(
+            "오렌지", value=(st.session_state.accent_theme == "orange"), label_visibility="collapsed"
+        )
+        st.session_state.accent_theme = "orange" if is_orange else "burgundy"
+    with dark_col, st.container(key="landing_toggle_dark"):
         st.session_state.dark_mode = st.toggle("다크", value=st.session_state.dark_mode, label_visibility="collapsed")
 else:
     with st.sidebar:
@@ -103,6 +132,9 @@ else:
             '<div class="ts-nav">▣　Monitoring</div><div class="ts-nav">⚙　Settings</div></div>'
         )
         st.session_state.dark_mode = st.toggle("다크 모드", value=st.session_state.dark_mode)
+        st.session_state.accent_theme = (
+            "burgundy" if st.toggle("버건디 테마", value=(st.session_state.accent_theme == "burgundy")) else "orange"
+        )
         recent = st.session_state.recent_questions[-4:]
         recent_html = '<div class="ts-recent"><b>Recent Analyses</b>'
         for index, item in enumerate(reversed(recent)):
@@ -110,32 +142,38 @@ else:
             recent_html += f'<div class="ts-recent-item{active}">{textwrap.shorten(item, width=27, placeholder="…")}</div>'
         _html(recent_html + "</div>")
 
-_html(dashboard_css(st.session_state.dark_mode))
+_html(dashboard_css(st.session_state.dark_mode, st.session_state.accent_theme))
 
 if result is None:
     _html(
         '<section class="ts-landing">' + wordmark_html(large=True) +
-        '<h1 class="ts-question-title">What should we work on?</h1></section>'
+        '<h1 class="ts-question-title">What Trend should we Spark?</h1></section>'
     )
     with st.form("intake_form"):
+        # Explicit `key=` binds each widget to st.session_state so its value
+        # survives a rerun triggered by something outside the form (e.g. the
+        # dark-mode/accent toggles above) instead of only living in transient
+        # frontend state until the form is submitted.
         question = st.text_area(
             "질문",
             placeholder="분석이 필요한 시장·기술·사업 이슈를 질문해 주세요.",
             height=180,
             label_visibility="collapsed",
+            key="intake_question",
         )
         audience_ids = list_audience_ids()
         sector_profiles = scan_sectors(SECTORS_DIR)
 
         with st.container(key="intake_meta_row"):
-            meta_row = st.columns([0.11, 0.14, 0.14, 0.61], vertical_alignment="center")
+            meta_row = st.columns([0.10, 0.16, 0.16, 0.58], vertical_alignment="center")
             with meta_row[0]:
-                with st.popover("＋　첨부", use_container_width=True):
+                with st.popover("첨부", use_container_width=True):
                     uploaded_files = st.file_uploader(
                         "파일첨부",
                         accept_multiple_files=True,
                         label_visibility="collapsed",
                         help="PDF, DOCX, TXT, MD, CSV, JSON, HTML 파일을 질문과 함께 근거로 사용합니다.",
+                        key="intake_attachments",
                     )
             with meta_row[1]:
                 selected_audience = st.selectbox(
@@ -145,6 +183,7 @@ if result is None:
                     placeholder="청중",
                     format_func=lambda audience_id: AUDIENCE_LABELS.get(audience_id, audience_id),
                     label_visibility="collapsed",
+                    key="intake_audience",
                 )
             with meta_row[2]:
                 selected_sector = st.selectbox(
@@ -154,11 +193,12 @@ if result is None:
                     placeholder="계열사",
                     format_func=lambda sector_id: _sector_english_label(sector_id, sector_profiles[sector_id].display_name),
                     label_visibility="collapsed",
+                    key="intake_sector",
                 )
 
         _, submit_col = st.columns([0.78, 0.22])
         with submit_col:
-            submitted = st.form_submit_button("Start  →", use_container_width=True)
+            submitted = st.form_submit_button("Start!", use_container_width=True)
 
     if submitted:
         if not question.strip():
@@ -182,7 +222,12 @@ if result is None:
                 attachments=attachments,
             )
             with st.spinner("관련 근거를 수집하고 의사결정 흐름을 구성하고 있습니다..."):
-                st.session_state.result = run_pipeline(request, dry_run=False, requested_sector_id=selected_sector)
+                log_buffer = io.StringIO()
+                tee_out = _TeeStream(sys.stdout, log_buffer)
+                tee_err = _TeeStream(sys.stderr, log_buffer)
+                with redirect_stdout(tee_out), redirect_stderr(tee_err):
+                    st.session_state.result = run_pipeline(request, dry_run=False, requested_sector_id=selected_sector)
+                st.session_state.terminal_log = log_buffer.getvalue()
                 st.session_state.submitted_question = question
                 st.session_state.recent_questions.append(question)
             st.rerun()
@@ -219,6 +264,17 @@ else:
 
 with st.expander("실행 기록 및 원본 계약"):
     render_execution_record(result.collection_events, result.trace)
+    terminal_log = st.session_state.get("terminal_log")
+    if terminal_log:
+        st.markdown("#### 터미널 실행 로그")
+        st.caption("수집·분석 단계에서 콘솔에 출력된 원본 로그입니다 (제외된 문서, AI 보정 실패 등 상세 사유 포함).")
+        st.code(terminal_log, language=None)
+        st.download_button(
+            "로그 다운로드 (.txt)",
+            terminal_log,
+            file_name=f"{result.request_id}_terminal_log.txt",
+            mime="text/plain",
+        )
     st.markdown("#### 원본 계약")
     st.json({
         "trace": [trace.model_dump(mode="json") for trace in result.trace],
