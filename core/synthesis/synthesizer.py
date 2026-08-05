@@ -50,7 +50,9 @@ def synthesize(
     monitoring_indicators: list[str] = []
     evidence: list[str] = []
     confidence_labels: list[str] = []
+    doc_source_map: dict[str, str] = {}
     for analysis in document_analyses:
+        doc_source_map[analysis.doc_id] = analysis.source_id or analysis.doc_id.split(":", 1)[0]
         _append_items(highlights, "Key Point", analysis.key_points, analysis.doc_id)
         _append_text(highlights, "Business Impact", analysis.business_impact, analysis.doc_id)
         _append_text(highlights, "Risk", analysis.risk, analysis.doc_id)
@@ -98,4 +100,5 @@ def synthesize(
         monitoring_indicators=monitoring_indicators,
         evidence=evidence,
         confidence_labels=confidence_labels,
+        doc_source_map=doc_source_map,
     )

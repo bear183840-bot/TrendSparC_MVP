@@ -2,13 +2,14 @@
 
 SK Broadband 섹터의 실행용 Source를 관리한다. 이 섹터는 1차 발표 기준 섹터이므로, 단순 뉴스 포털만 쓰지 않고 공식 발표, 경쟁사 공식 자료, 공공 시장 보고서, 산업 전문 매체, 사용자 반응을 함께 본다.
 
-질문마다 등록된 후보 중 관련성 높은 소스를 선별해 쓰는 구조로 전환 중이라, 섹터 전용 Source는 현재 **12개**다 (2026-08-01 기준 — 검증 결과는 아래 "이번에 반려된 후보" 참고). 공통 네이버 뉴스는 `sources/registry/common/`에서 자동 병합되므로 실제 SourcePlan 기준으로는 **최대 13개 Source**가 후보로 사용된다.
+질문마다 등록된 후보 중 관련성 높은 소스를 선별해 쓰는 구조로 전환 중이라, 섹터 전용 Source는 현재 **12개**다 (2026-08-03 기준 — 디지털데일리·키노라이츠 삭제, 미디어통계포털 신규 등록 반영. 이전 검증 결과는 아래 "이번에 반려된 후보" 참고). 공통 네이버 뉴스는 `sources/registry/common/`에서 자동 병합되므로 실제 SourcePlan 기준으로는 **최대 13개 Source**가 후보로 사용된다.
 
 ## 현재 등록 Source
 
 | 이름 | role | content_type | reliability_tier | 주요 용도 |
 |---|---|---|---|---|
 | SK브로드밴드 뉴스룸 | `official` | `press_release` | `official` | 공식 사업·서비스 발표 |
+| SK텔레콤 IR 자료실 (SK브로드밴드 연결 실적) | `official` | `analysis` | `official` | 연결 자회사 매출·실적 IR 자료 |
 | KT 뉴스룸 | `competitor_official` | `press_release` | `official` | 경쟁사 공식 발표 비교 |
 | 한국콘텐츠진흥원(KOCCA) | `market_analysis` | `analysis` | `official` | 콘텐츠·미디어 산업 통계/시장자료 |
 | 영화진흥위원회(KOFIC) | `market_analysis` | `analysis` | `official` | 영화산업 결산·콘텐츠 소비 흐름 |
@@ -18,8 +19,7 @@ SK Broadband 섹터의 실행용 Source를 관리한다. 이 섹터는 1차 발�
 | Netflix 미디어 센터 | `competitor_official` | `press_release` | `official` | 글로벌 OTT 대체재 공식 발표 |
 | Disney+ 프레스룸 | `competitor_official` | `press_release` | `official` | 글로벌 OTT 대체재 공식 발표 |
 | 방송미디어통신위원회 보도자료 | `regulatory_official` | `press_release` | `official` | 방송·통신 규제 정책 1차 출처 |
-| 디지털데일리(통신/미디어) | `search` | `analysis` | `analyst_media` | 통신·미디어 뉴스 보완 |
-| 키노라이츠 | `user_sentiment` | - | `user_generated` | OTT 콘텐츠 소비 반응 참고 |
+| 미디어통계포털 | `regulatory_official` | `press_release` | `official` | 국내 미디어·통신 시장 연구 보고서 |
 | 네이버 뉴스 | `search` | - | `common` | 공통 Source, 일반 뉴스 보완 |
 
 ## Source 선정 이유
@@ -29,6 +29,11 @@ SK Broadband 섹터의 실행용 Source를 관리한다. 이 섹터는 1차 발�
 - SK브로드밴드의 서비스, 기술, 제휴 관련 공식 1차 자료
 - 신규 서비스, AI 적용 사례, 사업 방향 등 산업동향 분석에 활용
 - 기업 공식 자료이므로 사실 확인의 기준점으로 사용
+
+### SK텔레콤 IR 자료실 (SK브로드밴드 연결 실적)
+
+- SK텔레콤 공식 IR 자료에서 연결 자회사인 SK브로드밴드의 유선·미디어 사업 실적과 주요 KPI를 확인하기 위한 1차 자료
+- 매출·영업이익 등 IR/실적 관점 질문에 대응하는 `official` 역할 소스 (뉴스룸의 서비스 뉴스와는 다른 각도)
 
 ### KT 뉴스룸
 
@@ -70,15 +75,11 @@ SK Broadband 섹터의 실행용 Source를 관리한다. 이 섹터는 1차 발�
 - 망 사용료·개인정보·AI 콘텐츠 규제 등 정책 리스크를 확인하는 정부 공식 1차 출처
 - 기존에 `regulatory_official` 역할이 비어있던 카테고리를 채움
 
-### 디지털데일리(통신/미디어)
+### 미디어통계포털
 
-- 전자신문 외에 통신·미디어 뉴스를 보완할 전문매체 추가 (검색 후보 다양화)
-- 공식 발표만으로 부족한 시장 반응·산업 맥락 확인용이며, 공식 Source와 Cross Check가 필요하다.
-
-### 키노라이츠
-
-- OTT 콘텐츠 통합 검색·평가 서비스, 왓챠피디아 외에 사용자 반응 신호를 보완
-- 왓챠피디아와 마찬가지로 보조 신호로만 사용, 단독 근거로 쓰지 않음
+- 국내 미디어·통신 시장에 대한 심도 있는 연구 보고서를 발행하는 공공 통계 포털
+- 방송미디어통신위원회 보도자료와 함께 `regulatory_official` 역할 보강 목적으로 2026-08-03 사용자 검토를 거쳐 신규 등록
+- 통계 포털 특성상 매일 갱신되지 않아 `frequency`는 `weekly`로 설정
 
 ### 네이버 뉴스
 
