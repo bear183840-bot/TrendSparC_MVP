@@ -172,6 +172,150 @@ def test_broadband_collect_caps_total_documents_at_twelve(monkeypatch):
     assert len(docs) == 12
 
 
+def _no_legacy_search_client():
+    class _NoSearchClient:
+        def search(self, *args, **kwargs):
+            raise AssertionError("legacy Firecrawl search must not run when the harness is enabled (판단 5)")
+
+    return _NoSearchClient()
+
+
+def test_broadband_crawl_source_uses_harness_when_enabled_and_sufficient(monkeypatch):
+    monkeypatch.setenv(collector_module._HARNESS_API_KEY_ENV_VAR, "test-key")
+    harness_doc = SourceDocument(
+        doc_id="d1", source_id="SK브로드밴드 뉴스룸", title="B tv 신규 서비스",
+        url="https://news.sktelecom.com/a", content="본문" * 100, reliability_tier="official",
+    )
+    calls = []
+
+    def fake_harness(openai_client, firecrawl_client, source, all_sources, keywords, config):
+        calls.append((source.name, all_sources, keywords))
+        return [harness_doc]
+
+    monkeypatch.setattr(collector_module, "run_ai_search_harness", fake_harness)
+    source = PlannedSource(name="SK브로드밴드 뉴스룸", url="https://news.sktelecom.com/tag/skbroadband", role="official")
+
+    docs = _crawl_source(_no_legacy_search_client(), source, "test-key", ["IPTV"], (source,))
+
+    assert docs == [harness_doc]
+    assert len(calls) == 1
+    assert calls[0][0] == "SK브로드밴드 뉴스룸"
+
+
+def test_broadband_crawl_source_fails_without_legacy_fallback_when_harness_insufficient(monkeypatch):
+    monkeypatch.setenv(collector_module._HARNESS_API_KEY_ENV_VAR, "test-key")
+    monkeypatch.setattr(collector_module, "run_ai_search_harness", lambda *args, **kwargs: [])
+    source = PlannedSource(name="SK브로드밴드 뉴스룸", url="https://news.sktelecom.com/tag/skbroadband")
+
+    with pytest.raises(PipelineStageError):
+        _crawl_source(_no_legacy_search_client(), source, "test-key", ["IPTV"], (source,))
+
+
+def test_broadband_crawl_source_wraps_harness_exception_as_stage_error(monkeypatch):
+    monkeypatch.setenv(collector_module._HARNESS_API_KEY_ENV_VAR, "test-key")
+
+    def fake_harness(*args, **kwargs):
+        raise RuntimeError("simulated unsupported model/tool error")
+
+    monkeypatch.setattr(collector_module, "run_ai_search_harness", fake_harness)
+    source = PlannedSource(name="SK브로드밴드 뉴스룸", url="https://news.sktelecom.com/tag/skbroadband")
+
+    with pytest.raises(PipelineStageError):
+        _crawl_source(_no_legacy_search_client(), source, "test-key", ["IPTV"], (source,))
+
+
+def test_broadband_crawl_source_skips_harness_entirely_when_key_unset(monkeypatch):
+    monkeypatch.delenv(collector_module._HARNESS_API_KEY_ENV_VAR, raising=False)
+    calls = []
+    monkeypatch.setattr(collector_module, "run_ai_search_harness", lambda *a, **k: calls.append(1) or [])
+    source = PlannedSource(
+        name="전자신문 (통신)", url="https://www.etnews.com/news/section.html?id1=03",
+        collection_method=["firecrawl_search"], reliability_tier="analyst_media",
+    )
+    result = _make_result("본문" * 200, title="OTT 시장 변화", url="https://www.etnews.com/a")
+
+    docs = _crawl_source(_FastClient([result]), source, "test-key", ["OTT", "IPTV"])
+
+    assert calls == []  # harness never touched
+    assert len(docs) == 1  # legacy path still works exactly as before this change
+
+
+def test_broadband_kofic_source_bypasses_harness_even_when_enabled(monkeypatch):
+    monkeypatch.setenv(collector_module._HARNESS_API_KEY_ENV_VAR, "test-key")
+    calls = []
+    monkeypatch.setattr(collector_module, "run_ai_search_harness", lambda *a, **k: calls.append(1) or [])
+    source = PlannedSource(
+        name="영화진흥위원회(KOFIC)",
+        url="https://www.kofic.or.kr/kofic/business/board/selectBoardList.do?boardNumber=2",
+        collection_method=["kofic_pdf_post_download", "firecrawl_parse"],
+        reliability_tier="official",
+    )
+    search_result = _make_result(
+        "상세 링크", title="KOFIC 보고서",
+        url="https://www.kofic.or.kr/kofic/business/board/selectBoardDetail.do?boardNumber=2&boardSeqNumber=69184",
+    )
+    attachment = types.SimpleNamespace(download_name="2025년 상반기 한국 영화산업 결산 보고서.pdf")
+    parsed = types.SimpleNamespace(detail_url=search_result.url, attachment=attachment, markdown="KOFIC PDF 본문" * 100)
+    monkeypatch.setattr(collector_module, "collect_pdf_markdown_from_detail_url", lambda detail_url, api_key: parsed)
+
+    docs = _crawl_source(_FastClient([search_result]), source, "test-key", ["영화산업", "OTT"])
+
+    assert calls == []  # responses.create-equivalent never invoked for KOFIC
+    assert len(docs) == 1
+
+
+def test_broadband_collect_continues_when_harness_fails_for_one_source(monkeypatch):
+    monkeypatch.setenv("FIRECRAWL_API_KEY", "test-key")
+    monkeypatch.setenv(collector_module._HARNESS_API_KEY_ENV_VAR, "test-key")
+    sources = [
+        PlannedSource(name="broken", url="https://broken.example.com", collection_method=["firecrawl_search"]),
+        PlannedSource(name="ok", url="https://ok.example.com", collection_method=["firecrawl_search"]),
+    ]
+    plan = SourcePlan(request_id="req", sector_id="sk_broadband", planned_sources=sources, question_keywords=["OTT"])
+    monkeypatch.setattr(collector_module, "Firecrawl", lambda api_key: object())  # never called by the fake harness
+
+    def fake_harness(openai_client, firecrawl_client, source, all_sources, keywords, config):
+        if source.name == "broken":
+            return []  # insufficient -> _run_ai_harness raises PipelineStageError
+        return [SourceDocument(doc_id="d1", source_id="ok", url="https://ok.example.com/a", content="본문" * 100)]
+
+    monkeypatch.setattr(collector_module, "run_ai_search_harness", fake_harness)
+
+    docs = collect(plan)
+
+    assert len(docs) == 1
+    assert docs[0].source_id == "ok"
+
+
+def test_broadband_collect_passes_all_planned_sources_to_crawl_source(monkeypatch):
+    monkeypatch.setenv("FIRECRAWL_API_KEY", "test-key")
+    monkeypatch.delenv(collector_module._HARNESS_API_KEY_ENV_VAR, raising=False)
+    sources = [
+        PlannedSource(name="a", url="https://a.example.com", collection_method=["firecrawl_search"]),
+        PlannedSource(name="b", url="https://b.example.com", collection_method=["firecrawl_search"]),
+    ]
+    plan = SourcePlan(request_id="req", sector_id="sk_broadband", planned_sources=sources, question_keywords=["OTT"])
+
+    class _EmptySearchClient:
+        def search(self, query, include_domains, limit, scrape_options):
+            return _search_data([])
+
+    monkeypatch.setattr(collector_module, "Firecrawl", lambda api_key: _EmptySearchClient())
+    captured_all_sources = []
+    original_crawl_source = collector_module._crawl_source
+
+    def spy(client, source, api_key, keywords, all_sources=()):
+        captured_all_sources.append(all_sources)
+        return original_crawl_source(client, source, api_key, keywords, all_sources)
+
+    monkeypatch.setattr(collector_module, "_crawl_source", spy)
+
+    collect(plan)
+
+    assert len(captured_all_sources) == 2
+    assert all(tuple(captured) == tuple(sources) for captured in captured_all_sources)
+
+
 def test_broadband_processor_strips_boilerplate_and_deduplicates():
     doc = SourceDocument(
         doc_id="doc1",

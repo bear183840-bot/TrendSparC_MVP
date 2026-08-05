@@ -9,6 +9,14 @@ points, rank what's left by actual importance, and produce a short
 synthesis_text overview — the kind of consolidation a human analyst would
 do by hand before writing a report.
 
+It also asks the model to (a) group points that restate the same underlying
+claim across different doc_ids, and (b) flag genuinely conflicting claims
+about the same topic. The model's own claim groupings are semantic pattern
+matching it's good at, but *how many independent sources* back a group is
+never trusted from the model — this module verifies that itself using
+TrendSynthesis.doc_source_map, since two documents from the same registered
+source are not independent corroboration of each other.
+
 No sector name is ever referenced here (sector-agnostic, like
 core/entity/ai_based.py).
 
@@ -26,17 +34,21 @@ import sys
 
 from openai import OpenAI
 
-from common.contracts import TrendSynthesis
+from common.contracts import Contradiction, ContradictingClaim, CorroboratedPoint, TrendSynthesis
 
 _API_KEY_ENV_VAR = "TRENDSPARC_SYNTHESIS_AI_API_KEY"
 _MODEL = "gpt-4o-mini"
 _STAGE = "synthesis"
+# Below this many distinct source_ids, a claim group is not "corroborated" —
+# it's just the same source (or the same lone source) restating itself.
+_MIN_INDEPENDENT_SOURCES_FOR_CORROBORATION = 2
 
 _SYSTEM_PROMPT = """You are a synthesis assistant for TrendSparC, an internal AI \
 trend-intelligence tool used across multiple, unrelated business sectors. You will be \
 given the original question the user asked, plus a flat JSON array of key_points \
 already extracted from several source documents about that question — some may \
-restate the same fact in different words, and they carry no particular order.
+restate the same fact in different words, and they carry no particular order. Each \
+point is tagged with the doc_id of the document it came from.
 
 Your job:
 - Remove near-duplicate points (the same fact stated more than once, even if worded \
@@ -47,20 +59,122 @@ original question (not just "important in general").
 - Write a short (2-4 sentence) synthesis_text paragraph in Korean that directly \
 answers the original question using the remaining points — a "so what" overview \
 grounded in what was actually asked, not a generic bullet-point restatement.
+- Separately, group the ORIGINAL (pre-deduplication) key_points by underlying claim: \
+for each group of >= 1 point that states essentially the same fact (even if worded \
+differently across documents), list the claim and every doc_id that stated it. \
+Include single-doc_id groups too — do not skip claims that only appear once. Do not \
+count or judge how many independent sources back each group yourself; just group by \
+doc_id, a separate process will verify independence.
+- Separately, identify genuine contradictions: cases where two or more documents make \
+factually conflicting claims about the same specific topic (not just different \
+emphasis or scope — an actual conflict, e.g. two different numbers for the same \
+metric, or opposite claims about whether something happened). For each, give a short \
+topic label and list each conflicting claim with its doc_id. Leave this empty if you \
+find no genuine conflicts — do not manufacture contradictions from minor wording \
+differences.
 
 Never invent a fact, number, or claim that isn't already present in the input points. \
-If the input is very short (1-2 points), it's fine for synthesis_text to be brief and \
-for little or no deduplication to occur."""
+Never invent a doc_id that wasn't in the input. If the input is very short (1-2 \
+points), it's fine for synthesis_text to be brief and for little or no deduplication \
+to occur."""
 
 _SCHEMA = {
     "type": "object",
     "properties": {
         "highlights": {"type": "array", "items": {"type": "string"}},
         "synthesis_text": {"type": "string"},
+        "claim_groups": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "claim": {"type": "string"},
+                    "doc_ids": {"type": "array", "items": {"type": "string"}},
+                },
+                "required": ["claim", "doc_ids"],
+                "additionalProperties": False,
+            },
+        },
+        "contradictions": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "topic": {"type": "string"},
+                    "conflicting_claims": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "claim": {"type": "string"},
+                                "doc_id": {"type": "string"},
+                            },
+                            "required": ["claim", "doc_id"],
+                            "additionalProperties": False,
+                        },
+                    },
+                },
+                "required": ["topic", "conflicting_claims"],
+                "additionalProperties": False,
+            },
+        },
     },
-    "required": ["highlights", "synthesis_text"],
+    "required": ["highlights", "synthesis_text", "claim_groups", "contradictions"],
     "additionalProperties": False,
 }
+
+
+def _split_by_corroboration(
+    claim_groups: list[dict], doc_source_map: dict[str, str]
+) -> tuple[list[CorroboratedPoint], list[str]]:
+    """Verify each model-proposed claim group's independent-source count in
+    code rather than trusting the model's own count — a group whose doc_ids
+    all map to the same source_id (or map to no known doc_id at all) is not
+    corroborated, regardless of how many doc_ids it lists."""
+    corroborated: list[CorroboratedPoint] = []
+    uncorroborated: list[str] = []
+    for group in claim_groups:
+        claim = group.get("claim")
+        doc_ids = group.get("doc_ids") or []
+        if not claim or not doc_ids:
+            continue
+        known_doc_ids = [doc_id for doc_id in doc_ids if doc_id in doc_source_map]
+        if not known_doc_ids:
+            continue  # every doc_id in this group is unknown -> hallucinated group, drop entirely
+        supporting_source_ids = list(dict.fromkeys(doc_source_map[doc_id] for doc_id in known_doc_ids))
+        if len(supporting_source_ids) >= _MIN_INDEPENDENT_SOURCES_FOR_CORROBORATION:
+            corroborated.append(
+                CorroboratedPoint(
+                    claim=claim,
+                    supporting_doc_ids=known_doc_ids,
+                    supporting_source_ids=supporting_source_ids,
+                )
+            )
+        else:
+            uncorroborated.append(claim)
+    return corroborated, uncorroborated
+
+
+def _filter_contradictions(raw_contradictions: list[dict], doc_source_map: dict[str, str]) -> list[Contradiction]:
+    """Drop any contradiction referencing a doc_id that doesn't actually exist
+    in this synthesis — a hallucination guard, mirroring the collector's
+    "never trust a URL the model just says" principle applied to doc_ids."""
+    contradictions: list[Contradiction] = []
+    for item in raw_contradictions:
+        topic = item.get("topic")
+        raw_claims = item.get("conflicting_claims") or []
+        claims = [
+            ContradictingClaim(
+                claim=claim["claim"],
+                doc_id=claim["doc_id"],
+                source_id=doc_source_map.get(claim["doc_id"]),
+            )
+            for claim in raw_claims
+            if claim.get("doc_id") in doc_source_map and claim.get("claim")
+        ]
+        if topic and len(claims) >= 2:
+            contradictions.append(Contradiction(topic=topic, conflicting_claims=claims))
+    return contradictions
 
 
 def refine_synthesis_ai(rule_based_result: TrendSynthesis, question: str) -> TrendSynthesis:
@@ -94,10 +208,19 @@ def refine_synthesis_ai(rule_based_result: TrendSynthesis, question: str) -> Tre
         if message.refusal:
             raise RuntimeError(message.refusal)
         data = json.loads(message.content)
+        corroborated_points, uncorroborated_points = _split_by_corroboration(
+            data.get("claim_groups") or [], rule_based_result.doc_source_map
+        )
+        contradictions = _filter_contradictions(
+            data.get("contradictions") or [], rule_based_result.doc_source_map
+        )
         return rule_based_result.model_copy(
             update={
                 "highlights": data["highlights"],
                 "synthesis_text": data["synthesis_text"],
+                "corroborated_points": corroborated_points,
+                "uncorroborated_points": uncorroborated_points,
+                "contradictions": contradictions,
             }
         )
     except Exception as exc:  # noqa: BLE001 - AI refinement is best-effort, never fatal

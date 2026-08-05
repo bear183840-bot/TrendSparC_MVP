@@ -23,6 +23,7 @@ from firecrawl.v2.types import ScrapeOptions
 from common.contracts import PlannedSource, SourceDocument, SourcePlan
 from common.errors import PipelineStageError
 from core.source_planner.query_strategy import build_search_queries, build_source_search_terms
+from sources.collectors.ai_search_harness import HarnessConfig, run_ai_search_harness
 from sources.collectors.kofic_pdf import collect_pdf_markdown_from_detail_url
 from sources.collectors.firecrawl_web import response_markdown
 
@@ -34,6 +35,17 @@ _PRIMARY_TERM_COUNT = 2
 _LAST_RESORT_TERM_COUNT = 1
 _MAX_QUERY_TERMS = 5
 _MAX_RESULTS_PER_SOURCE = 2
+# AI search harness (grounded web_search + Firecrawl scrape, see
+# sources/collectors/ai_search_harness.py) — optional, opt-in via env var.
+# When enabled, a source uses the harness ONLY: insufficient/failed results
+# raise PipelineStageError instead of falling back to the legacy Firecrawl
+# search below, since retrying with a lower-quality method after already
+# spending harness tokens wastes money for little chance of success. When
+# disabled (the default), sources use the legacy Firecrawl search unchanged.
+_HARNESS_API_KEY_ENV_VAR = "TRENDSPARC_SK_BROADBAND_COLLECTOR_HARNESS_API_KEY"
+_HARNESS_MODEL_ENV_VAR = "TRENDSPARC_SK_BROADBAND_COLLECTOR_HARNESS_MODEL"
+_HARNESS_DEFAULT_MODEL = "gpt-4o"
+_HARNESS_MIN_DOCS_PER_SOURCE = 1
 # Defensive cap on top of source_planner.select_top_sources()'s 6-source
 # selection (6 sources * _MAX_RESULTS_PER_SOURCE = 12) — stops collection
 # once reached even if a future config change lets more sources or results
@@ -242,10 +254,60 @@ def _crawl_kofic_pdf_source(client: Firecrawl, source: PlannedSource, api_key: s
     return documents
 
 
-def _crawl_source(client: Firecrawl, source: PlannedSource, api_key: str, keywords: list[str]) -> list[SourceDocument]:
+def _run_ai_harness(
+    client: Firecrawl,
+    source: PlannedSource,
+    all_sources: list[PlannedSource],
+    keywords: list[str],
+    api_key: str,
+) -> list[SourceDocument]:
+    """The only path taken when the harness is enabled for this source —
+    insufficient/failed results raise PipelineStageError instead of falling
+    back to legacy Firecrawl search. collect()'s existing per-source
+    try/except catches this, logs the source as failed, and moves on."""
+    try:
+        from openai import OpenAI
+
+        openai_client = OpenAI(api_key=api_key)
+        model = os.environ.get(_HARNESS_MODEL_ENV_VAR) or _HARNESS_DEFAULT_MODEL
+        docs = run_ai_search_harness(
+            openai_client,
+            client,
+            source,
+            all_sources,
+            keywords,
+            HarnessConfig(model=model),
+        )
+    except Exception as exc:  # noqa: BLE001
+        raise PipelineStageError(
+            stage=_STAGE,
+            reason=f"ai_search_harness call failed for '{source.name}'",
+            detail=str(exc),
+        ) from exc
+    if len(docs) < _HARNESS_MIN_DOCS_PER_SOURCE:
+        raise PipelineStageError(
+            stage=_STAGE,
+            reason=(
+                f"ai_search_harness found insufficient documents for "
+                f"'{source.name}' ({len(docs)} < {_HARNESS_MIN_DOCS_PER_SOURCE})"
+            ),
+        )
+    return docs
+
+
+def _crawl_source(
+    client: Firecrawl,
+    source: PlannedSource,
+    api_key: str,
+    keywords: list[str],
+    all_sources: tuple[PlannedSource, ...] = (),
+) -> list[SourceDocument]:
     if "kofic_pdf_post_download" in set(source.collection_method):
         return _crawl_kofic_pdf_source(client, source, api_key, keywords)
-    return _crawl_web_source(client, source, keywords)
+    harness_key = os.environ.get(_HARNESS_API_KEY_ENV_VAR)
+    if not harness_key:
+        return _crawl_web_source(client, source, keywords)  # harness disabled — legacy is the default
+    return _run_ai_harness(client, source, list(all_sources), keywords, harness_key)  # enabled — never falls back
 
 
 def collect(source_plan: SourcePlan) -> list[SourceDocument]:
@@ -267,6 +329,7 @@ def collect(source_plan: SourcePlan) -> list[SourceDocument]:
                 source,
                 api_key,
                 build_source_search_terms(source, source_plan.question_keywords),
+                tuple(source_plan.planned_sources),
             )
             documents.extend(source_documents)
             print(f"[{index + 1}/{total}] {source.name} 완료 ({len(source_documents)}건)", file=sys.stderr)

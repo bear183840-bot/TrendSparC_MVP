@@ -235,6 +235,38 @@ class DocumentAnalysis(BaseModel):
     relevant_to_question: Optional[bool] = None
 
 
+class ContradictingClaim(BaseModel):
+    """One side of a Contradiction — a single document's version of a claim."""
+
+    claim: str
+    doc_id: str
+    source_id: Optional[str] = None
+
+
+class Contradiction(BaseModel):
+    """Two or more collected documents make conflicting claims about the same
+    topic. Populated only by the AI refinement pass in core/synthesis/ai_based.py
+    (best-effort, silently absent whenever that pass doesn't run) — never
+    fabricated by the rule-based synthesizer.
+    """
+
+    topic: str
+    conflicting_claims: list[ContradictingClaim] = Field(default_factory=list)
+
+
+class CorroboratedPoint(BaseModel):
+    """A claim confirmed by >= 2 documents from genuinely independent
+    registered sources (distinct source_id, not just distinct doc_id — two
+    documents from the same source don't corroborate each other). Independence
+    is verified in code from TrendSynthesis.doc_source_map, never trusted from
+    the model's own count.
+    """
+
+    claim: str
+    supporting_doc_ids: list[str] = Field(default_factory=list)
+    supporting_source_ids: list[str] = Field(default_factory=list)
+
+
 class TrendSynthesis(BaseModel):
     request_id: str
     sector_id: str
@@ -251,6 +283,21 @@ class TrendSynthesis(BaseModel):
     monitoring_indicators: list[str] = Field(default_factory=list)
     evidence: list[str] = Field(default_factory=list)
     confidence_labels: list[str] = Field(default_factory=list)
+    # doc_id -> source_id, populated by the rule-based synthesizer (pure
+    # bookkeeping, no LLM) so the AI refinement pass can verify how many
+    # *independent* sources back a claim without re-deriving this mapping.
+    doc_source_map: dict[str, str] = Field(default_factory=dict)
+    # Claims backed by >= 2 independent sources. Empty unless the AI
+    # refinement pass ran and found some — never fabricated.
+    corroborated_points: list[CorroboratedPoint] = Field(default_factory=list)
+    # Claims that appear in only one independent source. Kept and labeled
+    # explicitly rather than dropped, so a report can flag them as unverified
+    # instead of silently presenting them with the same confidence as a
+    # corroborated point.
+    uncorroborated_points: list[str] = Field(default_factory=list)
+    # Conflicting claims across documents, grouped by topic. Empty unless the
+    # AI refinement pass ran and found some.
+    contradictions: list[Contradiction] = Field(default_factory=list)
 
 
 class ReportPlan(BaseModel):

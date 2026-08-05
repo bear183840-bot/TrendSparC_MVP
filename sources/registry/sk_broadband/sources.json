@@ -124,25 +124,15 @@
       "topics": ["방송·통신 정책", "망 사용료", "개인정보"]
     },
     {
-      "name": "디지털데일리 (통신/미디어)",
-      "url": "https://www.ddaily.co.kr/page/news/4",
+      "name": "미디어통계포털",
+      "url": "https://stat.kisdi.re.kr/main.html",
       "collection_method": ["firecrawl_search"],
-      "frequency": "daily",
-      "reliability_reason": "ICT 전문지로 통신·미디어 정책, IPTV, 유료방송 이슈를 상시 보도. 2026-08-01 실제 접속 확인 — '통신/미디어' 섹션이 실제 운영 중이며 관련 최신 기사가 다수 게재됨을 확인함.",
-      "reliability_tier": "analyst_media",
-      "content_type": "analysis",
-      "role": "search",
-      "topics": ["IPTV", "초고속 인터넷", "유료방송"]
-    },
-    {
-      "name": "키노라이츠",
-      "url": "https://m.kinolights.com/",
-      "collection_method": ["firecrawl_search"],
-      "frequency": "daily",
-      "reliability_reason": "OTT 콘텐츠 통합 검색·평가 서비스로 콘텐츠·OTT 사용자의 반응과 선호를 참고하기 위한 user sentiment 자료다. 사실 검증 출처가 아니라 보조 신호로만 사용한다. 2026-08-01 실제 서비스 존재 확인함.",
-      "reliability_tier": "user_generated",
-      "role": "user_sentiment",
-      "topics": ["콘텐츠 소비", "OTT 통합 검색"]
+      "frequency": "weekly",
+      "reliability_reason": "국내 미디어 및 통신 시장에 대한 가장 심도 있는 연구 보고서가 발행되는 공공 통계 포털. 2026-08-03 사용자 검토를 거쳐 신규 등록.",
+      "reliability_tier": "official",
+      "content_type": "press_release",
+      "role": "regulatory_official",
+      "topics": ["미디어 통계", "통신 시장 통계"]
     }
   ]
 }
