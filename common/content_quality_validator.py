@@ -166,6 +166,61 @@ def _similarity(a: str, b: str) -> float:
     return difflib.SequenceMatcher(a=a, b=b).ratio()
 
 
+# A figure with a unit ("4조 5,406억원", "650만 명", "6.2%"). Deliberately
+# excludes a bare year, which carries no fact by itself.
+_FIGURE_RE = re.compile(r"\d[\d,]*(?:\.\d+)?\s*(?:조|억|천만|만)?\s*(?:원|명|%|건|위|시간|배)")
+_CONTENT_TOKEN_RE = re.compile(r"[0-9A-Za-z가-힣]{2,}")
+# Words that carry sentence structure rather than subject matter - two
+# unrelated findings both end in "했다"/"있다" and both say "대비".
+_STRUCTURAL_TOKENS = frozenset({
+    "있다", "했다", "이다", "된다", "됐다", "한다", "이며", "으로", "에서",
+    "대비", "통해", "따라", "위해", "기록", "전망", "밝혔다", "예상",
+})
+_MIN_CONTENT_OVERLAP = 0.5
+
+
+def cited_figures(text: str) -> set[str]:
+    """Unit-bearing numbers quoted in a sentence, whitespace-normalized."""
+    return {re.sub(r"\s+", "", match.group()) for match in _FIGURE_RE.finditer(text or "")}
+
+
+def _content_tokens(text: str) -> set[str]:
+    return {
+        token for token in _CONTENT_TOKEN_RE.findall(text or "")
+        if token not in _STRUCTURAL_TOKENS
+    }
+
+
+def _content_overlap(a: str, b: str) -> float:
+    tokens_a, tokens_b = _content_tokens(a), _content_tokens(b)
+    if not tokens_a or not tokens_b:
+        return 0.0
+    return len(tokens_a & tokens_b) / min(len(tokens_a), len(tokens_b))
+
+
+def is_duplicate_statement(a: str, b: str, threshold: float = 0.6) -> bool:
+    """Whether two sentences state the same fact.
+
+    When both sentences quote figures, the figures decide: sharing one means
+    they're restating the same finding, and quoting *different* ones means
+    they're different findings no matter how alike the sentences read. That
+    second half matters - Korean report prose is highly templated, so
+    "2025년 매출은 4조 5,406억원이다" and "2025년 영업이익은 3,741억원이다"
+    score 0.62 on plain character similarity and a threshold alone would
+    silently delete one of two genuinely distinct metrics.
+
+    With no figures to compare, the sentences must be alike in *wording* AND
+    overlap in subject matter, because character similarity alone has the
+    same templated-prose problem: "2025년에 신규 요금제를 출시했다" and
+    "2025년에 조직 개편을 단행했다" score 0.62 while sharing nothing but the
+    year and the sentence skeleton.
+    """
+    figures_a, figures_b = cited_figures(a), cited_figures(b)
+    if figures_a and figures_b:
+        return bool(figures_a & figures_b)
+    return _similarity(a, b) >= threshold and _content_overlap(a, b) >= _MIN_CONTENT_OVERLAP
+
+
 def dedupe_across_blocks(blocks: list[list[str]], threshold: float = 0.6) -> list[list[str]]:
     """Given several blocks' candidate text lists (in display order), drop
     an item from a later block if it's a near-duplicate (lexical similarity
@@ -179,7 +234,7 @@ def dedupe_across_blocks(blocks: list[list[str]], threshold: float = 0.6) -> lis
     for block in blocks:
         kept: list[str] = []
         for item in block:
-            if any(_similarity(item, prior) >= threshold for prior in seen):
+            if any(is_duplicate_statement(item, prior, threshold) for prior in seen):
                 continue
             kept.append(item)
             seen.append(item)
@@ -276,9 +331,18 @@ _KOREAN_AMOUNT_UNIT_MULTIPLIERS = {
 # sk_broadband evidence rather than a general-purpose sentence parser -
 # widen the label alternation only when a genuinely new recurring pattern
 # is confirmed, not speculatively.
+#
+# `_QUALIFIER` covers the accounting modifiers that routinely sit between the
+# period and the label in Korean filings ("2024년 3분기 *누적* 매출액 …",
+# "2025년 *연결* 매출"). Live-verified: without it that sentence extracted
+# nothing, which left 매출 with a single period, classified it as a one-off
+# KPI instead of a series, and suppressed the trend chart entirely for a
+# question that was explicitly about the trend.
+_QUALIFIER = r"(?:\s*(?:누적|연결|별도|개별|잠정|연간|전사)){0,2}"
 _METRIC_SENTENCE_RE = re.compile(
-    r"(?P<period>20\d{2}\s*년(?:\s*[1-4]\s*분기)?)\s*"
-    r"(?P<label>매출액?|순이익|영업이익률?)\s*[:：]?\s*"
+    r"(?P<period>20\d{2}\s*년(?:\s*[1-4]\s*분기)?)"
+    + _QUALIFIER
+    + r"\s*(?P<label>매출액?|순이익|영업이익률?)\s*[:：]?\s*"
     r"(?P<amount>[^()]+?원)\s*"
     r"(?:\(\s*전년\s*대비\s*(?P<pct>\d+(?:\.\d+)?)\s*%\s*(?P<direction>증가|감소))?"
 )

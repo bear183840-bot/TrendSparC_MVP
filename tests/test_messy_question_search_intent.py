@@ -67,6 +67,7 @@ def test_executive_report_uses_shared_decision_order(monkeypatch):
     from common.contracts import DocumentAnalysis, ReportPurposeClassification
     from core.report_generator.generator import generate_report
     from core.report_planner.planner import plan_report
+    from core.report_purpose.classifier import recommended_sections_for
     from core.synthesis.synthesizer import synthesize
 
     monkeypatch.delenv("TRENDSPARC_REPORT_GENERATOR_API_KEY", raising=False)
@@ -90,10 +91,17 @@ def test_executive_report_uses_shared_decision_order(monkeypatch):
         request_id="req_exec",
         purpose_id="current_status",
         display_name="현황 파악",
+        recommended_sections=recommended_sections_for("current_status"),
     )
     plan = plan_report(synthesis, "executive", purpose)
     report = generate_report("HBM 개발 현황 알려줘", synthesis, plan, "executive")
 
-    assert [section.section_id for section in report.sections] == [
-        "overview", "key_metrics", "timeline", "decision_required", "risk", "sources"
-    ]
+    section_ids = [section.section_id for section in report.sections]
+    # The 현황파악 shape, from the purpose rather than the audience.
+    assert section_ids[0] == "overview"
+    assert "current_situation" in section_ids
+    assert "near_term_outlook" in section_ids
+    # This synthesis carries no figures, so the numeric panels are dropped
+    # with a recorded reason instead of rendering empty.
+    assert "key_metrics" not in section_ids
+    assert plan.omitted_sections["key_metrics"]

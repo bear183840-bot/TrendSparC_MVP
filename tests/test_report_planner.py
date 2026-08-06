@@ -81,7 +81,9 @@ def test_plan_report_uses_actual_evidence_shape_and_routes_internal_ids():
     market_refs = plan.section_evidence_map["market_status"]
     assert market_refs.metric_ids == ["doc1:metric:1"]
     assert market_refs.comparison_ids == ["doc1:comparison:1"]
-    risk_refs = plan.section_evidence_map["risk"]
+    # current_status has no risk section of its own; the risk claim earns a
+    # risk_and_opportunity section via _content_backed_sections.
+    risk_refs = plan.section_evidence_map["risk_and_opportunity"]
     assert risk_refs.claim_ids == ["doc1:risk1"]
     assert risk_refs.conclusion_ids == ["ai-conclusion-1"]
 

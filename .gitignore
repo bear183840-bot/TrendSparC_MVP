@@ -3,3 +3,6 @@ __pycache__/
 *.pyc
 .pytest_cache/
 .env
+
+# Per-run diagnostic archives (see core/run_archive.py) - local history, not source.
+storage/requests/*.json

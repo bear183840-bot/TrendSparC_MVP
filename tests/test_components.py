@@ -110,9 +110,8 @@ def test_render_kpi_row_never_drops_a_low_relevance_metric_within_limit(monkeypa
 
 
 def test_render_metric_chart_only_plots_line_shaped_series(monkeypatch):
-    captured_chart: list = []
-    monkeypatch.setattr(components.st, "markdown", lambda *a, **k: None)
-    monkeypatch.setattr(components.st, "line_chart", lambda data, **kwargs: captured_chart.append(data))
+    captured: list[str] = []
+    monkeypatch.setattr(components.st, "markdown", lambda body, **kwargs: captured.append(body))
 
     metric_points = [
         MetricPoint(label="IPTV 가입자 수", period="2022년", value=520.0, unit="만 명"),
@@ -123,16 +122,17 @@ def test_render_metric_chart_only_plots_line_shaped_series(monkeypatch):
     ]
     components.render_metric_chart(metric_points)
 
-    assert len(captured_chart) == 1
-    plotted = captured_chart[0]
-    assert "IPTV 가입자 수" in plotted.columns
-    assert "시청률" not in plotted.columns
+    output = "\n".join(captured)
+    assert "<svg" in output
+    assert "IPTV 가입자 수" in output
+    assert "시청률" not in output
+    # Axis labels are the evidence's own period text, in chronological order.
+    assert output.index("2022년") < output.index("2023년") < output.index("2024년")
 
 
 def test_render_metric_chart_is_a_no_op_when_nothing_is_line_shaped(monkeypatch):
-    captured_chart: list = []
-    monkeypatch.setattr(components.st, "markdown", lambda *a, **k: None)
-    monkeypatch.setattr(components.st, "line_chart", lambda data, **kwargs: captured_chart.append(data))
+    captured: list[str] = []
+    monkeypatch.setattr(components.st, "markdown", lambda body, **kwargs: captured.append(body))
 
     metric_points = [
         MetricPoint(label="시청률", period="도입 전", value=3.2, unit="%"),
@@ -140,7 +140,41 @@ def test_render_metric_chart_is_a_no_op_when_nothing_is_line_shaped(monkeypatch)
     ]
     components.render_metric_chart(metric_points)
 
-    assert captured_chart == []
+    assert captured == []
+
+
+def test_render_metric_chart_scales_the_axis_to_the_real_value_range(monkeypatch):
+    captured: list[str] = []
+    monkeypatch.setattr(components.st, "markdown", lambda body, **kwargs: captured.append(body))
+
+    components.render_metric_chart(
+        [
+            MetricPoint(label="가입자", period="2022년", value=520.0, unit="만 명"),
+            MetricPoint(label="가입자", period="2023년", value=610.0, unit="만 명"),
+            MetricPoint(label="가입자", period="2024년", value=650.0, unit="만 명"),
+        ]
+    )
+
+    output = "\n".join(captured)
+    # Highest/lowest gridline labels come from the data itself - never a
+    # rounded-off axis that misrepresents where the real values sit.
+    assert "650" in output
+    assert "520" in output
+
+
+def test_render_metric_chart_handles_a_flat_series_without_dividing_by_zero(monkeypatch):
+    captured: list[str] = []
+    monkeypatch.setattr(components.st, "markdown", lambda body, **kwargs: captured.append(body))
+
+    components.render_metric_chart(
+        [
+            MetricPoint(label="가입자", period="2022년", value=500.0, unit="만 명"),
+            MetricPoint(label="가입자", period="2023년", value=500.0, unit="만 명"),
+            MetricPoint(label="가입자", period="2024년", value=500.0, unit="만 명"),
+        ]
+    )
+
+    assert "<svg" in "\n".join(captured)
 
 
 def test_render_metric_bar_shows_both_periods_of_a_two_point_label(monkeypatch):

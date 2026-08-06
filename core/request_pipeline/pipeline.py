@@ -55,6 +55,7 @@ from core.layout_generator.generator import generate_layout
 from core.report_planner.planner import plan_report
 from core.report_generator.generator import generate_report
 from core.report_purpose.classifier import classify_report_purpose
+from core.run_archive import archive_run
 from core.request_pipeline.direct_response import direct_response_for
 from core.sector_router.router import route_request, scan_sectors
 from core.source_planner.planner import plan_sources, select_top_sources
@@ -155,6 +156,30 @@ def _call_sector_adapter_stage(sector_route: SectorRoute, role: str, *args):
 
 
 def run_pipeline(
+    request: UserRequest,
+    dry_run: bool = True,
+    requested_sector_id: Optional[str] = None,
+    force_fail_stage: Optional[str] = None,
+    progress_sink: Optional[list[SourceCollectionEvent]] = None,
+    archive: bool = True,
+) -> PipelineResult:
+    """Run the pipeline and, unless `archive=False`, record what happened.
+
+    The archive is a small per-run JSON under storage/requests/ (see
+    core/run_archive.py). It exists so questions about how the system behaves
+    across many runs can be answered from real history rather than from
+    whichever runs someone happened to keep. Tests pass `archive=False` to
+    avoid writing thousands of files.
+    """
+    result = _run_pipeline_stages(
+        request, dry_run, requested_sector_id, force_fail_stage, progress_sink
+    )
+    if archive:
+        archive_run(result, request.question, request.target_audience)
+    return result
+
+
+def _run_pipeline_stages(
     request: UserRequest,
     dry_run: bool = True,
     requested_sector_id: Optional[str] = None,

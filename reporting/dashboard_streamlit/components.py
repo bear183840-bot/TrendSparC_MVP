@@ -135,6 +135,76 @@ def render_card(title: str, body_html: str, css_class: str = "") -> str:
     return f"<section class=\"{classes}\"><h3>{escape(title)}</h3>{body_html}</section>"
 
 
+def render_section_rail(label: str) -> None:
+    """Stage label (the reference design's PROBLEM / CAUSE / IMPROVEMENT
+    spine) marking which stage of the argument the cards that follow belong
+    to. Purely a visual grouping cue - it labels blocks that are already
+    being rendered, and never adds or implies content of its own, so a stage
+    with no evidence simply isn't drawn."""
+    st.markdown(
+        f'<div class="ts-rail-strip"><span>{escape(label)}</span></div>',
+        unsafe_allow_html=True,
+    )
+
+
+# Which stage of the argument each planned section belongs to. Keyed on
+# section id (never on sector or audience name), so the grouping follows
+# whatever report_planner actually produced for this question - both the
+# issue_response shape (issue/impact/response_actions) and the root_cause
+# shape (problem/root_cause/improvement_plan) map onto the same three
+# stages, and a purpose whose sections don't map to any stage simply
+# renders no bands.
+_SECTION_STAGES: tuple[tuple[str, frozenset[str]], ...] = (
+    ("PROBLEM", frozenset({"issue", "problem", "risk", "current_situation", "market_status"})),
+    ("CAUSE", frozenset({"root_cause", "impact", "key_metrics", "risk_and_opportunity"})),
+    (
+        "IMPROVEMENT",
+        frozenset({
+            "response_actions", "improvement_plan", "recommended_action",
+            "strategic_recommendation", "decision_required", "opportunity",
+            "near_term_outlook", "investment_signal", "trend",
+        }),
+    ),
+)
+
+
+def stages_for_sections(section_ids: list[str] | None) -> list[str]:
+    """Stage labels this report actually has sections for, in argument order.
+    Empty when the plan is missing or none of its sections map to a stage -
+    the caller then renders its cards without bands rather than inventing a
+    stage the report doesn't contain."""
+    present = set(section_ids or [])
+    return [label for label, members in _SECTION_STAGES if present & members]
+
+
+def render_omitted_sections(omitted: dict[str, str] | None) -> None:
+    """Sections report_planner deliberately dropped for lack of evidence,
+    shown with the reason it recorded. Surfacing this is the honest
+    counterpart to the stage bands: the reader sees not just what the report
+    covers but what it couldn't, instead of the gap being invisible."""
+    if not omitted:
+        return
+    items = "".join(
+        f"<li><b>{escape(_SECTION_TITLES.get(section_id, section_id))}</b>{escape(reason)}</li>"
+        for section_id, reason in omitted.items()
+    )
+    st.markdown(
+        '<div class="ts-omitted"><small>근거가 없어 리포트에서 제외한 항목</small>'
+        f"<ul>{items}</ul></div>",
+        unsafe_allow_html=True,
+    )
+
+
+# Human-readable names for section ids, for the omitted-sections notice.
+_SECTION_TITLES = {
+    "key_metrics": "핵심 지표",
+    "timeline": "타임라인",
+    "market_status": "시장 현황",
+    "risk_and_opportunity": "리스크·기회",
+    "recommended_action": "권고 과제",
+}
+
+
 def render_row_list(rows: list[tuple[str, str, str]], empty_message: str) -> str:
     """`rows` = (source, point, confidence) triplets already backed by a document analysis."""
     if not rows:
@@ -263,18 +333,113 @@ def render_metric_chart(metric_points: list[Any], title: str = "Market Trend") -
     evidence-stated `period` text as-is (no invented dates). Height is
     capped so one chart can't push the rest of the dashboard off-screen.
     """
-    import pandas as pd
-
     chartable_points = select_chartable_series(metric_points)
     if not chartable_points:
         return
+    st.markdown(_metric_chart_svg(chartable_points, title), unsafe_allow_html=True)
 
-    frame = pd.DataFrame([point.model_dump() for point in chartable_points])
-    period_order = sorted(frame["period"].unique(), key=period_sort_key)
-    pivoted = frame.pivot_table(index="period", columns="label", values="value", aggfunc="first")
-    pivoted = pivoted.reindex(period_order)
-    st.markdown(f"**{escape(title)}**")
-    st.line_chart(pivoted, height=170)
+
+# Chart geometry, in the SVG's own viewBox units (it scales to the container).
+_CHART_W, _CHART_H = 356, 150
+_CHART_LEFT, _CHART_RIGHT = 46, 344      # plot area, leaving a gutter for y labels
+_CHART_TOP, _CHART_BOTTOM = 12, 112      # plot area vertically
+_CHART_XLABEL_Y = 136
+_CHART_GRID_LINES = 4
+
+
+def _chart_y_ticks(low: float, high: float) -> list[float]:
+    """`_CHART_GRID_LINES` evenly spaced values spanning the real data range,
+    top-down. A flat series (every value identical) still gets a readable
+    axis rather than a divide-by-zero."""
+    if high <= low:
+        pad = abs(high) * 0.1 or 1.0
+        low, high = high - pad, high + pad
+    step = (high - low) / (_CHART_GRID_LINES - 1)
+    return [high - step * index for index in range(_CHART_GRID_LINES)]
+
+
+def _metric_chart_svg(points: list[Any], title: str) -> str:
+    """Reference-style area+line chart drawn directly from evidence-stated
+    MetricPoints - one polyline per label, x positions in chronological
+    `period` order, y scaled to the real min/max of the plotted values.
+    Axis labels are the evidence's own period text and real numbers; nothing
+    is interpolated or extrapolated, so a gap in the evidence stays a gap.
+    """
+    by_label = group_metric_points_by_label(points)
+    periods = sorted({point.period for point in points}, key=period_sort_key)
+    values = [point.value for point in points]
+    low, high = min(values), max(values)
+    ticks = _chart_y_ticks(low, high)
+    tick_low, tick_high = ticks[-1], ticks[0]
+    span = (tick_high - tick_low) or 1.0
+    unit = next((point.unit for point in points if point.unit), "")
+
+    def x_of(period: str) -> float:
+        if len(periods) == 1:
+            return (_CHART_LEFT + _CHART_RIGHT) / 2
+        step = (_CHART_RIGHT - _CHART_LEFT) / (len(periods) - 1)
+        return _CHART_LEFT + step * periods.index(period)
+
+    def y_of(value: float) -> float:
+        ratio = (value - tick_low) / span
+        return _CHART_BOTTOM - ratio * (_CHART_BOTTOM - _CHART_TOP)
+
+    grid = "".join(
+        f'M{_CHART_LEFT - 12} {y_of(tick):.1f}h{_CHART_RIGHT - _CHART_LEFT + 12}' for tick in ticks
+    )
+    y_labels = "".join(
+        f'<text x="2" y="{y_of(tick) + 3:.1f}">{escape(_format_number(tick))}</text>' for tick in ticks
+    )
+    x_labels = "".join(
+        f'<text x="{x_of(period):.1f}" y="{_CHART_XLABEL_Y}">{escape(period)}</text>' for period in periods
+    )
+
+    series_markup = ""
+    for index, (label, label_points) in enumerate(by_label.items()):
+        ordered = sorted(label_points, key=lambda point: period_sort_key(point.period))
+        coords = [(x_of(point.period), y_of(point.value)) for point in ordered]
+        line = " ".join(f"{x:.1f},{y:.1f}" for x, y in coords)
+        dots = "".join(
+            f'<circle cx="{x:.1f}" cy="{y:.1f}" r="{4.4 if position == len(coords) - 1 else 3.4}"></circle>'
+            for position, (x, y) in enumerate(coords)
+        )
+        # Only the first series gets the filled area; stacking translucent
+        # fills would misread as a stacked chart rather than two independent
+        # series sharing one axis.
+        area = ""
+        if index == 0 and len(coords) > 1:
+            area_path = (
+                f'M{coords[0][0]:.1f} {coords[0][1]:.1f}'
+                + "".join(f'L{x:.1f} {y:.1f}' for x, y in coords[1:])
+                + f'L{coords[-1][0]:.1f} {_CHART_BOTTOM}L{coords[0][0]:.1f} {_CHART_BOTTOM}Z'
+            )
+            area = f'<path d="{area_path}" fill="url(#tsChartFill)"></path>'
+        stroke = "var(--ts-accent)" if index == 0 else "var(--ts-teal)"
+        series_markup += (
+            f'{area}<polyline points="{line}" fill="none" stroke="{stroke}" stroke-width="2.2" '
+            f'stroke-linejoin="round" stroke-linecap="round"></polyline>'
+            f'<g fill="var(--ts-panel)" stroke="{stroke}" stroke-width="2">{dots}</g>'
+        )
+
+    legend = "".join(
+        f'<span class="ts-chart-key"><i style="background:{"var(--ts-accent)" if index == 0 else "var(--ts-teal)"}"></i>'
+        f'{escape(label)}</span>'
+        for index, label in enumerate(by_label)
+    )
+    unit_note = f'<span class="ts-chart-unit">단위: {escape(unit)}</span>' if unit else ""
+    return (
+        f'<div class="ts-chart"><div class="ts-chart-head"><b>{escape(title)}</b>{unit_note}</div>'
+        f'<div class="ts-chart-legend">{legend}</div>'
+        f'<svg viewBox="0 0 {_CHART_W} {_CHART_H}" preserveAspectRatio="none" class="ts-chart-svg">'
+        '<defs><linearGradient id="tsChartFill" x1="0" y1="0" x2="0" y2="1">'
+        '<stop offset="0" stop-color="var(--ts-accent)" stop-opacity=".22"></stop>'
+        '<stop offset="1" stop-color="var(--ts-accent)" stop-opacity="0"></stop></linearGradient></defs>'
+        f'<g stroke="var(--ts-soft)" stroke-width="1"><path d="{grid}"></path></g>'
+        f'<g class="ts-chart-axis" text-anchor="start">{y_labels}</g>'
+        f'{series_markup}'
+        f'<g class="ts-chart-axis" text-anchor="middle">{x_labels}</g>'
+        "</svg></div>"
+    )
 
 
 def render_metric_bar(points_for_one_label: list[Any]) -> None:
@@ -320,13 +485,20 @@ def render_swot(strengths: list[str], weaknesses: list[str], opportunities: list
     )
 
 
-def _impact_pct(rank: int) -> int:
-    """Rank-based visual weight for the impact bar (priority order, not a fabricated score)."""
-    return max(38, 92 - (rank - 1) * 16)
-
-
 def render_action_list(rows: list[tuple[str, str, str | None]]) -> None:
-    """`rows` = (title, impact_note, evidence_url) already resolved by the caller."""
+    """`rows` = (title, expected_impact, evidence_url) already resolved by the caller.
+
+    `expected_impact` must be an impact this specific action is actually
+    linked to; pass "" when no such link exists. It used to be filled by
+    pairing the Nth action with the Nth business_impact, which looked like a
+    finding but was just two independent lists lined up by position - so an
+    unlinked action now shows an empty cell instead of a borrowed one.
+
+    The old rank-derived bar (92%/76%/60%… computed purely from row order)
+    is gone for the same reason: it rendered as a measured quantity while
+    carrying no information beyond "this row is above that row", which the
+    row numbers already say.
+    """
     if not rows:
         st.markdown(
             '<section class="ts-actions"><h3>Recommended Actions</h3>'
@@ -335,17 +507,21 @@ def render_action_list(rows: list[tuple[str, str, str | None]]) -> None:
         )
         return
     body_parts = []
-    for index, (title, impact_note, url) in enumerate(rows, 1):
+    for index, (title, expected_impact, url) in enumerate(rows, 1):
         link = (
             f'<a class="ts-evidence-link" href="{escape(url)}" target="_blank" title="근거 원문 열기">↗</a>'
             if url
             else "<span></span>"
         )
+        impact_cell = (
+            f'<span class="impact" title="{escape(expected_impact)}">{escape(expected_impact)}</span>'
+            if expected_impact
+            else '<span class="impact ts-empty">연결된 기대효과 없음</span>'
+        )
         body_parts.append(
             f'<div class="ts-action-row"><span class="num">{index:02d}</span>'
             f'<span class="action">{escape(title)}</span>'
-            f'<span title="{escape(impact_note)}"><small>{escape(impact_note)}</small>'
-            f'<div class="ts-impact" style="--impact:{_impact_pct(index)}%"></div></span>{link}</div>'
+            f"{impact_cell}{link}</div>"
         )
     st.markdown(
         '<section class="ts-actions"><h3>Recommended Actions</h3>'
@@ -400,9 +576,16 @@ def render_kpi_row(metric_points: list[Any], limit: int = 4, question_terms: lis
             caption_text = f"{sign}{_format_number(delta)}{latest.unit} ({escape(points[0].period)}→{escape(latest.period)})"
         else:
             caption_text = f"{escape(latest.period)} 기준"
-        delta_html = f'<small class="ts-kpi-delta">{caption_text}</small>'
+        # Label on the left, figure + its caption right-aligned as one unit -
+        # the reference design's KPI row shape. The delta is deliberately left
+        # in a neutral colour rather than red/green: whether a rise is good or
+        # bad is metric-specific (subscribers up is good, churn up is not) and
+        # nothing in the evidence tells us which this is, so colouring it would
+        # be asserting a judgement the data doesn't support.
         cards.append(
-            f'<div class="ts-kpi-card"><small>{escape(label)}</small><b>{escape(value_text)}</b>{delta_html}</div>'
+            f'<div class="ts-kpi-card"><small>{escape(label)}</small>'
+            f'<div class="ts-kpi-figure"><b>{escape(value_text)}</b>'
+            f'<small class="ts-kpi-delta">{caption_text}</small></div></div>'
         )
     st.markdown(f'<div class="ts-kpi-row">{"".join(cards)}</div>', unsafe_allow_html=True)
 

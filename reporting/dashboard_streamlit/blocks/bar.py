@@ -1,9 +1,9 @@
 """Bar block ("bar") - new block type, not present in the original renderer.py.
 
-Rank-based horizontal bar list: bar width reflects display order (priority),
-reusing the same non-fabricated-weight approach as
-`components.render_action_list`'s impact bar (`_impact_pct`) - never a score
-invented from thin air, just "earlier in the ranked list = wider bar".
+Ordered list of evidence items. Deliberately *not* a bar chart: the only
+signal available here is display order, and a bar whose length is computed
+from row position reads as a measured quantity while carrying no more
+information than the row number beside it. Rank is shown as rank.
 """
 
 from __future__ import annotations
@@ -28,11 +28,6 @@ class BarContent(BaseModel):
     business_impacts: list[str] = Field(default_factory=list)
 
 
-def _rank_weight_pct(rank: int) -> int:
-    """Rank-based visual weight (priority order, not a fabricated score)."""
-    return max(38, 92 - (rank - 1) * 16)
-
-
 def render(block: DashboardBlock) -> None:
     data = _shared.payload(block)
     if isinstance(data, list):
@@ -46,8 +41,7 @@ def render(block: DashboardBlock) -> None:
         return
     rows = "".join(
         f'<div class="ts-bar-row"><span class="num">{index:02d}</span>'
-        f'<span class="label">{escape(clean_citation(str(value)))}</span>'
-        f'<div class="ts-impact" style="--impact:{_rank_weight_pct(index)}%"></div></div>'
+        f'<span class="label">{escape(clean_citation(str(value)))}</span></div>'
         for index, value in enumerate(values, 1)
     )
     st.markdown(f'<div class="ts-bar-list">{rows}</div>', unsafe_allow_html=True)

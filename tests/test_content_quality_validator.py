@@ -8,6 +8,7 @@ from common.content_quality_validator import (
     extract_metric_points_from_evidence,
     filter_shared_comparison_axis,
     group_metric_points_by_label,
+    is_duplicate_statement,
     parse_korean_amount,
     period_sort_key,
     rank_by_relevance,
@@ -268,3 +269,100 @@ class TestDatedItems:
 
     def test_empty_input_returns_empty(self):
         assert dated_items([]) == []
+
+
+class TestIsDuplicateStatement:
+    def test_same_figure_cited_is_the_same_fact(self):
+        assert is_duplicate_statement(
+            "2025년 매출액은 4조 5,406억원으로 집계됐다.",
+            "매출액이 4조 5,406억원을 기록하며 전년 대비 증가했다.",
+        )
+
+    def test_different_figures_are_different_facts_despite_similar_wording(self):
+        # Real regression: these score 0.62 on plain character similarity, so a
+        # threshold alone deleted one of two genuinely distinct metrics.
+        assert not is_duplicate_statement(
+            "2025년 매출은 4조 5,406억원이다.",
+            "2025년 영업이익은 3,741억원이다.",
+        )
+
+    def test_falls_back_to_text_similarity_when_no_figures(self):
+        assert is_duplicate_statement("OTT 경쟁이 심화되고 있다.", "OTT 경쟁이 심화되는 중이다.")
+        assert not is_duplicate_statement("유료방송 가입자가 감소하고 있다.", "신규 콘텐츠 제휴가 발표됐다.")
+
+    def test_bare_year_alone_is_not_a_shared_figure(self):
+        assert not is_duplicate_statement(
+            "2025년에 신규 요금제를 출시했다.", "2025년에 조직 개편을 단행했다."
+        )
+
+
+class TestDedupeKeepsDistinctMetrics:
+    def test_restated_metric_dropped_but_other_metric_survives(self):
+        blocks = [
+            ["2025년 매출액은 4조 5,406억원으로 집계됐다."],
+            ["매출액이 4조 5,406억원을 기록하며 전년 대비 증가했다.", "2025년 영업이익은 3,741억원이다."],
+        ]
+
+        result = dedupe_across_blocks(blocks)
+
+        assert result[1] == ["2025년 영업이익은 3,741억원이다."]
+
+
+class TestAccountingQualifiersInExtraction:
+    def test_extracts_through_an_accounting_qualifier(self):
+        # "누적" between the period and the label used to break extraction,
+        # leaving the metric with one period and suppressing the trend chart.
+        points = extract_metric_points_from_evidence(["2024년 3분기 누적 매출액 3조 2,878억원"])
+
+        assert len(points) == 1
+        assert points[0].label == "매출"
+        assert points[0].period == "2024년 3분기"
+        assert points[0].value == 32878.0
+
+    def test_two_periods_of_revenue_become_a_comparable_series(self):
+        points = extract_metric_points_from_evidence(
+            [
+                "2024년 3분기 누적 매출액 3조 2,878억원",
+                "2025년 매출액 4조 5,406억원",
+            ]
+        )
+
+        assert classify_metric_shape(points) == "bar"
+
+
+class TestExtractionQualifierCoverage:
+    """Securities-report prose puts accounting modifiers between the period
+    and the metric label. Missing one silently drops the figure, which is how
+    a 매출 추이 question ended up with a single data point and no chart."""
+
+    def test_each_known_qualifier_still_extracts(self):
+        for qualifier in ("누적", "연결", "별도", "개별", "잠정", "연간", "전사"):
+            sentence = f"2025년 {qualifier} 매출액 4조 5,406억원"
+
+            points = extract_metric_points_from_evidence([sentence])
+
+            assert len(points) == 1, qualifier
+            assert points[0].label == "매출", qualifier
+            assert points[0].value == 45406.0, qualifier
+
+    def test_stacked_qualifiers_extract(self):
+        points = extract_metric_points_from_evidence(["2024년 3분기 연결 누적 매출액 3조 2,878억원"])
+
+        assert len(points) == 1
+        assert points[0].period == "2024년 3분기"
+        assert points[0].value == 32878.0
+
+    def test_yoy_clause_variants_do_not_block_extraction(self):
+        sentences = [
+            "2025년 매출액 4조 5,406억원 (전년 대비 3% 증가)",
+            "2025년 영업이익 3,741억원 (전년 대비 6.2% 증가)",
+            "2025년 순이익 1,414억 8천만원 (전년 대비 46% 감소)",
+        ]
+
+        points = extract_metric_points_from_evidence(sentences)
+
+        assert {point.label for point in points} == {"매출", "영업이익", "순이익"}
+
+    def test_qualifier_alone_is_not_mistaken_for_a_metric(self):
+        # No amount -> nothing to extract; never invent a value.
+        assert extract_metric_points_from_evidence(["2025년 누적 매출은 증가세다"]) == []

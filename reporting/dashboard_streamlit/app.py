@@ -312,7 +312,11 @@ if no_evidence:
     st.error("관련 소스를 수집·검증하지 못해 리포트를 생성하지 않았습니다.")
 elif purpose_id == "issue_response" and result.synthesis is not None:
     render_issue_response_dashboard(result, question, sector, audience, purpose)
-elif result.layout is not None and result.layout.blocks:
+elif result.synthesis is not None:
+    # Gated on the synthesis the view actually reads. It used to be gated on
+    # `result.layout.blocks`, which this view never touches (layout.blocks is
+    # debug-only) - so a run with real evidence could still fall through to
+    # "표시할 결과 블록이 없습니다" purely because layout generation came back empty.
     render_generic_dashboard(result, question, sector, audience, purpose, purpose_id)
 else:
     st.info("표시할 결과 블록이 없습니다.")

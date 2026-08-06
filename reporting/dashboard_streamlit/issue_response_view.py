@@ -60,8 +60,6 @@ def render_issue_response_dashboard(result: Any, question: str, sector: str, aud
     strengths = dedupe_clean(synthesis.strengths, 3)
     weaknesses = dedupe_clean(synthesis.weaknesses, 3)
     actions = prefer_audience_content_raw(report, "actions", synthesis.recommended_actions, 4)
-    impacts = dedupe_clean(synthesis.business_impacts, 4)
-    evidence = prefer_audience_content_raw(report, "evidence", synthesis.evidence)
     monitoring = prefer_audience_content(report, "monitoring_indicators", synthesis.monitoring_indicators, 3)
 
     question_terms = question.split()
@@ -106,11 +104,15 @@ def render_issue_response_dashboard(result: Any, question: str, sector: str, aud
                 unsafe_allow_html=True,
             )
 
-    action_rows = []
-    for index, raw_action in enumerate(actions, 1):
-        url = _evidence_url(raw_action, result) or (_evidence_url(evidence[index - 1], result) if index <= len(evidence) else None)
-        impact_note = impacts[index - 1] if index <= len(impacts) else "기대 효과는 추가 검증 필요"
-        action_rows.append((clean_citation(raw_action), impact_note, url))
+    # Only this action's own [doc_id=...] resolves its evidence link, and the
+    # expected-impact cell stays empty unless a real link exists. Both used to
+    # be filled positionally (action N borrowed evidence N / business_impact N),
+    # which produced a citation arrow pointing at an unrelated document and an
+    # impact phrase with nothing tying it to the action.
+    action_rows = [
+        (clean_citation(raw_action), "", _evidence_url(raw_action, result))
+        for raw_action in actions
+    ]
     render_action_list(action_rows)
 
     with st.expander("Evidence & Sources"):

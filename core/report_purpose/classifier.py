@@ -26,8 +26,14 @@ _PURPOSE_DEFINITIONS: dict[str, dict] = {
     "current_status": {
         "display_name": "현황 파악",
         "description": "현재 상황, 시장 상태, 주요 변화와 전망을 파악하는 보고 목적",
-        "recommended_sections": ["current_situation", "market_status", "near_term_outlook"],
-        "dashboard_block_hints": ["trend", "market_snapshot", "source_evidence"],
+        # KPI and time series lead: a 현황/추이 question is answered by the
+        # numbers first and the narrative second. `key_metrics` and
+        # `timeline` are content-sensitive, so they drop out honestly when
+        # the evidence has no figures rather than rendering empty panels.
+        "recommended_sections": [
+            "key_metrics", "market_status", "timeline", "current_situation", "near_term_outlook",
+        ],
+        "dashboard_block_hints": ["metrics", "chart", "timeline", "source_evidence"],
     },
     "issue_response": {
         "display_name": "이슈 대응",

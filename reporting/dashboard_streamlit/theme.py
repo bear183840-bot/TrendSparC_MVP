@@ -127,15 +127,26 @@ def dashboard_css(dark: bool, accent_theme: str = "orange") -> str:
       -webkit-mask-repeat:no-repeat; mask-repeat:no-repeat;
       -webkit-mask-size:contain; mask-size:contain;
       -webkit-mask-position:center; mask-position:center; }}
-    .ts-context-line {{ display:flex; gap:2.2rem; align-items:center; margin:.25rem 1.4rem .5rem;
-      color:var(--ts-ink); font-weight:750; }}
-    .ts-context-line span small {{ color:var(--ts-muted); font-size:.68rem; margin-right:.7rem; font-weight:500; }}
+    /* Meta row - reference design 1a: small caps label + value, each on its
+       own hairline underline rather than a floating inline row. */
+    .ts-context-line {{ display:flex; gap:1.9rem; align-items:flex-end; margin:.35rem 1.4rem .75rem;
+      color:var(--ts-ink); font-weight:750; flex-wrap:wrap; }}
+    .ts-context-line span {{ display:flex; align-items:baseline; gap:.6rem; padding-bottom:.32rem;
+      border-bottom:1px solid var(--ts-line); }}
+    .ts-context-line span small {{ color:var(--ts-muted); font-size:.66rem; margin-right:0; font-weight:500;
+      letter-spacing:.06em; }}
     .ts-summary-grid {{ display:grid; grid-template-columns:minmax(0,1fr) 210px; gap:1.2rem; align-items:stretch; }}
-    .ts-summary {{ padding:.8rem 1.45rem .9rem; border-radius:24px; background:var(--ts-accent); color:white; }}
-    .ts-summary h2 {{ margin:0 0 .38rem; padding-bottom:.35rem; border-bottom:1px solid rgba(255,255,255,.5);
-      color:white; font-size:1.25rem; }}
-    .ts-summary p {{ margin:0; font-size:.94rem; line-height:1.38; font-weight:700; letter-spacing:-.02em;
-      display:-webkit-box; -webkit-line-clamp:3; -webkit-box-orient:vertical; overflow:hidden; }}
+    /* Analysis Summary - reference design 1a's gradient panel with a fading
+       rule under the heading instead of a full-width divider. */
+    .ts-summary {{ padding:1.15rem 1.5rem 1.25rem; border-radius:10px; color:white;
+      background:linear-gradient(135deg,var(--ts-accent),color-mix(in srgb,var(--ts-accent) 62%,#000)); }}
+    .ts-summary h2 {{ margin:0 0 .55rem; padding-bottom:.4rem; border-bottom:0; color:white;
+      font-size:1.18rem; font-weight:700; letter-spacing:-.01em; position:relative; }}
+    .ts-summary h2::after {{ content:""; position:absolute; left:0; bottom:0; width:150px; height:1.5px;
+      background:linear-gradient(90deg,rgba(255,255,255,.9),rgba(255,255,255,0)); }}
+    .ts-summary p {{ margin:0; font-size:.95rem; line-height:1.62; font-weight:600; letter-spacing:-.01em;
+      color:rgba(255,255,255,.95); display:-webkit-box; -webkit-line-clamp:3; -webkit-box-orient:vertical;
+      overflow:hidden; }}
     .ts-signal-stack {{ display:grid; gap:.75rem; }}
     .ts-signal {{ padding:.6rem .85rem; border-bottom:1px solid var(--ts-accent); color:var(--ts-ink); }}
     .ts-signal small {{ color:var(--ts-muted); }} .ts-signal strong {{ float:right; color:var(--ts-orange); }}
@@ -146,25 +157,78 @@ def dashboard_css(dark: bool, accent_theme: str = "orange") -> str:
       letter-spacing:.05em; }}
     .ts-stat b {{ font-size:1.5rem; font-weight:850; letter-spacing:-.02em; }}
     .ts-stat.risk b {{ color:var(--ts-accent); }} .ts-stat.opportunity b {{ color:var(--ts-teal); }}
-    .ts-kpi-row {{ display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:.7rem;
+    /* Key KPI - reference design 1a: label on the left, figure and its YoY
+       delta right-aligned on the same row, in a light 2-up card grid. */
+    .ts-kpi-row {{ display:grid; grid-template-columns:repeat(auto-fit,minmax(210px,1fr)); gap:.75rem;
       margin-top:.65rem; }}
-    .ts-kpi-card {{ padding:.75rem 1rem; border:1.5px solid var(--ts-line); border-radius:16px;
-      background:var(--ts-panel); }}
-    .ts-kpi-card small {{ display:block; color:var(--ts-muted); font-size:.7rem; font-weight:700;
-      text-transform:uppercase; letter-spacing:.04em; margin-bottom:.3rem; }}
-    .ts-kpi-card b {{ font-size:1.35rem; font-weight:850; color:var(--ts-ink); letter-spacing:-.02em; }}
-    .ts-kpi-delta {{ display:block; margin-top:.25rem; font-size:.74rem; font-weight:700; color:var(--ts-muted); }}
+    .ts-kpi-card {{ display:flex; justify-content:space-between; align-items:center; gap:.65rem;
+      padding:.9rem 1.05rem; border:1px solid color-mix(in srgb,var(--ts-line) 55%,transparent);
+      border-radius:9px; background:var(--ts-panel); transition:border-color .15s, box-shadow .15s; }}
+    .ts-kpi-card:hover {{ border-color:color-mix(in srgb,var(--ts-accent) 45%,var(--ts-line));
+      box-shadow:0 2px 8px color-mix(in srgb,var(--ts-accent) 14%,transparent); }}
+    .ts-kpi-card > small {{ display:block; color:var(--ts-muted); font-size:.79rem; font-weight:500;
+      text-transform:none; letter-spacing:0; margin-bottom:0; line-height:1.35; }}
+    .ts-kpi-figure {{ flex:none; text-align:right; }}
+    .ts-kpi-card b {{ display:block; text-align:right; font-size:1.28rem; font-weight:800;
+      color:var(--ts-ink); letter-spacing:-.02em; white-space:nowrap; }}
+    .ts-kpi-delta {{ display:block; margin-top:.15rem; text-align:right; font-size:.72rem; font-weight:650;
+      color:var(--ts-muted); white-space:nowrap; }}
+    /* Evidence & Sources - reference design 1a's outlined "Link" chip. */
     .ts-source-list {{ list-style:none; margin:0; padding:0; }}
-    .ts-source-list li {{ display:flex; justify-content:space-between; gap:.6rem; padding:.5rem 0;
-      border-bottom:1px solid color-mix(in srgb,var(--ts-line) 38%,transparent); font-size:.82rem; }}
+    .ts-source-list li {{ display:flex; justify-content:space-between; align-items:center; gap:.6rem;
+      padding:.55rem 0; border-bottom:1px solid color-mix(in srgb,var(--ts-line) 38%,transparent);
+      font-size:.8rem; font-weight:500; color:var(--ts-muted); }}
     .ts-source-list li:last-child {{ border-bottom:0; }}
-    .ts-source-list a {{ color:var(--ts-accent); text-decoration:none; font-weight:700; white-space:nowrap; }}
+    .ts-source-list a {{ display:inline-flex; align-items:center; gap:.25rem; padding:.18rem .55rem;
+      border:1px solid color-mix(in srgb,var(--ts-accent) 45%,var(--ts-line)); border-radius:5px;
+      color:var(--ts-accent); text-decoration:none; font-weight:700; font-size:.68rem; white-space:nowrap; }}
+    .ts-source-list a:hover {{ background:color-mix(in srgb,var(--ts-accent) 10%,transparent); }}
     .ts-section-grid {{ display:grid; grid-template-columns:1.05fr 1.1fr 1.35fr; gap:.7rem; margin-top:.65rem; }}
-    .ts-card {{ min-height:185px; max-height:210px; padding:.75rem 1rem; border:1.5px solid var(--ts-line); border-radius:20px;
+    /* Cards - reference design 1a: light hairline border, small radius, and a
+       plain-weight title underscored by a fading accent rule (no pill badge). */
+    .ts-card {{ min-height:185px; max-height:210px; padding:1.05rem 1.25rem;
+      border:1px solid color-mix(in srgb,var(--ts-line) 55%,transparent); border-radius:10px;
       background:var(--ts-panel); color:var(--ts-ink); overflow:hidden; }}
-    .ts-card h3, .ts-card-inner h3 {{ display:inline-block; margin:0 0 .55rem; padding:.32rem 1.05rem;
-      border:0; border-radius:999px; background:var(--ts-accent); color:#fff; font-size:.92rem; font-weight:800;
-      letter-spacing:-.01em; }}
+    .ts-card h3, .ts-card-inner h3 {{ display:block; position:relative; margin:0 0 1rem;
+      padding:0 0 .45rem; border:0; border-radius:0; background:none; color:var(--ts-ink);
+      font-size:.95rem; font-weight:700; letter-spacing:-.01em; }}
+    .ts-card h3::after, .ts-card-inner h3::after {{ content:""; position:absolute; left:0; bottom:0;
+      width:160px; max-width:70%; height:1.5px;
+      background:linear-gradient(90deg,var(--ts-accent),color-mix(in srgb,var(--ts-accent) 0%,transparent)); }}
+    /* Stage marker - the reference design groups its cards behind a vertical
+       PROBLEM / CAUSE / IMPROVEMENT spine. Streamlit renders each element as
+       its own block and can't wrap arbitrary containers in a custom grid, so
+       the same grouping cue is carried by a slim horizontal band above the
+       group instead of a rotated left rail. */
+    .ts-rail-strip {{ display:flex; align-items:center; gap:.7rem; margin:1.1rem 0 .1rem;
+      color:var(--ts-accent); font-size:.72rem; font-weight:800; letter-spacing:.16em; }}
+    .ts-rail-strip span {{ flex:none; }}
+    .ts-rail-strip::after {{ content:""; flex:1; height:2px; border-radius:2px;
+      background:linear-gradient(90deg,var(--ts-accent),color-mix(in srgb,var(--ts-accent) 0%,transparent)); }}
+    /* Sections the planner dropped for lack of evidence, with its reason -
+       an absent section is information, not something to hide. */
+    .ts-omitted {{ margin:.9rem 0 .2rem; padding:.7rem .95rem; border-radius:10px;
+      border:1px dashed color-mix(in srgb,var(--ts-line) 70%,transparent);
+      background:color-mix(in srgb,var(--ts-soft) 55%,transparent); }}
+    .ts-omitted small {{ display:block; margin-bottom:.35rem; color:var(--ts-muted);
+      font-size:.7rem; font-weight:700; letter-spacing:.03em; }}
+    .ts-omitted ul {{ margin:0; padding-left:1.1rem; }}
+    .ts-omitted li {{ font-size:.78rem; color:var(--ts-muted); line-height:1.6; }}
+    .ts-omitted li b {{ color:var(--ts-ink); font-weight:700; margin-right:.4rem; }}
+    /* Metric chart - hand-drawn SVG in the reference's chart language
+       (hairline gridlines, filled area under the primary series, ringed
+       points, evidence-stated period labels) instead of Streamlit's default. */
+    .ts-chart {{ display:flex; flex-direction:column; gap:.3rem; }}
+    .ts-chart-head {{ display:flex; justify-content:space-between; align-items:baseline; gap:.6rem; }}
+    .ts-chart-head b {{ font-size:.9rem; font-weight:700; color:var(--ts-ink); }}
+    .ts-chart-unit {{ font-size:.68rem; color:var(--ts-muted); }}
+    .ts-chart-legend {{ display:flex; flex-wrap:wrap; gap:.75rem; }}
+    .ts-chart-key {{ display:inline-flex; align-items:center; gap:.3rem; font-size:.68rem;
+      font-weight:600; color:var(--ts-muted); }}
+    .ts-chart-key i {{ width:9px; height:2.5px; border-radius:2px; }}
+    .ts-chart-svg {{ display:block; width:100%; height:165px; overflow:visible; }}
+    .ts-chart-axis {{ font-family:"Pretendard Variable",Pretendard,sans-serif; font-size:9px;
+      fill:var(--ts-muted); }}
     .ts-card ul {{ margin:.4rem 0 0; padding-left:1.15rem; }} .ts-card li {{ margin:.55rem 0; line-height:1.4; }}
     .ts-empty {{ color:var(--ts-muted); font-size:.83rem; line-height:1.55; }}
     .ts-source-row {{ display:grid; grid-template-columns:110px 1fr 70px; gap:.5rem; padding:.58rem 0;
@@ -210,12 +274,11 @@ def dashboard_css(dark: bool, accent_theme: str = "orange") -> str:
       gap:.75rem; align-items:center; padding:.5rem .3rem; border-bottom:1px solid var(--ts-line); font-size:.88rem; }}
     .ts-action-row:last-child {{ border-bottom:0; }} .ts-action-row .num {{ font-size:1.1rem; color:var(--ts-muted); }}
     .ts-action-row .action {{ font-weight:800; }}
-    .ts-action-row > span:has(.ts-impact) {{ text-align:right; }}
-    .ts-action-row > span:has(.ts-impact) small {{ display:block; margin-bottom:.3rem; color:var(--ts-muted);
-      font-size:.72rem; }}
-    .ts-impact {{ --impact:60%; height:6px; border-radius:8px;
-      background:linear-gradient(90deg,var(--ts-accent) 0 var(--impact),
-      color-mix(in srgb,var(--ts-accent) 22%,transparent) var(--impact)); }}
+    /* Expected-impact cell: plain right-aligned text (reference design's
+       "Expected Impact" column). The rank-derived progress bar that used to
+       live here was removed - it encoded nothing but row order. */
+    .ts-action-row .impact {{ text-align:right; font-size:.8rem; font-weight:500; color:var(--ts-muted); }}
+    .ts-action-row .impact.ts-empty {{ font-size:.74rem; opacity:.7; }}
     .ts-evidence-link {{ display:grid; place-items:center; width:27px; height:27px; border-radius:50%;
       background:color-mix(in srgb,var(--ts-accent) 28%,var(--ts-panel)); color:var(--ts-accent); text-decoration:none;
       justify-self:end; }}
@@ -279,7 +342,7 @@ def dashboard_css(dark: bool, accent_theme: str = "orange") -> str:
       font-weight:700; }}
     .ts-radar-legend-item i {{ display:inline-block; width:.65rem; height:.65rem; border-radius:50%; }}
     @media(max-width:1050px) {{ .ts-section-grid{{grid-template-columns:1fr}} .ts-summary-grid{{grid-template-columns:1fr}}
-      .ts-action-row{{grid-template-columns:40px 1fr}} .ts-action-row .ts-impact,.ts-action-row .ts-evidence-link{{display:none}} }}
+      .ts-action-row{{grid-template-columns:40px 1fr}} .ts-action-row .impact,.ts-action-row .ts-evidence-link{{display:none}} }}
     @media(max-width:720px) {{ .block-container{{padding:1rem .8rem 2rem}} .ts-landing .ts-wordmark-text{{font-size:3.5rem}}
       .ts-context-line{{gap:.7rem;flex-wrap:wrap;margin-left:.3rem}} .ts-summary{{padding:1.2rem;border-radius:20px}} }}
     </style>

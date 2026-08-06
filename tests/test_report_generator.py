@@ -76,15 +76,17 @@ def test_report_sections_preserve_internal_conclusion_and_claim_links(monkeypatc
             )
         ],
     )
-    plan = plan_report(synthesis, "management", "current_status")
+    # issue_response is the purpose whose structure carries risk-type claims
+    # ("issue"); the section list follows the purpose, not the audience.
+    plan = plan_report(synthesis, "management", "issue_response")
 
     report = generate_report("주요 위험은?", synthesis, plan, "management")
-    risk_section = next(section for section in report.sections if section.section_id == "risk")
+    issue_section = next(section for section in report.sections if section.section_id == "issue")
 
-    assert [claim.synthesis_claim_id for claim in risk_section.grounded_claims] == [
+    assert [claim.synthesis_claim_id for claim in issue_section.grounded_claims] == [
         "doc:1:risk1"
     ]
-    assert risk_section.conclusions[0].supporting_claim_ids == ["doc:1:risk1"]
+    assert issue_section.conclusions[0].supporting_claim_ids == ["doc:1:risk1"]
 
 
 def test_report_generator_creates_distinct_issue_impact_action_sections(monkeypatch):
@@ -99,16 +101,17 @@ def test_report_generator_creates_distinct_issue_impact_action_sections(monkeypa
     )
     plan = plan_report(synthesis, "executive", purpose)
 
-    assert plan.sections == ["overview", "key_metrics", "timeline", "decision_required", "risk", "sources"]
+    # The purpose's own sections, not the audience's old fixed page shape.
+    assert plan.sections[:4] == ["overview", "issue", "impact", "response_actions"]
 
     report = generate_report("어떻게 대응해야 하나?", synthesis, plan, "executive")
     sections = {section.section_id: section for section in report.sections}
 
     assert report.executive_summary
-    assert sections["risk"].risks
-    assert sections["decision_required"].actions
+    assert sections["issue"].risks
+    assert sections["response_actions"].actions
     assert sections["sources"].evidence
-    assert sections["risk"].summary != sections["decision_required"].summary
+    assert sections["issue"].summary != sections["response_actions"].summary
     assert report.generation_mode == "rule_based"
     assert report.unique_source_count == 1
     assert any("고유 출처" in limitation for limitation in report.limitations)
@@ -151,11 +154,9 @@ def test_fallback_report_carries_structured_fields_into_market_status_section():
 def test_fallback_report_gives_each_metric_point_single_ownership_across_sections(monkeypatch):
     monkeypatch.delenv("TRENDSPARC_REPORT_GENERATOR_API_KEY", raising=False)
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
-    # "external" audience's fixed report_structure is
-    # ["overview", "market_status", "opportunity", "sources"] - both
     # market_status and opportunity independently ask for metric_points from
-    # the same synthesis.metric_series, so without single-ownership dedup
-    # the one real data point would get mechanically copied into both.
+    # the same synthesis.metric_series, so without single-ownership dedup the
+    # one real data point would get mechanically copied into both.
     analysis = DocumentAnalysis(
         doc_id="attachment:brief",
         summary="요약",
@@ -166,10 +167,10 @@ def test_fallback_report_gives_each_metric_point_single_ownership_across_section
         request_id="req_dedup",
         purpose_id="current_status",
         display_name="현황 파악",
-        recommended_sections=["market_status"],
+        recommended_sections=["market_status", "opportunity"],
     )
     plan = plan_report(synthesis, "external", purpose)
-    assert plan.sections == ["overview", "market_status", "opportunity", "sources"]
+    assert "market_status" in plan.sections and "opportunity" in plan.sections
 
     report = generate_report("매출 추이는?", synthesis, plan, "external")
     market_status = next(s for s in report.sections if s.section_id == "market_status")
@@ -179,7 +180,7 @@ def test_fallback_report_gives_each_metric_point_single_ownership_across_section
     assert opportunity.metric_points == []
 
 
-def test_report_planner_keeps_problem_and_root_cause_but_removes_audience_aliases():
+def test_report_planner_keeps_the_root_cause_shape_for_every_audience():
     synthesis = _synthesis()
     purpose = ReportPurposeClassification(
         request_id="req_report",
@@ -188,9 +189,10 @@ def test_report_planner_keeps_problem_and_root_cause_but_removes_audience_aliase
         recommended_sections=["problem", "root_cause", "improvement_plan"],
     )
 
-    plan = plan_report(synthesis, "executive", purpose)
+    for audience in ("executive", "practitioner", "management", "external"):
+        plan = plan_report(synthesis, audience, purpose)
 
-    assert plan.sections == ["overview", "key_metrics", "timeline", "decision_required", "risk", "sources"]
+        assert plan.sections[:4] == ["overview", "problem", "root_cause", "improvement_plan"], audience
 
 
 def test_report_generator_openai_path_receives_full_synthesis(monkeypatch):
@@ -266,7 +268,10 @@ def _issue_response_plan(synthesis, request_id: str):
         request_id=request_id,
         purpose_id="issue_response",
         display_name="이슈 대응",
-        recommended_sections=["issue", "impact", "response_actions"],
+        # timeline is requested explicitly so these tests exercise how the
+        # generator *fills* a timeline section, independent of the planner's
+        # separate rule for when a timeline is warranted.
+        recommended_sections=["issue", "impact", "response_actions", "timeline"],
     )
     return plan_report(synthesis, "executive", purpose)
 
@@ -278,7 +283,11 @@ def test_fallback_timeline_uses_dated_evidence_instead_of_overview_key_points(mo
         doc_id="attachment:brief",
         summary="요약",
         key_points=["일반 핵심 요약 문장"],
-        evidence=["2024년 7월 서비스 개편이 있었다.", "시점이 명시되지 않은 일반 서술"],
+        evidence=[
+            "2024년 7월 서비스 개편이 있었다.",
+            "2025년 3월 요금제가 개정됐다.",
+            "시점이 명시되지 않은 일반 서술",
+        ],
     )
     synthesis = synthesize("req_timeline", "general", [analysis])
     plan = _issue_response_plan(synthesis, "req_timeline")
@@ -315,7 +324,9 @@ def test_fallback_timeline_uses_metric_period_labels_when_no_dated_evidence(monk
     assert any("도입 후" in point for point in timeline_section.key_points)
 
 
-def test_fallback_timeline_is_honestly_empty_when_nothing_extractable(monkeypatch):
+def test_timeline_section_is_omitted_with_a_reason_when_nothing_is_dated(monkeypatch):
+    """No dated material anywhere -> the section is dropped and the reason
+    recorded, rather than rendering an empty 타임라인 panel."""
     monkeypatch.delenv("TRENDSPARC_REPORT_GENERATOR_API_KEY", raising=False)
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
     analysis = DocumentAnalysis(
@@ -327,10 +338,11 @@ def test_fallback_timeline_is_honestly_empty_when_nothing_extractable(monkeypatc
     synthesis = synthesize("req_timeline_empty", "general", [analysis])
     plan = _issue_response_plan(synthesis, "req_timeline_empty")
 
-    report = generate_report("어떻게 대응해야 하나?", synthesis, plan, "executive")
-    timeline_section = next(s for s in report.sections if s.section_id == "timeline")
+    assert "timeline" not in plan.sections
+    assert "timeline" in plan.omitted_sections
 
-    assert timeline_section.key_points == []
+    report = generate_report("어떻게 대응해야 하나?", synthesis, plan, "executive")
+    assert all(section.section_id != "timeline" for section in report.sections)
 
 
 # --- recommended_actions never silently dropped by the OpenAI writer (problem 8) ---

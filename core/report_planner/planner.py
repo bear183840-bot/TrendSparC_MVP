@@ -15,6 +15,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from audience.contracts import load_audience_profile
+from common.content_quality_validator import dated_items
 from common.contracts import (
     ReportPlan,
     ReportPurposeClassification,
@@ -117,7 +118,13 @@ def _has_timeline_evidence(synthesis: TrendSynthesis) -> bool:
     claim_dates = {
         claim.as_of_date for claim in synthesis.grounded_claims if claim.as_of_date
     }
-    return len(claim_dates) >= 2
+    if len(claim_dates) >= 2:
+        return True
+    # Dated evidence prose counts too. report_generator._timeline_key_points
+    # builds the timeline section from exactly these sentences, so judging
+    # timeline-worthiness only on structured dates meant a report could be
+    # denied the section the generator was perfectly able to fill.
+    return len(dated_items(synthesis.evidence)) >= 2
 
 
 def _has_claim_slot(sections: list[str], claim_types: set[str]) -> bool:
@@ -199,9 +206,15 @@ def _section_evidence_refs(
     )
 
 
-def _has_section_evidence(section: str, refs: SectionEvidenceRefs) -> bool:
+def _has_section_evidence(
+    section: str, refs: SectionEvidenceRefs, synthesis: TrendSynthesis
+) -> bool:
     if section == "timeline":
-        return bool(refs.metric_ids or refs.claim_ids)
+        # Dated evidence prose counts alongside structured refs, because
+        # report_generator._timeline_key_points fills the section from those
+        # sentences - judging on refs alone dropped timelines the generator
+        # could have written.
+        return bool(refs.metric_ids or refs.claim_ids) or _has_timeline_evidence(synthesis)
     return bool(
         refs.conclusion_ids or refs.claim_ids or refs.metric_ids or refs.comparison_ids
     )
@@ -229,7 +242,11 @@ def _coerce_report_purpose(
         confidence="low",
         reason="backwards-compatible raw purpose string passed to plan_report",
         classifier_version="compat_raw_string",
-        recommended_sections=[],
+        # Resolve the purpose's own sections rather than leaving this empty.
+        # It could stay empty while the audience's fixed structure supplied
+        # the shape; now that the purpose supplies it, an empty list would
+        # reduce a string-purpose caller's report to overview + sources.
+        recommended_sections=recommended_sections_for(purpose_id),
         dashboard_block_hints=[],
     )
 
@@ -249,22 +266,30 @@ def plan_report(
         # purposes' sections, not just the winner's - see
         # content_quality_validator.detect_secondary_purpose.
         purpose_sections = [*purpose_sections, *recommended_sections_for(purpose.secondary_purpose_id)]
-    if profile.report_structure:
-        # Keep the audience's required page shape stable. Evidence-backed
-        # sections may still be appended when the collected material has a
-        # distinct shape (for example, a real comparison table).
-        audience_sections = list(profile.report_structure)
-    else:
-        # No fixed shape for this audience — purpose-recommended sections are
-        # the primary structure, with the audience's focus areas layered in.
-        audience_sections = _BASE_SECTIONS + list(purpose_sections) + list(profile.focus)
+    # Purpose decides the report's shape; audience decides how it reads.
+    #
+    # This used to branch on `profile.report_structure`, which every one of
+    # the four selectable audiences defines - so on the real user path the
+    # purpose contributed nothing at all and "현황파악" and "원인분석" produced
+    # byte-identical section lists. Now the same purpose yields the same
+    # sections for every audience, and the audience shapes only the writing:
+    # `profile.focus`/`tone`/`detail_level` reach report_generator through the
+    # audience payload and the per-audience prompt, not the section list.
+    planned_sections = _BASE_SECTIONS + list(purpose_sections)
 
     candidate_sections = _dedupe_semantic_sections(
-        [*audience_sections, *_content_backed_sections(synthesis, audience_sections)]
+        [*planned_sections, *_content_backed_sections(synthesis, planned_sections)]
     )
+    # Sections whose whole point is structured evidence (a metrics panel, a
+    # timeline) are dropped when that evidence is missing, *even when the
+    # purpose asked for them* - a purpose saying "this report is about the
+    # numbers" doesn't conjure numbers, and an empty 핵심 지표 panel is worse
+    # than an honest "근거 없어 제외" note. Everything else the purpose asked
+    # for is kept so the report still has its intended shape.
     required_groups = {
         _SECTION_GROUPS.get(section, section)
-        for section in [*audience_sections, *_BASE_SECTIONS, *purpose_sections]
+        for section in [*_BASE_SECTIONS, *purpose_sections]
+        if section not in _CONTENT_SENSITIVE_SECTIONS
     }
     sections: list[str] = []
     section_evidence_map: dict[str, SectionEvidenceRefs] = {}
@@ -276,7 +301,7 @@ def plan_report(
         if (
             omission_reason
             and group not in required_groups
-            and not _has_section_evidence(section, refs)
+            and not _has_section_evidence(section, refs, synthesis)
         ):
             omitted_sections[section] = omission_reason
             continue

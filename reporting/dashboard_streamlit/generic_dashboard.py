@@ -25,6 +25,7 @@ from reporting.dashboard_streamlit.components import (
     render_kpi_row,
     render_metric_bar,
     render_metric_chart,
+    render_omitted_sections,
     render_page_header,
     render_source_list,
     render_swot,
@@ -36,31 +37,54 @@ from reporting.dashboard_streamlit.components import (
 _SWOT_QUALIFYING_FIELD_COUNT = 2
 
 
-def _panel_definitions(purpose_id: str | None, synthesis: Any, report: Any) -> list[tuple[str, str, list[str]]]:
-    # `_raw` variant: downstream `_item_markup()` still needs the [doc_id=...]
-    # marker intact to resolve an evidence URL, and strips it itself for display.
-    key_points = prefer_audience_content_raw(report, "key_points", synthesis.key_points)
-    opportunities = prefer_audience_content_raw(report, "opportunities", synthesis.opportunities)
-    risks = prefer_audience_content_raw(report, "risks", synthesis.risks)
-    actions = prefer_audience_content_raw(report, "actions", synthesis.recommended_actions)
-    monitoring = prefer_audience_content_raw(report, "monitoring_indicators", synthesis.monitoring_indicators)
-    if purpose_id == "future_business":
-        return [
-            ("Trend Drivers", "trend", key_points),
-            ("Opportunity Map", "opportunity", opportunities),
-            ("Investment Signals", "signal", synthesis.business_impacts or monitoring),
-        ]
-    if purpose_id == "root_cause":
-        return [
-            ("Problem Definition", "problem", key_points),
-            ("Cause Map", "cause", risks),
-            ("Improvement Plan", "action", actions),
-        ]
-    return [
-        ("Current Snapshot", "snapshot", key_points),
-        ("Market Signals", "signal", synthesis.business_impacts or monitoring),
-        ("Near-term Outlook", "timeline", opportunities or monitoring),
-    ]
+# How each planned section is presented: display title, CSS accent, and
+# which of the section's own fields carry its narrative items. Keyed on
+# section id, so the panels follow whatever report_planner produced for this
+# question's purpose rather than a fixed arrangement.
+_SECTION_PANELS: dict[str, tuple[str, str, tuple[str, ...]]] = {
+    "current_situation": ("Current Situation", "snapshot", ("key_points", "evidence")),
+    "market_status": ("Market Status", "signal", ("key_points", "evidence")),
+    "near_term_outlook": ("Near-term Outlook", "timeline", ("opportunities", "monitoring_indicators")),
+    "issue": ("Issue", "problem", ("risks", "key_points")),
+    "impact": ("Impact", "signal", ("key_points", "risks")),
+    "response_actions": ("Response Actions", "action", ("actions", "monitoring_indicators")),
+    "problem": ("Problem Definition", "problem", ("risks", "key_points")),
+    "root_cause": ("Cause Map", "cause", ("risks", "key_points")),
+    "improvement_plan": ("Improvement Plan", "action", ("actions", "monitoring_indicators")),
+    "trend": ("Trend Drivers", "trend", ("key_points", "opportunities")),
+    "opportunity": ("Opportunity Map", "opportunity", ("opportunities",)),
+    "investment_signal": ("Investment Signals", "signal", ("opportunities", "monitoring_indicators")),
+    "strategic_recommendation": ("Strategic Recommendations", "action", ("actions",)),
+    "recommended_action": ("Recommended Actions", "action", ("actions",)),
+    "decision_required": ("Decision Required", "action", ("actions",)),
+    "risk": ("Risk", "problem", ("risks",)),
+    "risk_and_opportunity": ("Risk & Opportunity", "signal", ("risks", "opportunities")),
+    "key_implication": ("Key Implication", "snapshot", ("key_points",)),
+}
+
+
+def _panel_definitions(report: Any) -> list[tuple[str, str, list[str]]]:
+    """One panel per planned section, in the report's own order.
+
+    This used to branch on `purpose_id` and return one of three hardcoded
+    triples, which meant the section list report_planner computed for the
+    question was never actually rendered - and every purpose without its own
+    branch collapsed onto the same three panels. Now the sections drive the
+    panels, so a change in the plan is visible on screen.
+    """
+    if report is None:
+        return []
+    panels: list[tuple[str, str, list[str]]] = []
+    for section in report.sections:
+        presentation = _SECTION_PANELS.get(section.section_id)
+        if presentation is None:
+            continue
+        title, accent, fields = presentation
+        values: list[str] = []
+        for field in fields:
+            values.extend(getattr(section, field, []) or [])
+        panels.append((title, accent, values))
+    return panels
 
 
 def _item_markup(raw_value: str, result: Any, index: int) -> str:
@@ -123,11 +147,10 @@ def render_generic_dashboard(
                 unsafe_allow_html=True,
             )
 
-    panel_defs = _panel_definitions(purpose_id, synthesis, report)
-    # Cross-block dedup: Current Snapshot/Market Signals/Near-term Outlook (or the
-    # future_business/root_cause equivalents) draw from overlapping synthesis fields
-    # by design, so the same fact often shows up reworded in 2+ panels - keep it in
-    # whichever panel comes first, drop the near-duplicate restatement from the rest.
+    panel_defs = _panel_definitions(report)
+    # Neighbouring sections legitimately draw on overlapping evidence, so the
+    # same fact often shows up reworded in more than one - keep it in
+    # whichever section comes first and drop the restatement from the rest.
     deduped_lists = dedupe_across_blocks(
         [list(dict.fromkeys(raw_values or [])) for _, _, raw_values in panel_defs]
     )
@@ -141,11 +164,22 @@ def render_generic_dashboard(
             f'<section class="ts-card ts-purpose-card {panel_type}"><h3>{escape(title)}</h3>'
             f'<ol class="ts-compact-list">{rows}</ol></section>'
         )
-    st.markdown('<div class="ts-section-grid ts-purpose-grid">' + "".join(panels) + "</div>", unsafe_allow_html=True)
+    if panels:
+        st.markdown(
+            '<div class="ts-section-grid ts-purpose-grid">' + "".join(panels) + "</div>",
+            unsafe_allow_html=True,
+        )
+    # Sections report_planner dropped for lack of evidence, shown with its
+    # recorded reason so a gap in the report is visible rather than silent.
+    render_omitted_sections(getattr(result.report_plan, "omitted_sections", None) if result.report_plan else None)
 
     actions = prefer_audience_content_raw(report, "actions", synthesis.recommended_actions, 4)
+    # Expected impact is left empty until an action is genuinely linked to one
+    # (see render_action_list). It previously carried the constant string
+    # "Evidence-based priority" on every row, which said nothing about the
+    # action while occupying the column reserved for a real finding.
     action_rows = [
-        (clean_citation(action), "Evidence-based priority", evidence_url(action, result)) for action in actions
+        (clean_citation(action), "", evidence_url(action, result)) for action in actions
     ]
     render_action_list(action_rows)
 
