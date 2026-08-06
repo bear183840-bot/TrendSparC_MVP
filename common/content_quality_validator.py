@@ -43,15 +43,20 @@ def period_sort_key(period: str) -> tuple:
     string, regardless of whether the evidence wrote it "2025년 1분기",
     "1Q25", or similar - never rewrites the displayed text, only used to
     order/compare periods. Falls back to sorting an unparseable period
-    alphabetically after every parseable one rather than crashing."""
+    alphabetically after every parseable one rather than crashing.
+
+    A period with a year but no quarter ("2025년") sorts by its year, at
+    quarter 0. Real evidence mixes annual and quarterly figures freely, and
+    treating the annual one as unparseable pushed it behind every quarterly
+    period regardless of year - so "2026년 1분기" landed before "2025년"."""
     year_m = _YEAR_RE.search(period or "")
     quarter_m = _QUARTER_RE.search(period or "")
-    if not year_m or not quarter_m:
+    if not year_m:
         return (1, period or "")
     year = int(year_m.group(1))
     if year < 100:
         year += 2000
-    return (0, year, int(quarter_m.group(1)))
+    return (0, year, int(quarter_m.group(1)) if quarter_m else 0)
 
 # Words that signal a *prescriptive* ask ("how do I improve/increase this")
 # layered on top of what might otherwise read as a pure status question -

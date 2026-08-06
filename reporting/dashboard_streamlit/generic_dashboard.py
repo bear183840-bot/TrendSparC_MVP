@@ -14,8 +14,12 @@ from reporting.dashboard_streamlit.components import (
     comparison_points_to_table,
     dedupe_clean,
     evidence_url,
+    has_cause_map,
     has_comparison,
+    has_radar,
+    has_timeline,
     has_timeseries,
+    metric_comparison_groups,
     prefer_audience_content,
     prefer_audience_content_raw,
     render_action_list,
@@ -25,7 +29,11 @@ from reporting.dashboard_streamlit.components import (
     render_kpi_row,
     render_metric_bar,
     render_metric_chart,
+    render_cause_map,
+    render_metric_comparison,
     render_omitted_sections,
+    render_radar,
+    render_timeline,
     render_page_header,
     render_source_list,
     render_swot,
@@ -124,19 +132,46 @@ def render_generic_dashboard(
     render_executive_summary(summary, len(risks), len(opportunities))
     render_kpi_row(synthesis.metric_series, question_terms=question_terms)
 
+    # Each block type is offered only when the data is genuinely that shape:
+    # a metric tracked over 3+ periods is a trend line, the same metric at two
+    # periods is a before/after bar, several metrics sharing a unit at one
+    # period is an item comparison, and dated evidence is a timeline.
     bar_groups = bar_metric_groups(synthesis.metric_series)
-    if has_timeseries(synthesis.metric_series) or bar_groups:
+    comparison_groups = metric_comparison_groups(synthesis.metric_series)
+    if has_timeseries(synthesis.metric_series) or bar_groups or comparison_groups:
         with st.container(border=True):
             if has_timeseries(synthesis.metric_series):
                 render_metric_chart(synthesis.metric_series, title="확인된 수치 추이")
             for group in bar_groups:
                 render_metric_bar(group)
+            for period, points in comparison_groups:
+                render_metric_comparison(period, points)
+
+    if has_timeline(synthesis.evidence, synthesis.metric_series):
+        with st.container(border=True):
+            st.markdown('<div class="ts-card-inner"><h3>Timeline</h3></div>', unsafe_allow_html=True)
+            render_timeline(synthesis.evidence, synthesis.metric_series)
 
     if has_comparison(synthesis.comparison_points):
         with st.container(border=True):
             st.markdown('<div class="ts-card-inner"><h3>Comparison</h3></div>', unsafe_allow_html=True)
             headers, rows = comparison_points_to_table(synthesis.comparison_points)
             st.markdown(render_comparison_table(headers, rows), unsafe_allow_html=True)
+
+    # A radar needs every plotted entity to have a stated level on 3+ shared
+    # criteria; below that it silently isn't drawn and the table above carries
+    # the comparison instead.
+    if has_radar(synthesis.comparison_points):
+        with st.container(border=True):
+            st.markdown('<div class="ts-card-inner"><h3>Capability Radar</h3></div>', unsafe_allow_html=True)
+            render_radar(synthesis.comparison_points)
+
+    impacts = dedupe_clean(synthesis.business_impacts, 3)
+    cause_actions = dedupe_clean(synthesis.recommended_actions, 3)
+    if purpose_id == "root_cause" and has_cause_map(risks, impacts, cause_actions):
+        with st.container(border=True):
+            st.markdown('<div class="ts-card-inner"><h3>Cause Map</h3></div>', unsafe_allow_html=True)
+            render_cause_map(risks, impacts, cause_actions)
 
     swot_field_count = sum(1 for field in (strengths, weaknesses, risks, opportunities) if field)
     if swot_field_count >= _SWOT_QUALIFYING_FIELD_COUNT:

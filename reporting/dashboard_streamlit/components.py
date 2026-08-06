@@ -10,6 +10,7 @@ number, a comparison, or a business fact that isn't backed by evidence.
 
 from __future__ import annotations
 
+import math
 import re
 from html import escape
 from typing import Any
@@ -18,6 +19,7 @@ import streamlit as st
 
 from common.content_quality_validator import (
     classify_metric_shape,
+    dated_items,
     filter_shared_comparison_axis,
     group_metric_points_by_label,
     period_sort_key,
@@ -616,3 +618,215 @@ def render_footer_note(text: str | None) -> None:
         f'<div class="ts-footer-note"><b>AI Monitoring Comment</b><span>{escape(text)}</span></div>',
         unsafe_allow_html=True,
     )
+
+
+# --- Block types ported from the registry into the live path ---------------
+#
+# The block registry (reporting/dashboard_streamlit/blocks/) was never
+# reachable from the live dashboard, and its chart block asked for
+# `block.data["rows"]`, a field no pipeline stage has ever written. What was
+# worth keeping is the *range of block types* it set out to offer. These
+# functions rebuild the ones the live path was missing, each driven by a
+# contract the pipeline actually populates - never by a field that is always
+# empty.
+
+_LEVEL_RADIUS_FRACTION = {"low": 0.4, "medium": 0.7, "high": 1.0}
+_RADAR_PALETTE = ("var(--ts-accent)", "var(--ts-teal)", "var(--ts-orange)")
+_RADAR_MIN_AXES = 3
+_RADAR_MAX_ENTITIES = 3
+
+
+def radar_axes(comparison_points: list[Any]) -> list[str]:
+    """Criteria every compared entity has a stated `level` for. A radar with
+    a missing vertex misreads as a zero, so an axis only counts when all
+    plotted entities actually have a value on it."""
+    leveled = [point for point in comparison_points if point.level in _LEVEL_RADIUS_FRACTION]
+    entities = list(dict.fromkeys(point.entity for point in leveled))[:_RADAR_MAX_ENTITIES]
+    if not entities:
+        return []
+    criteria_by_entity = {
+        entity: {point.criterion for point in leveled if point.entity == entity}
+        for entity in entities
+    }
+    shared = set.intersection(*criteria_by_entity.values()) if criteria_by_entity else set()
+    return [
+        criterion
+        for criterion in dict.fromkeys(point.criterion for point in leveled)
+        if criterion in shared
+    ]
+
+
+def has_radar(comparison_points: list[Any]) -> bool:
+    return len(radar_axes(comparison_points)) >= _RADAR_MIN_AXES
+
+
+def _radar_polygon(fractions: list[float], center: float, max_radius: float) -> str:
+    step = 2 * math.pi / len(fractions)
+    return " ".join(
+        f"{center + max_radius * fraction * math.cos(-math.pi / 2 + index * step):.1f},"
+        f"{center + max_radius * fraction * math.sin(-math.pi / 2 + index * step):.1f}"
+        for index, fraction in enumerate(fractions)
+    )
+
+
+def render_radar(comparison_points: list[Any]) -> None:
+    """Capability radar over ComparisonPoints that carry an explicit `level`.
+
+    Radius comes from the document-stated low/medium/high ordinal, never from
+    an invented continuous score - a point whose source didn't state a level
+    is left out rather than guessed at.
+    """
+    axes = radar_axes(comparison_points)
+    if len(axes) < _RADAR_MIN_AXES:
+        return
+    leveled = [point for point in comparison_points if point.level in _LEVEL_RADIUS_FRACTION]
+    entities = list(dict.fromkeys(point.entity for point in leveled))[:_RADAR_MAX_ENTITIES]
+    level_by_key = {(point.entity, point.criterion): point.level for point in leveled}
+    center, max_radius = 120.0, 84.0
+
+    rings = "".join(
+        f'<polygon points="{_radar_polygon([fraction] * len(axes), center, max_radius)}" '
+        f'fill="none" stroke="var(--ts-line)" stroke-width="1" opacity=".5"/>'
+        for fraction in (0.4, 0.7, 1.0)
+    )
+    step = 2 * math.pi / len(axes)
+    spokes = "".join(
+        f'<line x1="{center}" y1="{center}" '
+        f'x2="{center + max_radius * math.cos(-math.pi / 2 + i * step):.1f}" '
+        f'y2="{center + max_radius * math.sin(-math.pi / 2 + i * step):.1f}" '
+        f'stroke="var(--ts-line)" stroke-width="1" opacity=".5"/>'
+        for i in range(len(axes))
+    )
+    labels = "".join(
+        f'<text x="{center + (max_radius + 18) * math.cos(-math.pi / 2 + i * step):.1f}" '
+        f'y="{center + (max_radius + 18) * math.sin(-math.pi / 2 + i * step):.1f}" '
+        f'fill="var(--ts-muted)" font-size="9.5" text-anchor="middle" dominant-baseline="middle">'
+        f"{escape(clean_citation(axis))}</text>"
+        for i, axis in enumerate(axes)
+    )
+    shapes = ""
+    for index, entity in enumerate(entities):
+        colour = _RADAR_PALETTE[index % len(_RADAR_PALETTE)]
+        fractions = [_LEVEL_RADIUS_FRACTION[level_by_key[(entity, axis)]] for axis in axes]
+        shapes += (
+            f'<polygon points="{_radar_polygon(fractions, center, max_radius)}" '
+            f'fill="{colour}" fill-opacity=".16" stroke="{colour}" stroke-width="2"/>'
+        )
+    legend = "".join(
+        f'<span class="ts-radar-legend-item">'
+        f'<i style="background:{_RADAR_PALETTE[index % len(_RADAR_PALETTE)]}"></i>{escape(entity)}</span>'
+        for index, entity in enumerate(entities)
+    )
+    st.markdown(
+        f'<div class="ts-radar"><svg viewBox="0 0 240 240">{rings}{spokes}{shapes}{labels}</svg>'
+        f'<div class="ts-radar-legend">{legend}</div></div>',
+        unsafe_allow_html=True,
+    )
+
+
+def metric_comparison_groups(metric_points: list[Any]) -> list[tuple[str, list[Any]]]:
+    """Periods where two or more differently-labelled metrics share a unit -
+    a genuine like-for-like item comparison, as opposed to the same metric
+    tracked over time (which is `bar_metric_groups`/`render_metric_chart`).
+    """
+    by_period: dict[str, list[Any]] = {}
+    for point in metric_points:
+        by_period.setdefault(point.period, []).append(point)
+    groups: list[tuple[str, list[Any]]] = []
+    for period, points in by_period.items():
+        by_unit: dict[str, list[Any]] = {}
+        for point in points:
+            by_unit.setdefault(point.unit or "", []).append(point)
+        for unit_points in by_unit.values():
+            if len({point.label for point in unit_points}) >= 2:
+                groups.append((period, unit_points))
+    return groups
+
+
+def has_metric_comparison(metric_points: list[Any]) -> bool:
+    return bool(metric_comparison_groups(metric_points))
+
+
+def render_metric_comparison(period: str, points: list[Any]) -> None:
+    """Horizontal bars comparing several metrics measured in the same unit at
+    the same point in time. Bar length is the real value against the largest
+    in the group - not a rank-derived width."""
+    if len(points) < 2:
+        return
+    ordered = sorted(points, key=lambda point: point.value, reverse=True)
+    unit = ordered[0].unit or ""
+    largest = max(abs(point.value) for point in ordered) or 1
+    rows = "".join(
+        f'<div class="ts-compare-row"><span class="label">{escape(point.label)}</span>'
+        f'<div class="ts-compare-track"><div class="ts-compare-fill" '
+        f'style="--pct:{abs(point.value) / largest * 100:.1f}%"></div></div>'
+        f'<span class="value">{escape(_format_number(point.value))}{escape(unit)}</span></div>'
+        for point in ordered
+    )
+    st.markdown(
+        f'<div class="ts-compare"><b>{escape(period)}</b>{rows}</div>',
+        unsafe_allow_html=True,
+    )
+
+
+def timeline_entries(evidence: list[str], metric_points: list[Any]) -> list[tuple[str, str]]:
+    """(period, text) pairs in chronological order, from evidence sentences
+    that actually carry a date and from metric points that state a period.
+    Undated prose is left out - a numbered list of undated statements is not
+    a timeline, which is all the old registry block produced."""
+    entries: list[tuple[str, str]] = []
+    for point in metric_points:
+        if point.period:
+            entries.append((point.period, f"{point.label} {_format_number(point.value)}{point.unit or ''}"))
+    for sentence in dated_items(evidence):
+        # Quarter/month must be part of the captured label, not dropped:
+        # "2024년 3분기" and "2024년 1분기" would otherwise both read "2024년",
+        # collapsing into one indistinguishable step on the axis.
+        match = re.search(
+            r"(20\d{2}\s*년(?:\s*(?:[1-4]\s*분기|\d{1,2}\s*월))?|[1-4]\s*분기)", sentence
+        )
+        if match:
+            entries.append((match.group(1).strip(), clean_citation(sentence)))
+    deduped = list(dict.fromkeys(entries))
+    return sorted(deduped, key=lambda entry: period_sort_key(entry[0]))
+
+
+def has_timeline(evidence: list[str], metric_points: list[Any]) -> bool:
+    return bool(timeline_entries(evidence, metric_points))
+
+
+def render_timeline(evidence: list[str], metric_points: list[Any], limit: int = 6) -> None:
+    entries = timeline_entries(evidence, metric_points)[:limit]
+    if not entries:
+        return
+    steps = "".join(
+        f'<div class="ts-timeline-step"><b>{escape(period)}</b>{escape(text)}</div>'
+        for period, text in entries
+    )
+    st.markdown(f'<div class="ts-timeline">{steps}</div>', unsafe_allow_html=True)
+
+
+def has_cause_map(risks: list[str], impacts: list[str], actions: list[str]) -> bool:
+    return sum(1 for column in (risks, impacts, actions) if column) >= 2
+
+
+def render_cause_map(risks: list[str], impacts: list[str], actions: list[str], limit: int = 3) -> None:
+    """Cause -> effect -> response, laid out as three ordered columns.
+
+    Each column is filled from its own synthesis field. No arrow is drawn
+    between individual items, because nothing in the data says which cause
+    produced which impact - drawing that edge would assert a link the
+    evidence does not contain. The columns show the flow; the items stay
+    honestly unpaired.
+    """
+    columns = (("원인", "cause", risks), ("영향", "impact", impacts), ("대응", "action", actions))
+    cells = ""
+    for label, accent, values in columns:
+        items = "".join(
+            f"<li>{escape(clean_citation(str(value)))}</li>" for value in values[:limit]
+        ) or '<li class="ts-empty">확인된 근거 없음</li>'
+        cells += (
+            f'<div class="ts-cause-col {accent}"><h4>{escape(label)}</h4>'
+            f"<ol>{items}</ol></div>"
+        )
+    st.markdown(f'<div class="ts-cause-map">{cells}</div>', unsafe_allow_html=True)

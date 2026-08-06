@@ -215,6 +215,28 @@ def dashboard_css(dark: bool, accent_theme: str = "orange") -> str:
     .ts-omitted ul {{ margin:0; padding-left:1.1rem; }}
     .ts-omitted li {{ font-size:.78rem; color:var(--ts-muted); line-height:1.6; }}
     .ts-omitted li b {{ color:var(--ts-ink); font-weight:700; margin-right:.4rem; }}
+    /* Item comparison - several metrics sharing a unit at one point in time.
+       Bar length is the real value over the group's largest. */
+    .ts-compare {{ display:flex; flex-direction:column; gap:.45rem; margin-bottom:.6rem; }}
+    .ts-compare > b {{ font-size:.8rem; color:var(--ts-muted); font-weight:700; }}
+    .ts-compare-row {{ display:grid; grid-template-columns:minmax(90px,150px) minmax(0,1fr) 96px;
+      align-items:center; gap:.6rem; font-size:.78rem; }}
+    .ts-compare-row .label {{ color:var(--ts-ink); font-weight:600; }}
+    .ts-compare-row .value {{ text-align:right; font-weight:700; color:var(--ts-ink); white-space:nowrap; }}
+    .ts-compare-track {{ height:9px; border-radius:5px; background:var(--ts-soft); overflow:hidden; }}
+    .ts-compare-fill {{ --pct:0%; width:var(--pct); height:100%; border-radius:5px;
+      background:linear-gradient(90deg,var(--ts-accent),var(--ts-orange)); }}
+    /* Cause -> effect -> response columns. No arrows between items: the data
+       says which facts exist, not which cause produced which impact. */
+    .ts-cause-map {{ display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:.7rem; }}
+    .ts-cause-col {{ padding:.75rem .85rem; border-radius:10px; background:var(--ts-panel2);
+      border:1px solid color-mix(in srgb,var(--ts-line) 45%,transparent); }}
+    .ts-cause-col h4 {{ margin:0 0 .5rem; font-size:.8rem; font-weight:800; letter-spacing:.02em;
+      color:var(--ts-accent); }}
+    .ts-cause-col.impact h4 {{ color:var(--ts-orange); }}
+    .ts-cause-col.action h4 {{ color:var(--ts-teal); }}
+    .ts-cause-col ol {{ margin:0; padding-left:1.05rem; }}
+    .ts-cause-col li {{ font-size:.78rem; line-height:1.5; margin:.3rem 0; color:var(--ts-ink); }}
     /* Metric chart - hand-drawn SVG in the reference's chart language
        (hairline gridlines, filled area under the primary series, ringed
        points, evidence-stated period labels) instead of Streamlit's default. */
