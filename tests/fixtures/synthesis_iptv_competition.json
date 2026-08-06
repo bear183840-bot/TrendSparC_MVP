@@ -1,41 +1,103 @@
 {
-  "_note": "Analyzer output for the 'IPTV와 OTT 경쟁 심화' question. Shaped to exercise the qualitative side - entity-vs-entity comparisons with stated levels, SWOT coverage, and actions - rather than the time series the revenue fixture covers.",
-  "doc_id": "www.etnews.com:b1",
-  "source_id": "전자신문 (통신)",
-  "source_url": "https://www.etnews.com/news/section.html?id1=03",
-  "summary": "OTT 중심 소비 확대로 IPTV 단독 경쟁력이 약화되고 있다.",
-  "key_points": [
-    "OTT 중심 시청 행태가 확산되고 있다",
-    "결합상품이 가입자 유지의 주요 수단으로 작동한다"
+  "_note": "TrendSynthesis-level fixture for --synthesis-fixture. issue_response purpose, 3-way comparison_points + SWOT + actions. Feeds report_planner onward with no collector or analyzer call.",
+  "request_id": "req_synthetic_iptv_competition",
+  "sector_id": "sk_broadband",
+  "question": "IPTV 시장에서 KT, LG유플러스와 비교했을 때 SK브로드밴드(B tv)의 경쟁력은 어떻고, 앞으로 어떻게 대응해야 하나요?",
+  "audience_id": "executive",
+  "purpose_id": "issue_response",
+  "highlights": [
+    "2025년 하반기 기준 IPTV 가입자 수는 KT 952만명, LG유플러스 577만명, SK브로드밴드 669만명으로, SK브로드밴드는 전년 대비 유일하게 가입자가 감소했다. [doc_id=v.daum.net:34a27329ef99af59]",
+    "AI 추천/개인화 서비스 경쟁력은 3사 중 SK브로드밴드가 중간 수준으로 평가되며, KT는 최근 AI 셋톱박스 고도화로 우위를 점하고 있다. [doc_id=www.etnews.com:fdb9ff84ad062c04]",
+    "SK브로드밴드는 B tv+ max 출시로 콘텐츠 경쟁력을 강화했으나 스포츠·독점 중계 부문에서는 경쟁사 대비 약세다. [doc_id=blog.bworld.co.kr:a198235c989ad273]",
+    "OTT(넷플릭스, 티빙 등)와의 경쟁 심화로 IPTV 3사 모두 가입자 기반 약화 압력을 받고 있다. [doc_id=www.newspim.com:f001e2f9c688aabf]"
   ],
-  "business_impact": "가입자 이탈로 ARPU 방어가 어려워지고 있다",
-  "risk": "글로벌 OTT 확장으로 콘텐츠 확보 비용이 상승한다",
-  "opportunity": "AI 추천 고도화로 개인화 경쟁력을 확보할 수 있다",
-  "strength": "IPTV 인프라와 통신 결합상품 경쟁력을 보유하고 있다",
-  "weakness": "OTT 대비 콘텐츠 다양성이 부족하다",
+  "synthesis_text": "IPTV 3사 비교 시 SK브로드밴드는 가입자 수 기준으로 3사 중 2위이나 유일하게 감소세를 보이고 있다. AI 개인화·콘텐츠 경쟁력은 중간 수준이며, 스포츠 독점중계 등 킬러 콘텐츠 확보가 상대적으로 약하다. OTT와의 경쟁이 3사 공통 압박 요인으로 작용하고 있어, 차별화 포인트 확보가 시급하다.",
+  "source_count": 7,
+  "unique_source_count": 6,
+  "source_ids": [
+    "v.daum.net",
+    "www.etnews.com",
+    "blog.bworld.co.kr",
+    "www.newspim.com",
+    "kind.krx.co.kr",
+    "www.sks.co.kr"
+  ],
+  "key_points": [
+    "시장 변화: IPTV 3사 중 SK브로드밴드만 가입자 수 감소 [doc_id=v.daum.net:34a27329ef99af59]",
+    "전략 영향: KT의 AI 셋톱박스 고도화로 개인화 경쟁에서 앞서가는 중 [doc_id=www.etnews.com:fdb9ff84ad062c04]",
+    "Risk: 스포츠·독점 콘텐츠 열세가 신규 가입자 유치에 불리하게 작용 [doc_id=blog.bworld.co.kr:a198235c989ad273]",
+    "Opportunity: B tv+ max의 콘텐츠 다양성을 통한 차별화 여지 존재 [doc_id=blog.bworld.co.kr:a198235c989ad273]"
+  ],
+  "business_impacts": [
+    "가입자 감소가 지속되면 결합상품 매출과 ARPU에도 연쇄적 영향을 줄 수 있음 [doc_id=v.daum.net:34a27329ef99af59]"
+  ],
+  "risks": [
+    "OTT 대체 심화로 IPTV 전체 시장의 성장 둔화 [doc_id=www.newspim.com:f001e2f9c688aabf]",
+    "경쟁사 대비 스포츠 콘텐츠 열세 지속 시 신규 가입자 유치 불리 [doc_id=blog.bworld.co.kr:a198235c989ad273]"
+  ],
+  "opportunities": [
+    "AI 개인화 고도화를 통한 KT와의 격차 축소 가능성 [doc_id=www.etnews.com:fdb9ff84ad062c04]",
+    "B tv+ max 콘텐츠 다양성을 활용한 차별화 [doc_id=blog.bworld.co.kr:a198235c989ad273]"
+  ],
+  "strengths": [
+    "결합상품 및 통신 인프라 경쟁력 우위 [doc_id=www.sks.co.kr:0a546e18bda27bbd]",
+    "B tv+ max 출시로 콘텐츠 다양성 확대 [doc_id=blog.bworld.co.kr:a198235c989ad273]"
+  ],
+  "weaknesses": [
+    "IPTV 3사 중 유일하게 가입자 수 감소 [doc_id=v.daum.net:34a27329ef99af59]",
+    "스포츠·독점 중계 콘텐츠 경쟁력 열세 [doc_id=blog.bworld.co.kr:a198235c989ad273]"
+  ],
+  "metric_series": [
+    {"label": "IPTV 가입자 수", "period": "2025년 하반기", "value": 669.1, "unit": "만명"},
+    {"label": "IPTV 가입자 수", "period": "2024년 하반기", "value": 676.9, "unit": "만명"}
+  ],
   "comparison_points": [
-    {"entity": "B tv", "criterion": "AI 추천/개인화", "value": "보통 수준", "level": "medium"},
-    {"entity": "B tv", "criterion": "콘텐츠 경쟁력", "value": "보통 수준", "level": "medium"},
-    {"entity": "B tv", "criterion": "가격 경쟁력", "value": "결합할인 제공", "level": "high"},
-    {"entity": "Netflix", "criterion": "AI 추천/개인화", "value": "업계 최고 수준", "level": "high"},
-    {"entity": "Netflix", "criterion": "콘텐츠 경쟁력", "value": "오리지널 다수 보유", "level": "high"},
-    {"entity": "Netflix", "criterion": "가격 경쟁력", "value": "구독료 인상", "level": "low"},
-    {"entity": "TVING", "criterion": "AI 추천/개인화", "value": "제한적", "level": "low"},
-    {"entity": "TVING", "criterion": "콘텐츠 경쟁력", "value": "스포츠 중계 보유", "level": "high"},
-    {"entity": "TVING", "criterion": "가격 경쟁력", "value": "프로모션 요금제", "level": "high"}
+    {"entity": "SK브로드밴드", "criterion": "IPTV 가입자 수", "value": "669만명", "level": "medium"},
+    {"entity": "KT", "criterion": "IPTV 가입자 수", "value": "952만명", "level": "high"},
+    {"entity": "LG유플러스", "criterion": "IPTV 가입자 수", "value": "577만명", "level": "low"},
+    {"entity": "SK브로드밴드", "criterion": "AI 추천/개인화", "value": "Medium", "level": "medium"},
+    {"entity": "KT", "criterion": "AI 추천/개인화", "value": "High", "level": "high"},
+    {"entity": "LG유플러스", "criterion": "AI 추천/개인화", "value": "Medium", "level": "medium"},
+    {"entity": "SK브로드밴드", "criterion": "스포츠/독점 중계", "value": "Medium", "level": "medium"},
+    {"entity": "KT", "criterion": "스포츠/독점 중계", "value": "High", "level": "high"},
+    {"entity": "LG유플러스", "criterion": "스포츠/독점 중계", "value": "Low", "level": "low"}
   ],
   "recommended_actions": [
-    "AI 추천 서비스를 고도화한다",
-    "스포츠·독점 콘텐츠를 확대한다",
-    "결합상품 경쟁력을 강화한다"
+    "AI 추천/개인화 서비스 고도화를 통해 KT와의 격차 축소 [doc_id=www.etnews.com:fdb9ff84ad062c04]",
+    "스포츠 및 독점 콘텐츠 확보를 위한 제휴·투자 확대 [doc_id=blog.bworld.co.kr:a198235c989ad273]",
+    "B tv+ max 기반 결합상품 프로모션 강화로 가입자 이탈 방어 [doc_id=www.sks.co.kr:0a546e18bda27bbd]",
+    "OTT 제휴형 요금제(FAST 등) 도입 검토 [doc_id=www.newspim.com:f001e2f9c688aabf]"
   ],
   "monitoring_indicators": [
-    "월별 해지율",
-    "AI 추천 클릭률"
+    "월별 IPTV 3사 가입자 수 증감 비교",
+    "AI 추천 서비스 클릭률·이용률 추이",
+    "경쟁사 스포츠 중계권 계약 동향"
   ],
   "evidence": [
-    "OTT 이용 시간이 지속 증가하고 있다",
-    "유료방송 가입자 증가율이 둔화됐다"
+    "2025년 하반기 SK브로드밴드 IPTV 가입자는 669만 1,354명으로 집계됐다. [doc_id=v.daum.net:34a27329ef99af59]",
+    "KT는 같은 기간 952만명, LG유플러스는 577만명의 IPTV 가입자를 보유했다. [doc_id=v.daum.net:34a27329ef99af59]",
+    "KT는 AI 셋톱박스 고도화를 통해 개인화 서비스 경쟁력에서 앞서고 있다. [doc_id=www.etnews.com:fdb9ff84ad062c04]",
+    "SK브로드밴드는 B tv+ max 출시로 255개 실시간 채널과 30만 편 이상의 콘텐츠를 제공한다. [doc_id=blog.bworld.co.kr:a198235c989ad273]"
   ],
-  "analysis_confidence": "high"
+  "confidence_labels": [
+    "high [doc_id=v.daum.net:34a27329ef99af59]",
+    "high [doc_id=www.etnews.com:fdb9ff84ad062c04]",
+    "high [doc_id=blog.bworld.co.kr:a198235c989ad273]",
+    "medium [doc_id=www.newspim.com:f001e2f9c688aabf]"
+  ],
+  "doc_source_map": {
+    "v.daum.net:34a27329ef99af59": "v.daum.net",
+    "www.etnews.com:fdb9ff84ad062c04": "www.etnews.com",
+    "blog.bworld.co.kr:a198235c989ad273": "blog.bworld.co.kr",
+    "www.newspim.com:f001e2f9c688aabf": "www.newspim.com",
+    "kind.krx.co.kr:2e2f633dc358aaa2": "kind.krx.co.kr",
+    "www.sks.co.kr:0a546e18bda27bbd": "www.sks.co.kr"
+  },
+  "corroborated_points": [
+    "SK브로드밴드의 IPTV 가입자 감소는 v.daum.net과 kind.krx.co.kr 두 출처에서 공통 확인됨"
+  ],
+  "uncorroborated_points": [
+    "AI 추천/개인화 경쟁력 Medium/High/Medium 등급 비교는 etnews 단일 출처 기반"
+  ],
+  "contradictions": []
 }

@@ -206,6 +206,21 @@ def _section_evidence_refs(
     )
 
 
+# What each content-sensitive section is *actually* filled from, beyond the
+# id-based refs. A ref id is internal bookkeeping the synthesizer assigns;
+# the section's content is the data itself. Judging on ids alone dropped
+# sections whose data was right there - `recommended_action` was added by
+# _recommended_sections() because synthesis.recommended_actions was non-empty
+# and then immediately omitted here for having no action-typed claim, and
+# `key_metrics` was omitted whenever the metric points carried no metric_id.
+_SECTION_CONTENT_FIELDS: dict[str, tuple[str, ...]] = {
+    "key_metrics": ("metric_series",),
+    "market_status": ("metric_series", "comparison_points"),
+    "risk_and_opportunity": ("risks", "opportunities", "strengths", "weaknesses"),
+    "recommended_action": ("recommended_actions",),
+}
+
+
 def _has_section_evidence(
     section: str, refs: SectionEvidenceRefs, synthesis: TrendSynthesis
 ) -> bool:
@@ -215,6 +230,10 @@ def _has_section_evidence(
         # sentences - judging on refs alone dropped timelines the generator
         # could have written.
         return bool(refs.metric_ids or refs.claim_ids) or _has_timeline_evidence(synthesis)
+    if any(
+        getattr(synthesis, field, None) for field in _SECTION_CONTENT_FIELDS.get(section, ())
+    ):
+        return True
     return bool(
         refs.conclusion_ids or refs.claim_ids or refs.metric_ids or refs.comparison_ids
     )

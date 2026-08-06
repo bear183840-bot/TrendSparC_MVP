@@ -630,19 +630,36 @@ def _run_pipeline_stages(
         return result
 
     audience_id = request.target_audience or _DEFAULT_AUDIENCE_ID
+    _run_report_stages(result, request, audience_id, _maybe_force_fail, _halt)
+    return result
 
+
+def _run_report_stages(
+    result: PipelineResult,
+    request: UserRequest,
+    audience_id: str,
+    maybe_force_fail,
+    halt,
+) -> None:
+    """Stages 6-9: everything downstream of a finished synthesis.
+
+    Split out from the collection half so it can be driven from a saved
+    synthesis as well as a live one (see `run_pipeline_from_synthesis`) -
+    these four stages are pure transforms over `result.synthesis`, and
+    re-running them shouldn't require paying for collection again.
+    """
     # 6. report_planner
     try:
-        _maybe_force_fail("report_planner")
+        maybe_force_fail("report_planner")
         result.report_plan = plan_report(result.synthesis, audience_id, result.report_purpose)
         result.trace.append(StageTrace(stage="report_planner", status=StageStatus.OK))
     except PipelineStageError as exc:
-        _halt("report_planner", exc.reason, exc.detail)
-        return result
+        halt("report_planner", exc.reason, exc.detail)
+        return
 
     # 7. report_generator
     try:
-        _maybe_force_fail("report_generator")
+        maybe_force_fail("report_generator")
         # What's left after best-effort collection/analysis (including the
         # recollection loops above) - never fabricated to fill these, just
         # disclosed honestly in the report's limitations (see
@@ -651,22 +668,28 @@ def _run_pipeline_stages(
             result.document_analyses,
             result.source_plan.information_needs if result.source_plan else [],
         )
+        # A fixture run starts at report_planner, so the entity stage never
+        # ran and there are no canonical entities to normalize names against.
+        entities = result.entities
+        canonical_entities = (
+            [*entities.organizations, *entities.technologies] if entities else []
+        )
         result.generated_report = generate_report(
             request.question,
             result.synthesis,
             result.report_plan,
             audience_id,
-            canonical_entities=[*result.entities.organizations, *result.entities.technologies],
+            canonical_entities=canonical_entities,
             missing_information_needs=still_missing,
         )
         result.trace.append(StageTrace(stage="report_generator", status=StageStatus.OK))
     except PipelineStageError as exc:
-        _halt("report_generator", exc.reason, exc.detail)
-        return result
+        halt("report_generator", exc.reason, exc.detail)
+        return
 
     # 8. audience_adapter
     try:
-        _maybe_force_fail("audience_adapter")
+        maybe_force_fail("audience_adapter")
         result.audience_adaptation = adapt_for_audience(
             result.synthesis,
             result.report_plan,
@@ -675,18 +698,65 @@ def _run_pipeline_stages(
         )
         result.trace.append(StageTrace(stage="audience_adapter", status=StageStatus.OK))
     except PipelineStageError as exc:
-        _halt("audience_adapter", exc.reason, exc.detail)
-        return result
+        halt("audience_adapter", exc.reason, exc.detail)
+        return
 
     # 9. layout_generator
     try:
-        _maybe_force_fail("layout_generator")
+        maybe_force_fail("layout_generator")
         result.layout = generate_layout(
             result.report_plan, result.audience_adaptation, result.synthesis.doc_source_map
         )
         result.trace.append(StageTrace(stage="layout_generator", status=StageStatus.OK))
     except PipelineStageError as exc:
-        _halt("layout_generator", exc.reason, exc.detail)
-        return result
+        halt("layout_generator", exc.reason, exc.detail)
 
+
+# Stages a fixture run replaces rather than executes - recorded as SKIPPED so
+# the trace still shows the full pipeline shape and nobody mistakes a fixture
+# run's output for a report built from freshly collected evidence.
+_FIXTURE_SKIPPED_STAGES = (
+    "attachment_extractor", "entity", "sector_router", "source_planner",
+    "sector_adapter", "synthesis",
+)
+
+
+def run_pipeline_from_synthesis(
+    question: str,
+    synthesis: TrendSynthesis,
+    audience_id: str,
+    report_purpose: ReportPurposeClassification,
+    force_fail_stage: Optional[str] = None,
+) -> PipelineResult:
+    """Development entrypoint: run only the report half, from a saved synthesis.
+
+    Everything up to and including synthesis costs Firecrawl and OpenAI calls,
+    so iterating on planner/generator/adapter/layout behaviour used to mean
+    paying to re-collect evidence that hadn't changed. This takes a
+    TrendSynthesis straight off disk instead. No collector, analyzer, entity
+    or synthesis AI pass runs on this path.
+    """
+    result = PipelineResult(request_id=synthesis.request_id)
+    result.synthesis = synthesis
+    result.report_purpose = report_purpose
+    for stage in _FIXTURE_SKIPPED_STAGES:
+        result.trace.append(
+            StageTrace(stage=stage, status=StageStatus.SKIPPED, reason="synthesis loaded from fixture")
+        )
+    result.trace.append(
+        StageTrace(stage="report_purpose", status=StageStatus.OK, reason="purpose taken from fixture")
+    )
+
+    def _maybe_force_fail(stage: str) -> None:
+        if force_fail_stage == stage:
+            raise PipelineStageError(stage=stage, reason="forced failure for testing")
+
+    def _halt(stage: str, reason: str, detail: Optional[str] = None) -> None:
+        result.trace.append(StageTrace(stage=stage, status=StageStatus.FAILED, reason=reason, detail=detail))
+        result.halted_at_stage = stage
+
+    request = UserRequest(
+        request_id=synthesis.request_id, question=question, target_audience=audience_id
+    )
+    _run_report_stages(result, request, audience_id, _maybe_force_fail, _halt)
     return result

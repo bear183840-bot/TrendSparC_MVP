@@ -9,12 +9,14 @@ Usage:
     python main.py --request-file examples/requests/sample_request.json
     python main.py --question "..." --sector sk_totally_made_up
     python main.py --question "..." --force-fail-stage intent
+    python main.py --synthesis-fixture tests/fixtures/synthesis_revenue_trend.json --summary-only
 """
 
 from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 import sys
 import uuid
@@ -28,7 +30,8 @@ if hasattr(sys.stderr, "reconfigure") and not sys.stderr.isatty():
 from dotenv import load_dotenv
 
 from common.contracts import UserRequest
-from core.request_pipeline.pipeline import run_pipeline
+from core.request_pipeline.pipeline import run_pipeline, run_pipeline_from_synthesis
+from core.request_pipeline.synthesis_fixture import load_synthesis_fixture
 
 
 def _safe_filename(value: str) -> str:
@@ -91,6 +94,32 @@ def _build_request(args: argparse.Namespace) -> UserRequest:
     )
 
 
+def _run_from_fixture(args: argparse.Namespace):
+    """Run report_planner -> layout_generator from a saved synthesis.
+
+    Free by default: report_generator is the one stage downstream of synthesis
+    that can call OpenAI, so its keys are cleared for the process unless
+    --with-report-llm is passed. Clearing beats mocking here because the
+    generator's own rule-based fallback is then exercised, which is the path
+    that actually ships when a key is missing.
+    """
+    synthesis, question, audience_id, purpose = load_synthesis_fixture(args.synthesis_fixture)
+    if args.audience:
+        audience_id = args.audience
+    if not args.with_report_llm:
+        for variable in ("TRENDSPARC_REPORT_GENERATOR_API_KEY", "OPENAI_API_KEY"):
+            os.environ.pop(variable, None)
+    print(
+        f"[synthesis-fixture] {Path(args.synthesis_fixture).name} | audience={audience_id} "
+        f"| purpose={purpose.purpose_id} | report_generator="
+        f"{'openai' if args.with_report_llm else 'rule_based (free)'}",
+        file=sys.stderr,
+    )
+    return run_pipeline_from_synthesis(
+        question, synthesis, audience_id, purpose, force_fail_stage=args.force_fail_stage
+    )
+
+
 def main() -> int:
     # Load local credentials only for an actual CLI invocation. Keeping this
     # out of module import prevents tests and helper imports from inheriting
@@ -115,15 +144,32 @@ def main() -> int:
         action="store_true",
         help="print a compact execution summary instead of the full PipelineResult JSON",
     )
+    parser.add_argument(
+        "--synthesis-fixture",
+        type=Path,
+        default=None,
+        metavar="PATH",
+        help="dev only: skip collection/analysis/synthesis and run report_planner onward "
+             "from a saved TrendSynthesis JSON. Free regardless of --no-dry-run.",
+    )
+    parser.add_argument(
+        "--with-report-llm",
+        action="store_true",
+        help="with --synthesis-fixture, let report_generator make its real OpenAI call "
+             "(costs money) instead of forcing the rule-based path",
+    )
     args = parser.parse_args()
 
-    request = _build_request(args)
-    result = run_pipeline(
-        request,
-        dry_run=not args.no_dry_run,
-        requested_sector_id=args.sector,
-        force_fail_stage=args.force_fail_stage,
-    )
+    if args.synthesis_fixture is not None:
+        result = _run_from_fixture(args)
+    else:
+        request = _build_request(args)
+        result = run_pipeline(
+            request,
+            dry_run=not args.no_dry_run,
+            requested_sector_id=args.sector,
+            force_fail_stage=args.force_fail_stage,
+        )
 
     if args.save_source_documents is not None:
         saved_dir = _save_source_documents(result, args.save_source_documents)

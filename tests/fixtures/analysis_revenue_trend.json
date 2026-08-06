@@ -1,0 +1,26 @@
+{
+  "_note": "Analyzer output for the '우리회사 매출 추이' question. Figures and sentences are the ones that appeared in the real 2026-08 sk_broadband run - the case where three of four numeric facts stayed trapped in evidence prose and no chart was drawn.",
+  "doc_id": "www.jobkorea.co.kr:a1",
+  "source_id": "잡코리아",
+  "source_url": "https://www.jobkorea.co.kr/company/skbroadband",
+  "summary": "SK브로드밴드 매출은 증가세이나 순이익은 감소했다.",
+  "key_points": [
+    "AI 인프라 투자를 확대하고 있다"
+  ],
+  "business_impact": "매출 성장에도 수익성은 압박을 받고 있다",
+  "risk": "유료방송 경쟁 심화로 수익성 저하 우려가 있다",
+  "opportunity": "AI 투자로 신규 매출원을 확보할 기회가 있다",
+  "recommended_actions": [
+    "AI 사업 투자 성과를 분기별로 점검한다"
+  ],
+  "monitoring_indicators": [
+    "분기별 영업이익률"
+  ],
+  "evidence": [
+    "2024년 3분기 누적 매출액 3조 2,878억원",
+    "2025년 매출액 4조 5,406억원",
+    "2025년 영업이익 3,741억원 (전년 대비 6.2% 증가)",
+    "2026년 1분기 매출액 1조 2,140억원"
+  ],
+  "analysis_confidence": "high"
+}

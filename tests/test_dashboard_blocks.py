@@ -194,7 +194,7 @@ def _blocks_for(fixture_name: str, purpose_id: str) -> tuple[list[str], dict[str
 
 
 def test_revenue_trend_fixture_draws_the_quantitative_blocks():
-    blocks, structured = _blocks_for("synthesis_revenue_trend", "current_status")
+    blocks, structured = _blocks_for("analysis_revenue_trend", "current_status")
 
     assert "chart" in blocks
     assert "timeline" in blocks
@@ -206,7 +206,7 @@ def test_revenue_trend_fixture_draws_the_quantitative_blocks():
 
 
 def test_iptv_competition_fixture_draws_the_qualitative_blocks():
-    blocks, structured = _blocks_for("synthesis_iptv_competition", "issue_response")
+    blocks, structured = _blocks_for("analysis_iptv_competition", "issue_response")
 
     assert "table" in blocks
     assert "radar" in blocks
@@ -217,6 +217,6 @@ def test_iptv_competition_fixture_draws_the_qualitative_blocks():
 
 
 def test_the_two_fixtures_do_not_produce_the_same_layout():
-    revenue, _ = _blocks_for("synthesis_revenue_trend", "current_status")
-    iptv, _ = _blocks_for("synthesis_iptv_competition", "issue_response")
+    revenue, _ = _blocks_for("analysis_revenue_trend", "current_status")
+    iptv, _ = _blocks_for("analysis_iptv_competition", "issue_response")
     assert set(revenue) != set(iptv)

@@ -10,7 +10,7 @@ AudienceAdaptation never carry a sector id, so the same rules apply no
 matter which sector's data flows through).
 """
 
-from common.contracts import AudienceAdaptation, ReportPlan
+from common.contracts import AudienceAdaptation, ReportPlan, ReportPurposeClassification
 from core.layout_generator.generator import generate_layout
 
 _METRIC_POINTS_TWO_PERIODS = [
@@ -176,18 +176,59 @@ def test_no_structured_data_falls_back_to_the_existing_static_table():
     assert layout.blocks[0].block_type == "list"  # unchanged from before this feature
 
 
-def test_audience_priority_breaks_ties_when_a_section_qualifies_for_multiple_types():
-    section_content = {
-        "title": "Composite",
-        "metric_points": _METRIC_POINTS_TWO_PERIODS,
-        "comparison_points": _COMPARISON_POINTS_TWO_ENTITIES,
+_COMPOSITE_CONTENT = {
+    "title": "Composite",
+    "metric_points": _METRIC_POINTS_TWO_PERIODS,
+    "comparison_points": _COMPARISON_POINTS_TWO_ENTITIES,
+}
+
+
+def _purpose(purpose_id: str, hints: list[str]) -> ReportPurposeClassification:
+    return ReportPurposeClassification(
+        request_id="req_content_type",
+        purpose_id=purpose_id,
+        display_name=purpose_id,
+        dashboard_block_hints=hints,
+    )
+
+
+def test_audience_does_not_change_block_type():
+    """Audience decides tone and detail, never structure.
+
+    This previously asserted the opposite - a practitioner got a table and an
+    external reader a chart from identical content - which meant the same
+    question asked by two people produced two differently *shaped* reports.
+    """
+    types = {
+        audience: generate_layout(
+            _plan(audience, ["overview"]), _adaptation(audience, {"overview": _COMPOSITE_CONTENT})
+        ).blocks[0].block_type
+        for audience in ("practitioner", "executive", "external", "management")
     }
+    assert len(set(types.values())) == 1, types
 
-    practitioner_layout = generate_layout(_plan("practitioner", ["overview"]), _adaptation("practitioner", {"overview": section_content}))
-    external_layout = generate_layout(_plan("external", ["overview"]), _adaptation("external", {"overview": section_content}))
 
-    assert practitioner_layout.blocks[0].block_type == "table"
-    assert external_layout.blocks[0].block_type == "chart"
+def test_purpose_block_hints_break_ties_when_content_qualifies_for_multiple_types():
+    plan = _plan("practitioner", ["overview"])
+    plan.report_purpose = _purpose("current_status", ["chart", "timeline"])
+    chart_first = generate_layout(plan, _adaptation("practitioner", {"overview": _COMPOSITE_CONTENT}))
+
+    other = _plan("practitioner", ["overview"])
+    other.report_purpose = _purpose("issue_response", ["table", "action_items"])
+    table_first = generate_layout(other, _adaptation("practitioner", {"overview": _COMPOSITE_CONTENT}))
+
+    assert chart_first.blocks[0].block_type == "chart"
+    assert table_first.blocks[0].block_type == "table"
+
+
+def test_hint_that_names_no_real_block_type_leaves_the_data_shape_order_alone():
+    plan = _plan("practitioner", ["overview"])
+    # issue_response's real hints are prose labels, not block_types.
+    plan.report_purpose = _purpose("issue_response", ["issue_summary", "impact_map"])
+
+    layout = generate_layout(plan, _adaptation("practitioner", {"overview": _COMPOSITE_CONTENT}))
+
+    assert layout.blocks[0].block_type == "chart"  # data-shape order stands
 
 
 def test_content_type_decision_is_identical_across_sectors():

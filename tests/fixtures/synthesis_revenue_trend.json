@@ -1,26 +1,100 @@
 {
-  "_note": "Analyzer output for the '우리회사 매출 추이' question. Figures and sentences are the ones that appeared in the real 2026-08 sk_broadband run - the case where three of four numeric facts stayed trapped in evidence prose and no chart was drawn.",
-  "doc_id": "www.jobkorea.co.kr:a1",
-  "source_id": "잡코리아",
-  "source_url": "https://www.jobkorea.co.kr/company/skbroadband",
-  "summary": "SK브로드밴드 매출은 증가세이나 순이익은 감소했다.",
-  "key_points": [
-    "AI 인프라 투자를 확대하고 있다"
+  "_note": "TrendSynthesis-level fixture for --synthesis-fixture. current_status purpose, multi-year 매출/영업이익 metric_series. Feeds report_planner onward with no collector or analyzer call.",
+  "request_id": "req_synthetic_revenue_trend",
+  "sector_id": "sk_broadband",
+  "question": "SK브로드밴드 매출과 영업이익 추이는 어떻게 되고 있고, 2026년 이후 전망은 어떤가요?",
+  "audience_id": "practitioner",
+  "purpose_id": "current_status",
+  "highlights": [
+    "SK브로드밴드의 연결 매출액은 2024년 4조 4,120억원에서 2025년 4조 5,406억원으로 증가했고, 2026년 상반기까지의 흐름을 반영하면 2026년 연간 매출은 4조 6,900억원 수준으로 전망된다. [doc_id=www.samsungpop.com:cb4a40e40fd3d360]",
+    "영업이익은 2024년 3,522억원에서 2025년 3,741억원으로 6.2% 증가했으며, 2026년 1분기 영업이익은 전년 동기 대비 4.1% 증가한 951억원을 기록했다. [doc_id=file.alphasquare.co.kr:67083446d465940b]",
+    "매출 성장의 주된 원인은 판교 데이터센터 수익 인식 확대와 B tv 유료 가입자당 평균 매출(ARPU) 상승이다. [doc_id=biz.chosun.com:25729e70dd2a1d1f]",
+    "다만 IPTV 가입자 수는 2025년 하반기 기준 전년 대비 7만 7,481명 감소해 매출 성장과 가입자 기반 사이에 괴리가 존재한다. [doc_id=v.daum.net:34a27329ef99af59]"
   ],
-  "business_impact": "매출 성장에도 수익성은 압박을 받고 있다",
-  "risk": "유료방송 경쟁 심화로 수익성 저하 우려가 있다",
-  "opportunity": "AI 투자로 신규 매출원을 확보할 기회가 있다",
+  "synthesis_text": "SK브로드밴드의 매출과 영업이익은 2024년부터 2026년까지 꾸준한 증가세를 보이고 있다. 매출은 데이터센터·B tv 프리미엄 상품이 견인하고 있으며, 영업이익률도 동반 개선되고 있다. 다만 이 성장이 IPTV 가입자 수 감소를 데이터센터·기업 매출로 상쇄하는 구조라는 점은 주의가 필요하다.",
+  "source_count": 6,
+  "unique_source_count": 5,
+  "source_ids": [
+    "www.samsungpop.com",
+    "file.alphasquare.co.kr",
+    "biz.chosun.com",
+    "v.daum.net",
+    "rdata.kbsec.com"
+  ],
+  "key_points": [
+    "시장 변화: 2024~2026년 매출이 3개년 연속 증가 추세 [doc_id=www.samsungpop.com:cb4a40e40fd3d360]",
+    "전략 영향: 판교 데이터센터 수익 인식이 매출 성장의 핵심 동력 [doc_id=biz.chosun.com:25729e70dd2a1d1f]",
+    "Risk: IPTV 가입자 수 감소가 지속되면 중장기 매출 기반이 약화될 수 있음 [doc_id=v.daum.net:34a27329ef99af59]",
+    "Opportunity: 데이터센터·B2B 매출 비중 확대로 수익 다각화 진행 중 [doc_id=file.alphasquare.co.kr:67083446d465940b]"
+  ],
+  "business_impacts": [
+    "매출·영업이익 동반 성장은 투자 재원 확보에 긍정적이나, 성장의 질(가입자 기반 vs 비가입자 매출)을 구분해서 봐야 한다. [doc_id=file.alphasquare.co.kr:67083446d465940b]"
+  ],
+  "risks": [
+    "IPTV 가입자 수 감소 추세가 이어지면 향후 매출 성장률 둔화 가능성 [doc_id=v.daum.net:34a27329ef99af59]",
+    "데이터센터 매출 의존도가 높아질 경우 전력비 등 원가 변동에 대한 민감도 상승 [doc_id=rdata.kbsec.com:cabf9bb92c23ff63]"
+  ],
+  "opportunities": [
+    "데이터센터·B2B 매출 비중 확대를 통한 수익 다각화 [doc_id=file.alphasquare.co.kr:67083446d465940b]",
+    "B tv 프리미엄 상품(B tv+ max) ARPU 상승 여력 [doc_id=biz.chosun.com:25729e70dd2a1d1f]"
+  ],
+  "strengths": [
+    "2024~2026년 3개년 연속 매출·영업이익 동반 성장 [doc_id=www.samsungpop.com:cb4a40e40fd3d360]",
+    "데이터센터 등 non-가입자 매출원 확보로 수익 구조 다변화 [doc_id=file.alphasquare.co.kr:67083446d465940b]"
+  ],
+  "weaknesses": [
+    "IPTV 가입자 수 감소가 매출 성장에도 불구하고 지속되고 있음 [doc_id=v.daum.net:34a27329ef99af59]"
+  ],
+  "metric_series": [
+    {"label": "매출액", "period": "2024년", "value": 44120.0, "unit": "억원"},
+    {"label": "매출액", "period": "2025년", "value": 45406.0, "unit": "억원"},
+    {"label": "매출액", "period": "2026년(전망)", "value": 46900.0, "unit": "억원"},
+    {"label": "영업이익", "period": "2024년", "value": 3522.0, "unit": "억원"},
+    {"label": "영업이익", "period": "2025년", "value": 3741.0, "unit": "억원"},
+    {"label": "영업이익", "period": "2026년 1분기", "value": 951.0, "unit": "억원"},
+    {"label": "IPTV 가입자 수", "period": "2024년 하반기", "value": 676.9, "unit": "만명"},
+    {"label": "IPTV 가입자 수", "period": "2025년 하반기", "value": 669.1, "unit": "만명"}
+  ],
+  "comparison_points": [
+    {"entity": "매출액", "criterion": "2025년 대비 2026년 전망 증감", "value": "+3.3%", "level": "medium"},
+    {"entity": "영업이익", "criterion": "2024년 대비 2025년 증감", "value": "+6.2%", "level": "high"},
+    {"entity": "IPTV 가입자 수", "criterion": "2024년 대비 2025년 증감", "value": "-1.2%", "level": "low"}
+  ],
   "recommended_actions": [
-    "AI 사업 투자 성과를 분기별로 점검한다"
+    "데이터센터·B2B 매출 비중을 지속 확대해 가입자 매출 의존도를 낮추는 중장기 전략 수립 [doc_id=file.alphasquare.co.kr:67083446d465940b]",
+    "IPTV 가입자 이탈 방어를 위한 B tv+ max 콘텐츠 강화 지속 [doc_id=biz.chosun.com:25729e70dd2a1d1f]",
+    "2026년 하반기 영업이익률 목표치 재점검 및 원가 구조 모니터링 [doc_id=rdata.kbsec.com:cabf9bb92c23ff63]"
   ],
   "monitoring_indicators": [
-    "분기별 영업이익률"
+    "분기별 매출·영업이익 발표치와 전망치 간 괴리 추적",
+    "IPTV 가입자 수 월별 증감 추이",
+    "데이터센터 부문 매출 비중 변화"
   ],
   "evidence": [
-    "2024년 3분기 누적 매출액 3조 2,878억원",
-    "2025년 매출액 4조 5,406억원",
-    "2025년 영업이익 3,741억원 (전년 대비 6.2% 증가)",
-    "2026년 1분기 매출액 1조 2,140억원"
+    "2024년 SK브로드밴드 연결 매출액은 4조 4,120억원을 기록했다. [doc_id=www.samsungpop.com:cb4a40e40fd3d360]",
+    "2025년 매출액은 4조 5,406억원(+2.9% YoY)으로 집계됐다. [doc_id=www.samsungpop.com:cb4a40e40fd3d360]",
+    "2026년 1분기 영업이익은 951억원으로 전년 동기 대비 4.1% 증가했다. [doc_id=file.alphasquare.co.kr:67083446d465940b]",
+    "판교 데이터센터 수익 인식 확대가 매출 성장을 견인하고 있다. [doc_id=biz.chosun.com:25729e70dd2a1d1f]",
+    "2025년 하반기 IPTV 가입자는 전년 대비 7만 7,481명 감소했다. [doc_id=v.daum.net:34a27329ef99af59]"
   ],
-  "analysis_confidence": "high"
+  "confidence_labels": [
+    "high [doc_id=www.samsungpop.com:cb4a40e40fd3d360]",
+    "high [doc_id=file.alphasquare.co.kr:67083446d465940b]",
+    "medium [doc_id=biz.chosun.com:25729e70dd2a1d1f]",
+    "high [doc_id=v.daum.net:34a27329ef99af59]"
+  ],
+  "doc_source_map": {
+    "www.samsungpop.com:cb4a40e40fd3d360": "www.samsungpop.com",
+    "file.alphasquare.co.kr:67083446d465940b": "file.alphasquare.co.kr",
+    "biz.chosun.com:25729e70dd2a1d1f": "biz.chosun.com",
+    "v.daum.net:34a27329ef99af59": "v.daum.net",
+    "rdata.kbsec.com:cabf9bb92c23ff63": "rdata.kbsec.com"
+  },
+  "corroborated_points": [
+    "매출·영업이익 3개년 연속 증가 추세는 samsungpop, alphasquare, kbsec 세 출처에서 공통 확인됨"
+  ],
+  "uncorroborated_points": [
+    "2026년 연간 매출 전망치 4조 6,900억원은 단일 출처 기반 추정치"
+  ],
+  "contradictions": []
 }

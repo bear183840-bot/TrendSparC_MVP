@@ -81,16 +81,16 @@ _SECTION_BLOCK_TYPES = {
 
 
 # When a section legitimately qualifies for more than one structured type
-# (e.g. it has both a 2+ point metric series AND a SWOT split), the audience
-# decides which one wins - see AudienceAdaptation.audience_id / the audience
-# priority table in the feature plan (external -> big picture, practitioner
-# -> detail, executive/management -> headline numbers).
-_AUDIENCE_TYPE_PRIORITY: dict[str, list[str]] = {
-    "external": ["matrix", "chart"],
-    "practitioner": ["table", "list"],
-    "executive": ["metrics", "list"],
-    "management": ["metrics", "chart"],
-}
+# (e.g. it has both a 2+ point metric series AND a SWOT split), the report's
+# *purpose* breaks the tie, from the block hints its recipe already declares
+# (core/report_purpose/classifier.py). This used to be keyed on audience,
+# which meant asking the same question as an executive rather than a
+# practitioner silently changed the report's block structure - audience is
+# supposed to decide tone and detail, purpose decides shape. Hints that don't
+# name a real block_type (e.g. "issue_summary") simply never match, and the
+# data-shape ordering below stands.
+def _purpose_preferred_types(report_purpose) -> list[str]:
+    return list(getattr(report_purpose, "dashboard_block_hints", None) or [])
 
 
 def _candidate_content_types(content: dict) -> list[str]:
@@ -141,7 +141,7 @@ def _has_genuine_timeline_data(content: dict) -> bool:
     return len(dated_items(candidate_items)) >= _MIN_TIMELINE_DATED_ITEMS
 
 
-def _block_type(section: str, content: dict, audience_id: str | None = None) -> str:
+def _block_type(section: str, content: dict, preferred_types: list[str] | None = None) -> str:
     """Choose a semantic UI slot from the section's actual structured content
     first; only fall back to the static per-section table when nothing
     structured exists. This deliberately inverts the old precedence (section
@@ -149,8 +149,8 @@ def _block_type(section: str, content: dict, audience_id: str | None = None) -> 
     name isn't in the static table, and never gets a chart/table it has no
     real data to back."""
     candidates = _candidate_content_types(content)
-    if len(candidates) > 1 and audience_id:
-        for preferred in _AUDIENCE_TYPE_PRIORITY.get(audience_id, []):
+    if len(candidates) > 1:
+        for preferred in preferred_types or []:
             if preferred in candidates:
                 return preferred
     if candidates:
@@ -205,6 +205,7 @@ def generate_layout(
     section_order = list(report_plan.sections)
     if "executive_summary" in adaptation.adapted_sections:
         section_order.insert(0, "executive_summary")
+    preferred_types = _purpose_preferred_types(report_plan.report_purpose)
     blocks = []
     for index, section in enumerate(section_order):
         content = adaptation.adapted_sections.get(section, {})
@@ -215,7 +216,7 @@ def generate_layout(
                 block_id=f"{index + 1:02d}_{section}",
                 section=section,
                 title=_block_title(section, content),
-                block_type=_block_type(section, content, report_plan.audience_id),
+                block_type=_block_type(section, content, preferred_types),
                 content=content,
             )
         )

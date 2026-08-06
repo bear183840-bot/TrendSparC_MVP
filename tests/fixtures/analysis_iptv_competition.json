@@ -1,0 +1,41 @@
+{
+  "_note": "Analyzer output for the 'IPTV와 OTT 경쟁 심화' question. Shaped to exercise the qualitative side - entity-vs-entity comparisons with stated levels, SWOT coverage, and actions - rather than the time series the revenue fixture covers.",
+  "doc_id": "www.etnews.com:b1",
+  "source_id": "전자신문 (통신)",
+  "source_url": "https://www.etnews.com/news/section.html?id1=03",
+  "summary": "OTT 중심 소비 확대로 IPTV 단독 경쟁력이 약화되고 있다.",
+  "key_points": [
+    "OTT 중심 시청 행태가 확산되고 있다",
+    "결합상품이 가입자 유지의 주요 수단으로 작동한다"
+  ],
+  "business_impact": "가입자 이탈로 ARPU 방어가 어려워지고 있다",
+  "risk": "글로벌 OTT 확장으로 콘텐츠 확보 비용이 상승한다",
+  "opportunity": "AI 추천 고도화로 개인화 경쟁력을 확보할 수 있다",
+  "strength": "IPTV 인프라와 통신 결합상품 경쟁력을 보유하고 있다",
+  "weakness": "OTT 대비 콘텐츠 다양성이 부족하다",
+  "comparison_points": [
+    {"entity": "B tv", "criterion": "AI 추천/개인화", "value": "보통 수준", "level": "medium"},
+    {"entity": "B tv", "criterion": "콘텐츠 경쟁력", "value": "보통 수준", "level": "medium"},
+    {"entity": "B tv", "criterion": "가격 경쟁력", "value": "결합할인 제공", "level": "high"},
+    {"entity": "Netflix", "criterion": "AI 추천/개인화", "value": "업계 최고 수준", "level": "high"},
+    {"entity": "Netflix", "criterion": "콘텐츠 경쟁력", "value": "오리지널 다수 보유", "level": "high"},
+    {"entity": "Netflix", "criterion": "가격 경쟁력", "value": "구독료 인상", "level": "low"},
+    {"entity": "TVING", "criterion": "AI 추천/개인화", "value": "제한적", "level": "low"},
+    {"entity": "TVING", "criterion": "콘텐츠 경쟁력", "value": "스포츠 중계 보유", "level": "high"},
+    {"entity": "TVING", "criterion": "가격 경쟁력", "value": "프로모션 요금제", "level": "high"}
+  ],
+  "recommended_actions": [
+    "AI 추천 서비스를 고도화한다",
+    "스포츠·독점 콘텐츠를 확대한다",
+    "결합상품 경쟁력을 강화한다"
+  ],
+  "monitoring_indicators": [
+    "월별 해지율",
+    "AI 추천 클릭률"
+  ],
+  "evidence": [
+    "OTT 이용 시간이 지속 증가하고 있다",
+    "유료방송 가입자 증가율이 둔화됐다"
+  ],
+  "analysis_confidence": "high"
+}
