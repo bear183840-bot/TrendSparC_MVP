@@ -5,6 +5,7 @@ import pytest
 
 from common.contracts import (
     PlannedSource,
+    SourceCollectionResult,
     SourceDocument,
     SourcePlan,
     WebSearchContext,
@@ -18,6 +19,10 @@ from sectors.sk_broadband.adapter.analyzer import analyze
 from sectors.sk_broadband.adapter.collector import _crawl_source, collect
 from sectors.sk_broadband.adapter.processor import process
 from sectors.sk_broadband.adapter.validator import validate
+
+
+def _collected_documents(result):
+    return result.documents if isinstance(result, SourceCollectionResult) else result
 
 
 def _make_result(markdown, title="제목", url="https://example.com/article", published_time="2026-01-01T00:00:00+09:00"):
@@ -121,6 +126,11 @@ def test_broadband_kofic_source_uses_pdf_helper(monkeypatch):
     attachment = types.SimpleNamespace(download_name="2025년 상반기 한국 영화산업 결산 보고서.pdf")
     parsed = types.SimpleNamespace(detail_url=search_result.url, attachment=attachment, markdown="KOFIC PDF 본문" * 100)
     monkeypatch.setattr(collector_module, "collect_pdf_markdown_from_detail_url", lambda detail_url, api_key: parsed)
+    # No question/openai_api_key passed via _crawl_source's legacy path, so
+    # search-discovery itself would normally return [] (no GPT query, no
+    # ladder fallback anymore) - stub the query generator so this test can
+    # still exercise "a search result was found -> PDF helper is used".
+    monkeypatch.setattr(collector_module, "_ai_generate_search_query", lambda *a, **k: "영화산업")
 
     docs = _crawl_source(_FastClient([search_result]), source, "test-key", ["영화산업", "OTT"])
 
@@ -228,6 +238,522 @@ def test_crawl_kofic_pdf_source_logs_when_no_post_ids_are_discovered(monkeypatch
     assert "no post ids discovered" in capsys.readouterr().err
 
 
+class _FakeChatOpenAI:
+    """Fake for the `from openai import OpenAI` done inline inside
+    _ai_source_gate_relevant/_ai_select_relevant_candidates - patched via
+    monkeypatch.setattr("openai.OpenAI", ...) since the import happens at
+    call time, not at collector_module's top level."""
+
+    def __init__(self, content=None, raise_error=False):
+        self._content = content
+        self._raise_error = raise_error
+        self.calls: list[dict] = []
+
+    def __call__(self, api_key):  # instantiated as OpenAI(api_key=...)
+        return self
+
+    @property
+    def chat(self):
+        outer = self
+
+        class _Completions:
+            def create(self, **kwargs):
+                outer.calls.append(kwargs)
+                if outer._raise_error:
+                    raise RuntimeError("simulated API failure")
+                message = types.SimpleNamespace(content=outer._content, refusal=None)
+                return types.SimpleNamespace(choices=[types.SimpleNamespace(message=message)])
+
+        return types.SimpleNamespace(completions=_Completions())
+
+
+def _kofic_source(topics=None):
+    return PlannedSource(
+        name="영화진흥위원회(KOFIC)",
+        url="https://www.kofic.or.kr/kofic/business/board/selectBoardList.do?boardNumber=2",
+        collection_method=["kofic_pdf_post_download"],
+        topics=topics if topics is not None else ["영화산업", "박스오피스", "콘텐츠 소비"],
+    )
+
+
+def test_extract_kofic_board_seq_and_titles_pairs_seq_with_its_title():
+    pairs = collector_module._extract_kofic_board_seq_and_titles(
+        _KOFIC_LISTING_JS_EXCERPT + _KOFIC_LISTING_ROW_EXCERPT
+    )
+
+    assert pairs == [("74481", "2026년 상반기 한국 영화산업 결산 보고서")]
+
+
+def test_kofic_question_gate_fails_open_without_openai_key():
+    assert collector_module._ai_source_gate_relevant("IPTV 사업 현황은?", _kofic_source(), None) is True
+
+
+def test_kofic_question_gate_fails_open_without_registered_topics():
+    assert collector_module._ai_source_gate_relevant("IPTV 사업 현황은?", _kofic_source(topics=[]), "key") is True
+
+
+def test_kofic_question_gate_fails_open_without_a_question():
+    assert collector_module._ai_source_gate_relevant("", _kofic_source(), "key") is True
+
+
+def test_kofic_question_gate_returns_model_judgment_when_irrelevant(monkeypatch):
+    fake = _FakeChatOpenAI(content=json.dumps({"relevant": False}))
+    monkeypatch.setattr("openai.OpenAI", fake)
+
+    result = collector_module._ai_source_gate_relevant("SK브로드밴드 IPTV 사업 현황은?", _kofic_source(), "key")
+
+    assert result is False
+    assert len(fake.calls) == 1
+
+
+def test_kofic_question_gate_returns_model_judgment_when_relevant(monkeypatch):
+    fake = _FakeChatOpenAI(content=json.dumps({"relevant": True}))
+    monkeypatch.setattr("openai.OpenAI", fake)
+
+    result = collector_module._ai_source_gate_relevant("영화 콘텐츠 소비 동향은?", _kofic_source(), "key")
+
+    assert result is True
+
+
+def test_kofic_question_gate_fails_open_on_api_error(monkeypatch, capsys):
+    monkeypatch.setattr("openai.OpenAI", _FakeChatOpenAI(raise_error=True))
+
+    result = collector_module._ai_source_gate_relevant("IPTV 사업 현황은?", _kofic_source(), "key")
+
+    assert result is True
+    assert "relevance gate call failed" in capsys.readouterr().err
+
+
+def test_ai_select_relevant_candidates_returns_none_without_openai_key():
+    posts = [("1", "제목1"), ("2", "제목2")]
+
+    assert collector_module._ai_select_relevant_candidates("질문", posts, None) is None
+
+
+def test_ai_select_relevant_candidates_returns_none_without_a_question():
+    posts = [("1", "제목1")]
+
+    assert collector_module._ai_select_relevant_candidates("", posts, "key") is None
+
+
+def test_ai_select_relevant_candidates_filters_to_model_selected_ids(monkeypatch):
+    posts = [("1", "무관한 제목"), ("2", "질문과 관련된 제목")]
+    fake = _FakeChatOpenAI(content=json.dumps({"relevant_ids": ["2"]}))
+    monkeypatch.setattr("openai.OpenAI", fake)
+
+    result = collector_module._ai_select_relevant_candidates("질문", posts, "key")
+
+    assert result == ["2"]
+
+
+def test_ai_select_relevant_candidates_ignores_hallucinated_ids_not_in_the_candidate_list(monkeypatch):
+    posts = [("1", "제목1")]
+    # Model returns an id that was never offered - must be dropped, not trusted.
+    fake = _FakeChatOpenAI(content=json.dumps({"relevant_ids": ["1", "999"]}))
+    monkeypatch.setattr("openai.OpenAI", fake)
+
+    result = collector_module._ai_select_relevant_candidates("질문", posts, "key")
+
+    assert result == ["1"]
+
+
+def test_ai_select_relevant_candidates_can_return_an_empty_but_meaningful_list(monkeypatch):
+    posts = [("1", "무관한 제목")]
+    fake = _FakeChatOpenAI(content=json.dumps({"relevant_ids": []}))
+    monkeypatch.setattr("openai.OpenAI", fake)
+
+    result = collector_module._ai_select_relevant_candidates("질문", posts, "key")
+
+    assert result == []  # genuinely "found nothing relevant" - distinct from None
+
+
+def test_ai_select_relevant_candidates_returns_none_on_api_error(monkeypatch, capsys):
+    posts = [("1", "제목1")]
+    monkeypatch.setattr("openai.OpenAI", _FakeChatOpenAI(raise_error=True))
+
+    result = collector_module._ai_select_relevant_candidates("질문", posts, "key")
+
+    assert result is None
+    assert "post-selection call failed" in capsys.readouterr().err
+
+
+def test_crawl_kofic_pdf_source_skips_entirely_when_gate_says_irrelevant(monkeypatch):
+    source = _kofic_source()
+    monkeypatch.setattr(collector_module, "_ai_source_gate_relevant", lambda *a, **k: False)
+    monkeypatch.setattr(
+        collector_module, "_discover_kofic_detail_urls_from_search",
+        lambda *a, **k: pytest.fail("discovery must not run once the gate says irrelevant"),
+    )
+
+    docs = collector_module._crawl_kofic_pdf_source(
+        _FastClient([]), source, "test-key", ["영화산업"], question="SK브로드밴드 IPTV 사업 현황은?", openai_api_key="key",
+    )
+
+    assert docs == []
+
+
+def test_discover_kofic_detail_urls_from_listing_uses_model_selected_posts_not_blind_newest(monkeypatch):
+    source = _kofic_source()
+    two_posts_html = (
+        '<a onclick="fn_goDetailPage(74481, \'x\', \'\');return false;">무관한 최신글</a>'
+        '<a onclick="fn_goDetailPage(74480, \'x\', \'\');return false;">두번째로 최신인 글</a>'
+    )
+    fake_response = types.SimpleNamespace(text=two_posts_html, encoding="utf-8", raise_for_status=lambda: None)
+    monkeypatch.setattr(collector_module.requests, "get", lambda *a, **k: fake_response)
+    # The blind (question-less) behavior would pick 74481 (the newest) - the
+    # model instead picks 74480, proving the listing path actually uses the
+    # selection instead of just taking the top of the page.
+    monkeypatch.setattr(
+        collector_module, "_ai_select_relevant_candidates", lambda question, posts, key: ["74480"]
+    )
+
+    urls = collector_module._discover_kofic_detail_urls_from_listing(source, "질문", "key")
+
+    assert urls == [
+        "https://www.kofic.or.kr/kofic/business/board/selectBoardDetail.do?boardNumber=2&boardSeqNumber=74480"
+    ]
+
+
+def test_discover_kofic_detail_urls_from_listing_falls_back_to_blind_newest_when_selection_unavailable(monkeypatch):
+    source = _kofic_source()
+    fake_response = types.SimpleNamespace(
+        text=_KOFIC_LISTING_JS_EXCERPT + _KOFIC_LISTING_ROW_EXCERPT,
+        encoding="utf-8",
+        raise_for_status=lambda: None,
+    )
+    monkeypatch.setattr(collector_module.requests, "get", lambda *a, **k: fake_response)
+    monkeypatch.setattr(collector_module, "_ai_select_relevant_candidates", lambda *a, **k: None)
+
+    urls = collector_module._discover_kofic_detail_urls_from_listing(source, "", None)
+
+    assert urls == [
+        "https://www.kofic.or.kr/kofic/business/board/selectBoardDetail.do"
+        "?boardNumber=2&boardSeqNumber=74481"
+    ]
+
+
+class _RecordingSearchClient:
+    """Fake Firecrawl client that records every query it was searched with,
+    so a test can prove which query (GPT-generated vs. rule-based ladder)
+    actually reached client.search()."""
+
+    def __init__(self, results_by_query=None, default_results=None):
+        self.results_by_query = results_by_query or {}
+        self.default_results = default_results if default_results is not None else []
+        self.search_calls: list[str] = []
+
+    def search(self, query, include_domains, limit, scrape_options):
+        self.search_calls.append(query)
+        return types.SimpleNamespace(web=self.results_by_query.get(query, self.default_results))
+
+
+def test_ai_generate_search_query_returns_none_without_openai_key():
+    assert collector_module._ai_generate_search_query("IPTV 가입자 수는?", _kofic_source(), None) is None
+
+
+def test_ai_generate_search_query_returns_none_without_a_question():
+    assert collector_module._ai_generate_search_query("", _kofic_source(), "key") is None
+
+
+def test_ai_generate_search_query_returns_model_query(monkeypatch):
+    fake = _FakeChatOpenAI(content=json.dumps({"query": "IPTV VOD 이용 건수"}))
+    monkeypatch.setattr("openai.OpenAI", fake)
+
+    query = collector_module._ai_generate_search_query("SK브로드밴드 IPTV 가입자 수는?", _kofic_source(), "key")
+
+    assert query == "IPTV VOD 이용 건수"
+    assert len(fake.calls) == 1
+
+
+def test_ai_generate_search_query_returns_none_on_api_error(monkeypatch, capsys):
+    monkeypatch.setattr("openai.OpenAI", _FakeChatOpenAI(raise_error=True))
+
+    query = collector_module._ai_generate_search_query("IPTV 가입자 수는?", _kofic_source(), "key")
+
+    assert query is None
+    assert "search-query generation failed" in capsys.readouterr().err
+
+
+def test_discover_kofic_detail_urls_from_search_uses_gpt_query_first(monkeypatch):
+    source = _kofic_source()
+    result = _make_result(
+        "본문" * 100, url="https://www.kofic.or.kr/kofic/business/board/selectBoardDetail.do?boardNumber=2&boardSeqNumber=74481"
+    )
+    client = _RecordingSearchClient(results_by_query={"IPTV VOD 이용 건수": [result]})
+    monkeypatch.setattr(collector_module, "_ai_generate_search_query", lambda *a, **k: "IPTV VOD 이용 건수")
+
+    urls = collector_module._discover_kofic_detail_urls_from_search(
+        client, source, ["영화산업"], question="IPTV 가입자 수는?", openai_api_key="key",
+    )
+
+    assert client.search_calls == ["IPTV VOD 이용 건수"]  # rule-based ladder never queried
+    assert urls == [
+        "https://www.kofic.or.kr/kofic/business/board/selectBoardDetail.do?boardNumber=2&boardSeqNumber=74481"
+    ]
+
+
+def test_discover_kofic_detail_urls_from_search_returns_empty_when_gpt_query_unavailable(monkeypatch):
+    # No rule-based ladder fallback anymore - a missing/failed GPT query
+    # means this function contributes nothing, full stop. The listing-page
+    # path (with its own GPT selection, then its own blind-newest fallback)
+    # is what actually catches this case, not a second search attempt here.
+    source = _kofic_source()
+    result = _make_result(
+        "본문" * 100, url="https://www.kofic.or.kr/kofic/business/board/selectBoardDetail.do?boardNumber=2&boardSeqNumber=1"
+    )
+    client = _RecordingSearchClient(default_results=[result])
+    monkeypatch.setattr(collector_module, "_ai_generate_search_query", lambda *a, **k: None)
+
+    urls = collector_module._discover_kofic_detail_urls_from_search(
+        client, source, ["영화산업"], question="", openai_api_key=None,
+    )
+
+    assert client.search_calls == []  # never even called client.search()
+    assert urls == []
+
+
+def test_discover_kofic_detail_urls_from_search_returns_empty_when_gpt_query_finds_nothing(monkeypatch):
+    source = _kofic_source()
+    client = _RecordingSearchClient(results_by_query={"무관한 쿼리": []})
+    monkeypatch.setattr(collector_module, "_ai_generate_search_query", lambda *a, **k: "무관한 쿼리")
+
+    urls = collector_module._discover_kofic_detail_urls_from_search(
+        client, source, ["영화산업"], question="질문", openai_api_key="key",
+    )
+
+    assert client.search_calls == ["무관한 쿼리"]  # tried exactly once, no second attempt
+    assert urls == []
+
+
+def _ai_gated_source(topics=None):
+    """A generic non-KOFIC source registered with the reusable
+    "ai_gated_search" collection_method - no listing page, no PDF, just plain
+    web articles reached through Firecrawl's domain-restricted search."""
+    return PlannedSource(
+        name="예시 산업 통계 포털",
+        url="https://stats.example-media.co.kr/reports",
+        collection_method=["ai_gated_search"],
+        reliability_tier="official",
+        topics=topics if topics is not None else ["IPTV 시장 통계", "미디어 통계"],
+    )
+
+
+def test_crawl_source_with_ai_gated_search_skips_entirely_when_gate_says_irrelevant(monkeypatch):
+    source = _ai_gated_source()
+    monkeypatch.setattr(collector_module, "_ai_source_gate_relevant", lambda *a, **k: False)
+
+    def _fail_if_called(*a, **k):
+        raise AssertionError("query generation must not run once the gate says irrelevant")
+
+    monkeypatch.setattr(collector_module, "_ai_generate_search_query", _fail_if_called)
+
+    docs = collector_module._crawl_source_with_ai_gated_search(
+        _RecordingSearchClient(), source, question="무관한 질문", openai_api_key="key"
+    )
+
+    assert docs == []
+
+
+def test_crawl_source_with_ai_gated_search_returns_empty_when_query_unavailable(monkeypatch):
+    # Same "no rule-based ladder fallback" policy as KOFIC's search discovery
+    # - a missing/failed GPT query means this source contributes nothing.
+    source = _ai_gated_source()
+    client = _RecordingSearchClient(default_results=[_make_result("본문" * 100)])
+    monkeypatch.setattr(collector_module, "_ai_source_gate_relevant", lambda *a, **k: True)
+    monkeypatch.setattr(collector_module, "_ai_generate_search_query", lambda *a, **k: None)
+
+    docs = collector_module._crawl_source_with_ai_gated_search(
+        client, source, question="IPTV 시장 규모는?", openai_api_key="key"
+    )
+
+    assert client.search_calls == []
+    assert docs == []
+
+
+def test_crawl_source_with_ai_gated_search_returns_empty_when_query_finds_nothing(monkeypatch):
+    source = _ai_gated_source()
+    client = _RecordingSearchClient(results_by_query={"IPTV 시장 통계": []})
+    monkeypatch.setattr(collector_module, "_ai_source_gate_relevant", lambda *a, **k: True)
+    monkeypatch.setattr(collector_module, "_ai_generate_search_query", lambda *a, **k: "IPTV 시장 통계")
+
+    docs = collector_module._crawl_source_with_ai_gated_search(
+        client, source, question="질문", openai_api_key="key"
+    )
+
+    assert client.search_calls == ["IPTV 시장 통계"]  # tried exactly once, no second attempt
+    assert docs == []
+
+
+def test_crawl_source_with_ai_gated_search_builds_documents_from_model_query(monkeypatch):
+    source = _ai_gated_source()
+    result = _make_result("보고서 본문" * 100, title="IPTV 시장 통계 2026", url="https://stats.example-media.co.kr/reports/1")
+    client = _RecordingSearchClient(results_by_query={"IPTV 가입자 통계": [result]})
+    monkeypatch.setattr(collector_module, "_ai_source_gate_relevant", lambda *a, **k: True)
+    monkeypatch.setattr(collector_module, "_ai_generate_search_query", lambda *a, **k: "IPTV 가입자 통계")
+
+    docs = collector_module._crawl_source_with_ai_gated_search(
+        client, source, question="IPTV 가입자 수는?", openai_api_key="key"
+    )
+
+    assert client.search_calls == ["IPTV 가입자 통계"]
+    assert len(docs) == 1
+    assert docs[0].source_id == source.name
+    assert docs[0].url == "https://stats.example-media.co.kr/reports/1"
+    assert docs[0].title == "IPTV 시장 통계 2026"
+    assert docs[0].content == "보고서 본문" * 100
+    assert docs[0].reliability_tier == "official"
+
+
+def test_crawl_source_with_ai_gated_search_scrapes_when_markdown_is_missing(monkeypatch):
+    source = _ai_gated_source()
+    result = _make_result(None, url="https://stats.example-media.co.kr/reports/2")
+    client = _RecordingSearchClient(results_by_query={"쿼리": [result]})
+    client.scrape = lambda url, formats: types.SimpleNamespace(markdown="직접 스크랩 본문" * 100)
+    monkeypatch.setattr(collector_module, "_ai_source_gate_relevant", lambda *a, **k: True)
+    monkeypatch.setattr(collector_module, "_ai_generate_search_query", lambda *a, **k: "쿼리")
+
+    docs = collector_module._crawl_source_with_ai_gated_search(
+        client, source, question="질문", openai_api_key="key"
+    )
+
+    assert len(docs) == 1
+    assert docs[0].content == "직접 스크랩 본문" * 100
+
+
+def test_crawl_special_source_dispatches_ai_gated_search_method(monkeypatch):
+    source = _ai_gated_source()
+    calls = []
+    monkeypatch.setattr(
+        collector_module,
+        "_crawl_source_with_ai_gated_search",
+        lambda client, src, question="", openai_api_key=None: calls.append((src.name, question, openai_api_key))
+        or ["sentinel"],
+    )
+
+    result = collector_module._crawl_special_source(
+        _RecordingSearchClient(), source, "firecrawl-key", ["키워드"], question="질문", openai_api_key="ai-key"
+    )
+
+    assert result == ["sentinel"]
+    assert calls == [(source.name, "질문", "ai-key")]
+
+
+def test_crawl_special_source_dispatches_kofic_pdf_method(monkeypatch):
+    source = _kofic_source()
+    calls = []
+    monkeypatch.setattr(
+        collector_module,
+        "_crawl_kofic_pdf_source",
+        lambda client, src, api_key, keywords, question="", openai_api_key=None: calls.append(
+            (src.name, api_key, keywords, question, openai_api_key)
+        )
+        or ["sentinel"],
+    )
+
+    result = collector_module._crawl_special_source(
+        _RecordingSearchClient(), source, "firecrawl-key", ["영화산업"], question="질문", openai_api_key="ai-key"
+    )
+
+    assert result == ["sentinel"]
+    assert calls == [(source.name, "firecrawl-key", ["영화산업"], "질문", "ai-key")]
+
+
+def test_crawl_special_source_returns_empty_for_a_source_with_no_special_method():
+    source = PlannedSource(name="일반", url="https://example.com", collection_method=["firecrawl_search"])
+
+    result = collector_module._crawl_special_source(
+        _RecordingSearchClient(), source, "firecrawl-key", ["키워드"]
+    )
+
+    assert result == []
+
+
+def test_crawl_source_dispatches_ai_gated_search_in_the_legacy_per_source_path(monkeypatch):
+    source = _ai_gated_source()
+    monkeypatch.setenv(collector_module._HARNESS_API_KEY_ENV_VAR, "ai-key")
+
+    def _fail_if_called(*a, **k):
+        raise AssertionError("legacy Firecrawl keyword search must not run for an ai_gated_search source")
+
+    monkeypatch.setattr(collector_module, "_crawl_web_source", _fail_if_called)
+    calls = []
+    monkeypatch.setattr(
+        collector_module,
+        "_crawl_source_with_ai_gated_search",
+        lambda client, src, question="", openai_api_key=None: calls.append((src.name, question, openai_api_key))
+        or ["sentinel"],
+    )
+
+    result = _crawl_source(
+        _RecordingSearchClient(),
+        source,
+        "firecrawl-key",
+        ["키워드"],
+        search_context=WebSearchContext(question="IPTV 시장 규모는?"),
+    )
+
+    assert result == ["sentinel"]
+    assert calls == [(source.name, "IPTV 시장 규모는?", "ai-key")]
+
+
+def test_crawl_source_ai_gated_search_uses_empty_question_without_search_context(monkeypatch):
+    source = _ai_gated_source()
+    monkeypatch.delenv(collector_module._HARNESS_API_KEY_ENV_VAR, raising=False)
+    calls = []
+    monkeypatch.setattr(
+        collector_module,
+        "_crawl_source_with_ai_gated_search",
+        lambda client, src, question="", openai_api_key=None: calls.append((question, openai_api_key)) or [],
+    )
+
+    _crawl_source(_RecordingSearchClient(), source, "firecrawl-key", ["키워드"])
+
+    assert calls == [("", None)]
+
+
+def test_broadband_question_harness_treats_ai_gated_search_source_as_special(monkeypatch):
+    """Same guarantee as KOFIC (test_broadband_question_harness_keeps_special_
+    kofic_collector): a source registered with "ai_gated_search" always runs
+    its own dedicated collector, regardless of whether the question-level
+    harness's own top-N selection would have included it."""
+    monkeypatch.setenv("FIRECRAWL_API_KEY", "test-key")
+    monkeypatch.setenv(collector_module._HARNESS_API_KEY_ENV_VAR, "test-key")
+    web_source = PlannedSource(name="뉴스", url="https://news.example.com", collection_method=["firecrawl_search"])
+    gated = _ai_gated_source()
+    plan = SourcePlan(
+        request_id="req",
+        sector_id="sk_broadband",
+        planned_sources=[web_source],  # the ai_gated_search source may be outside the legacy top-N
+        registered_sources=[web_source, gated],
+        question_keywords=["OTT"],
+    )
+    monkeypatch.setattr(collector_module, "Firecrawl", lambda api_key: object())
+    monkeypatch.setattr(
+        collector_module,
+        "_run_question_ai_harness",
+        lambda *args: WebSearchHarnessResult(
+            documents=[
+                SourceDocument(doc_id="w1", source_id="뉴스", url="https://news.example.com/1", content="본문" * 100),
+            ],
+            sufficient=True,
+        ),
+    )
+    special_calls = []
+
+    def fake_ai_gated(client, src, question="", openai_api_key=None):
+        special_calls.append(src.name)
+        return [
+            SourceDocument(doc_id="g1", source_id=src.name, url="https://stats.example-media.co.kr/1", content="본문" * 100),
+        ]
+
+    monkeypatch.setattr(collector_module, "_crawl_source_with_ai_gated_search", fake_ai_gated)
+
+    docs = _collected_documents(collect(plan))
+
+    assert special_calls == [gated.name]
+    assert {doc.source_id for doc in docs} == {"뉴스", gated.name}
+
+
 def test_broadband_collect_continues_when_one_source_fails(monkeypatch):
     monkeypatch.setenv("FIRECRAWL_API_KEY", "test-key")
     sources = [
@@ -244,7 +770,7 @@ def test_broadband_collect_continues_when_one_source_fails(monkeypatch):
 
     monkeypatch.setattr(collector_module, "Firecrawl", lambda api_key: _PerDomainClient())
 
-    docs = collect(plan)
+    docs = _collected_documents(collect(plan))
 
     assert len(docs) == 1
     assert docs[0].source_id == "ok"
@@ -271,7 +797,7 @@ def test_broadband_collect_caps_total_documents_at_twelve(monkeypatch):
 
     monkeypatch.setattr(collector_module, "Firecrawl", lambda api_key: _TwoResultsClient())
 
-    docs = collect(plan)
+    docs = _collected_documents(collect(plan))
 
     assert len(docs) == 12
 
@@ -303,6 +829,7 @@ def test_broadband_kofic_source_bypasses_harness_even_when_enabled(monkeypatch):
     attachment = types.SimpleNamespace(download_name="2025년 상반기 한국 영화산업 결산 보고서.pdf")
     parsed = types.SimpleNamespace(detail_url=search_result.url, attachment=attachment, markdown="KOFIC PDF 본문" * 100)
     monkeypatch.setattr(collector_module, "collect_pdf_markdown_from_detail_url", lambda detail_url, api_key: parsed)
+    monkeypatch.setattr(collector_module, "_ai_generate_search_query", lambda *a, **k: "영화산업")
 
     docs = _crawl_source(_FastClient([search_result]), source, "test-key", ["영화산업", "OTT"])
 
@@ -337,16 +864,27 @@ def test_broadband_collect_runs_question_harness_once_for_all_sources(monkeypatc
 
     monkeypatch.setattr(collector_module, "run_question_search_harness_result", fake_harness)
 
-    docs = collect(plan)
+    result = collect(plan)
+    assert isinstance(result, SourceCollectionResult)
+    assert result.collection_mode == "ai_search_harness"
+    assert result.minimum_validated_documents == 5
+    docs = result.documents
 
     assert len(docs) == 2
     assert docs[0].source_id == "broken"
     assert len(calls) == 1
     assert calls[0][0] == sources
-    assert calls[0][2].target_docs == 6
-    assert calls[0][2].min_scraped_docs_for_sufficient == 2
+    assert calls[0][2].target_docs == 5
+    assert calls[0][2].max_collected_docs == 10
+    assert calls[0][2].min_scraped_docs_for_sufficient == 5
     assert calls[0][2].min_independent_sources_for_sufficient == 2
     assert calls[0][2].assess_scraped_evidence is True
+    # Raised from the ai_search_harness module default of 2 -> more raw
+    # documents considered per round, with the scrape-call ceiling raised to
+    # match so it isn't the thing actually bounding each round instead.
+    assert calls[0][2].max_candidates_per_round == 5
+    assert calls[0][2].max_rounds == 3
+    assert calls[0][2].max_total_scrape_calls == 25
 
 
 def test_broadband_question_harness_keeps_special_kofic_collector(monkeypatch):
@@ -371,15 +909,20 @@ def test_broadband_question_harness_keeps_special_kofic_collector(monkeypatch):
         "_run_question_ai_harness",
         lambda *args: WebSearchHarnessResult(
             documents=[
-                SourceDocument(doc_id="w1", source_id="뉴스1", url="https://news.example.com/1", content="본문" * 100),
-                SourceDocument(doc_id="w2", source_id="뉴스2", url="https://other.example.com/2", content="본문" * 100),
+                SourceDocument(
+                    doc_id=f"w{index}",
+                    source_id=f"뉴스{index}",
+                    url=f"https://news{index}.example.com/{index}",
+                    content="본문" * 100,
+                )
+                for index in range(1, 8)
             ],
             sufficient=True,
         ),
     )
     special_calls = []
 
-    def fake_kofic(client, source, api_key, keywords):
+    def fake_kofic(client, source, api_key, keywords, **kwargs):
         special_calls.append(source.name)
         return [
             SourceDocument(doc_id="k1", source_id=source.name, url="https://www.kofic.or.kr/report-1", content="본문" * 100),
@@ -388,10 +931,11 @@ def test_broadband_question_harness_keeps_special_kofic_collector(monkeypatch):
 
     monkeypatch.setattr(collector_module, "_crawl_kofic_pdf_source", fake_kofic)
 
-    docs = collect(plan)
+    docs = _collected_documents(collect(plan))
 
     assert special_calls == ["영화진흥위원회(KOFIC)"]
-    assert [doc.doc_id for doc in docs] == ["w1", "w2", "k1", "k2"]
+    assert len(docs) == 9
+    assert [doc.doc_id for doc in docs] == ["w1", "w2", "w3", "w4", "w5", "w6", "w7", "k1", "k2"]
 
 
 def test_broadband_question_harness_rejects_fewer_than_two_documents(monkeypatch):
@@ -453,7 +997,7 @@ def test_broadband_question_harness_accepts_partial_coverage_instead_of_all_or_n
         ),
     )
 
-    docs = collect(plan)
+    docs = _collected_documents(collect(plan))
 
     assert [doc.doc_id for doc in docs] == ["a", "b"]
 
@@ -493,12 +1037,12 @@ def test_broadband_question_harness_counts_kofic_toward_sufficiency(monkeypatch)
     monkeypatch.setattr(
         collector_module,
         "_crawl_kofic_pdf_source",
-        lambda *args: [
+        lambda *args, **kwargs: [
             SourceDocument(doc_id="k1", source_id="영화진흥위원회(KOFIC)", url="https://kofic.example.com/1", content="본문" * 100)
         ],
     )
 
-    docs = collect(plan)
+    docs = _collected_documents(collect(plan))
 
     assert {doc.doc_id for doc in docs} == {"a", "k1"}
 
@@ -767,6 +1311,14 @@ def _make_response(
     return types.SimpleNamespace(choices=[types.SimpleNamespace(message=message)])
 
 
+def _make_quote_repair_response(repairs, refusal=None):
+    message = types.SimpleNamespace(
+        content=json.dumps({"repairs": repairs}, ensure_ascii=False),
+        refusal=refusal,
+    )
+    return types.SimpleNamespace(choices=[types.SimpleNamespace(message=message)])
+
+
 class _FakeCompletions:
     def __init__(self, response):
         self._response = response
@@ -780,6 +1332,25 @@ class _FakeCompletions:
 class _FakeOpenAI:
     def __init__(self, response):
         self.chat = types.SimpleNamespace(completions=_FakeCompletions(response))
+
+
+class _SequenceFakeCompletions:
+    def __init__(self, responses):
+        self._responses = list(responses)
+        self.calls = []
+
+    def create(self, **kwargs):
+        self.calls.append(kwargs)
+        if not self._responses:
+            raise AssertionError("no more fake analyzer responses queued")
+        return self._responses.pop(0)
+
+
+class _SequenceFakeOpenAI:
+    def __init__(self, responses):
+        self.chat = types.SimpleNamespace(
+            completions=_SequenceFakeCompletions(responses)
+        )
 
 
 def test_broadband_analyzer_uses_structured_schema(monkeypatch):
@@ -815,6 +1386,81 @@ def test_broadband_analyzer_uses_structured_schema(monkeypatch):
         "OTT와 IPTV 경쟁 변화",
         "경쟁사별 가입자 수치",
     ]
+    assert "content" not in user_payload["document"]
+    assert user_payload["document"]["evidence_passages"][0]["passage_id"] == "P001"
+
+
+def test_broadband_analyzer_chunks_any_long_pdf_and_merges_one_document(monkeypatch):
+    monkeypatch.setenv("TRENDSPARC_SK_BROADBAND_ANALYZER_API_KEY", "test-key")
+    first_quote = "PDF 앞부분에 IPTV 시장 현황이 있다."
+    later_quote = "2026년 IPTV 가입자는 120만 명이다."
+    document = SourceDocument(
+        doc_id="kmcc:70246",
+        source_id="방송미디어통신위원회",
+        title="방송시장 보고서",
+        url="https://www.kmcc.go.kr/download.do?fileSeq=70246",
+        content=first_quote + ("가" * 11900) + "\n\n" + later_quote + ("나" * 1000),
+        media_type="application/pdf",
+        reliability_tier="official",
+    )
+    first_response = _make_response(
+        summary="시장 현황 요약",
+        grounded_claims=[
+            {
+                "claim_id": "c1",
+                "claim_type": "key_point",
+                "claim": "IPTV 시장 현황을 제시한다.",
+                "evidence_quote": first_quote,
+                "evidence_location": "본문 앞부분",
+                "as_of_date": None,
+                "confidence": "high",
+            }
+        ],
+    )
+    second_response = _make_response(
+        summary="가입자 수치 요약",
+        grounded_claims=[
+            {
+                "claim_id": "c1",
+                "claim_type": "metric",
+                "claim": "2026년 IPTV 가입자는 120만 명이다.",
+                "evidence_quote": later_quote,
+                "evidence_location": "후반부 표",
+                "as_of_date": "2026년",
+                "confidence": "high",
+            }
+        ],
+        metric_points=[
+            {
+                "label": "IPTV 가입자",
+                "period": "2026년",
+                "value": 120,
+                "unit": "만 명",
+                "evidence_claim_id": "c1",
+            }
+        ],
+    )
+    fake_openai = _SequenceFakeOpenAI([first_response, second_response])
+    monkeypatch.setattr(analyzer_module, "OpenAI", lambda api_key: fake_openai)
+    monkeypatch.setattr(analyzer_module, "_load_system_prompt", lambda: "system prompt")
+
+    results = analyze(
+        [document],
+        "IPTV 시장 현황과 가입자는?",
+        ["OTT와 IPTV 경쟁 변화"],
+    )
+
+    assert len(results) == 1
+    assert len(fake_openai.chat.completions.calls) == 2
+    assert [claim.claim_id for claim in results[0].grounded_claims] == [
+        "pdf1:c1",
+        "pdf2:c1",
+    ]
+    assert results[0].grounded_claims[1].evidence_location.startswith("PDF 청크 2/2")
+    assert results[0].grounded_claims[1].evidence_passage_id.startswith("pdf2:P")
+    assert results[0].metric_points[0].evidence_claim_id == "pdf2:c1"
+    assert results[0].metric_points[0].evidence_quote == later_quote
+    assert results[0].source_url == document.url
 
 
 def test_broadband_analyzer_rejects_claim_quote_not_found_in_source(monkeypatch):
@@ -847,15 +1493,168 @@ def test_broadband_analyzer_rejects_claim_quote_not_found_in_source(monkeypatch)
     assert result.usable_for_synthesis is False
 
 
+def test_broadband_analyzer_repairs_failed_quote_once_without_changing_claim(monkeypatch):
+    monkeypatch.setenv("TRENDSPARC_SK_BROADBAND_ANALYZER_API_KEY", "test-key")
+    exact_quote = "2026년 IPTV 가입자는 120만 명으로 집계됐다."
+    document = _document().model_copy(
+        update={"content": f"시장 개요 문단이다.\n\n{exact_quote}\n\n후속 설명이다."}
+    )
+    original_claim = "2026년 IPTV 가입자는 120만 명이다."
+    analysis_response = _make_response(
+        grounded_claims=[
+            {
+                "claim_id": "c1",
+                "claim_type": "metric",
+                "claim": original_claim,
+                "evidence_passage_id": "P001",
+                "evidence_quote": "가입자가 약 120만 명이다.",
+                "evidence_location": "가입자 현황",
+                "as_of_date": "2026년",
+                "confidence": "high",
+            }
+        ]
+    )
+    repair_response = _make_quote_repair_response(
+        [
+            {
+                "claim_id": "c1",
+                "evidence_passage_id": "P002",
+                "evidence_quote": exact_quote,
+            }
+        ]
+    )
+    fake_openai = _SequenceFakeOpenAI([analysis_response, repair_response])
+    monkeypatch.setattr(analyzer_module, "OpenAI", lambda api_key: fake_openai)
+    monkeypatch.setattr(analyzer_module, "_load_system_prompt", lambda: "system prompt")
+
+    result = analyze([document], "2026년 IPTV 가입자는?")[0]
+
+    assert len(fake_openai.chat.completions.calls) == 2
+    assert len(result.grounded_claims) == 1
+    assert result.grounded_claims[0].claim == original_claim
+    assert result.grounded_claims[0].evidence_quote == exact_quote
+    assert result.grounded_claims[0].evidence_passage_id == "P002"
+    assert result.analysis_validation_status == "verified"
+    assert result.usable_for_synthesis is True
+    repair_payload = json.loads(
+        fake_openai.chat.completions.calls[1]["messages"][1]["content"]
+    )
+    assert repair_payload["claims_to_repair"][0]["claim"] == original_claim
+    assert "P002" in repair_payload["claims_to_repair"][0]["candidate_passage_ids"]
+    assert any(
+        passage["passage_id"] == "P002"
+        for passage in repair_payload["candidate_passages"]
+    )
+
+
+def test_broadband_analyzer_keeps_valid_claim_when_other_quote_repair_fails(monkeypatch):
+    monkeypatch.setenv("TRENDSPARC_SK_BROADBAND_ANALYZER_API_KEY", "test-key")
+    exact_quote = "OTT 시장 변화와 IPTV 경쟁에 관한 본문입니다."
+    analysis_response = _make_response(
+        grounded_claims=[
+            {
+                "claim_id": "good",
+                "claim_type": "key_point",
+                "claim": "OTT와 IPTV가 경쟁한다.",
+                "evidence_passage_id": "P001",
+                "evidence_quote": exact_quote,
+                "evidence_location": "본문",
+                "as_of_date": None,
+                "confidence": "high",
+            },
+            {
+                "claim_id": "bad",
+                "claim_type": "risk",
+                "claim": "원문에 없는 위험이다.",
+                "evidence_passage_id": "P001",
+                "evidence_quote": "원문에 없는 인용",
+                "evidence_location": None,
+                "as_of_date": None,
+                "confidence": "low",
+            },
+        ]
+    )
+    repair_response = _make_quote_repair_response(
+        [
+            {
+                "claim_id": "bad",
+                "evidence_passage_id": "P001",
+                "evidence_quote": "여전히 원문에 없는 인용",
+            }
+        ]
+    )
+    fake_openai = _SequenceFakeOpenAI([analysis_response, repair_response])
+    monkeypatch.setattr(analyzer_module, "OpenAI", lambda api_key: fake_openai)
+    monkeypatch.setattr(analyzer_module, "_load_system_prompt", lambda: "system prompt")
+
+    result = analyze([_document()], "OTT 시장 변화는?")[0]
+
+    assert [claim.claim_id for claim in result.grounded_claims] == ["good"]
+    assert result.analysis_validation_status == "partial_grounding"
+    assert result.usable_for_synthesis is True
+
+
+def test_broadband_analyzer_normalizes_safe_pdf_spacing_artifacts(monkeypatch):
+    monkeypatch.setenv("TRENDSPARC_SK_BROADBAND_ANALYZER_API_KEY", "test-key")
+    document = _document().model_copy(
+        update={"content": "IPTV\u00a0가입자는 120만\u200b 명이다."}
+    )
+    response = _make_response(
+        grounded_claims=[
+            {
+                "claim_id": "c1",
+                "claim_type": "metric",
+                "claim": "IPTV 가입자는 120만 명이다.",
+                "evidence_passage_id": "P001",
+                "evidence_quote": "IPTV 가입자는 120만 명이다.",
+                "evidence_location": "본문",
+                "as_of_date": None,
+                "confidence": "high",
+            }
+        ]
+    )
+    fake_openai = _FakeOpenAI(response)
+    monkeypatch.setattr(analyzer_module, "OpenAI", lambda api_key: fake_openai)
+    monkeypatch.setattr(analyzer_module, "_load_system_prompt", lambda: "system prompt")
+
+    result = analyze([document], "IPTV 가입자는?")[0]
+
+    assert [claim.claim_id for claim in result.grounded_claims] == ["c1"]
+    assert result.analysis_validation_status == "verified"
+
+
 def test_broadband_analyzer_keeps_only_metrics_found_in_source(monkeypatch):
     monkeypatch.setenv("TRENDSPARC_SK_BROADBAND_ANALYZER_API_KEY", "test-key")
     document = _document().model_copy(
         update={"content": "2025년 IPTV 가입자는 100만 명이다. OTT 시장 변화와 IPTV 경쟁에 관한 본문입니다."}
     )
     response = _make_response(
+        grounded_claims=[
+            {
+                "claim_id": "metric1",
+                "claim_type": "metric",
+                "claim": "2025년 IPTV 가입자는 100만 명이다.",
+                "evidence_quote": "2025년 IPTV 가입자는 100만 명이다.",
+                "evidence_location": "본문",
+                "as_of_date": "2025년",
+                "confidence": "high",
+            }
+        ],
         metric_points=[
-            {"label": "IPTV 가입자", "period": "2025년", "value": 100, "unit": "만 명"},
-            {"label": "매출", "period": "2024년", "value": 999, "unit": "억원"},
+            {
+                "label": "IPTV 가입자",
+                "period": "2025년",
+                "value": 100,
+                "unit": "만 명",
+                "evidence_claim_id": "metric1",
+            },
+            {
+                "label": "매출",
+                "period": "2024년",
+                "value": 999,
+                "unit": "억원",
+                "evidence_claim_id": "metric1",
+            },
         ]
     )
     fake_openai = _FakeOpenAI(response)
@@ -867,6 +1666,8 @@ def test_broadband_analyzer_keeps_only_metrics_found_in_source(monkeypatch):
     assert len(result.metric_points) == 1
     assert result.metric_points[0].period == "2025년"
     assert result.metric_points[0].value == 100
+    assert result.metric_points[0].evidence_claim_id == "metric1"
+    assert result.metric_points[0].evidence_quote == "2025년 IPTV 가입자는 100만 명이다."
 
 
 def test_broadband_analyzer_keeps_only_comparisons_linked_to_verified_claims(monkeypatch):

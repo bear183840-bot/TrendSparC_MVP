@@ -38,6 +38,7 @@ from common.contracts import (
     ReportPlan,
     ReportPurposeClassification,
     SectorRoute,
+    SourceCollectionResult,
     SourceDocument,
     SourceCollectionEvent,
     SourcePlan,
@@ -124,6 +125,7 @@ class PipelineResult(BaseModel):
     sector_route: Optional[SectorRoute] = None
     source_plan: Optional[SourcePlan] = None
     collection_events: list[SourceCollectionEvent] = Field(default_factory=list)
+    source_collection: Optional[SourceCollectionResult] = None
     report_purpose: Optional[ReportPurposeClassification] = None
     # Raw documents exactly as returned by the sector collector, before the
     # processor strips boilerplate or the validator drops documents. Kept so
@@ -137,6 +139,12 @@ class PipelineResult(BaseModel):
     layout: Optional[DynamicLayout] = None
     halted_at_stage: Optional[str] = None
     direct_answer: Optional[str] = None
+
+
+def _normalize_collection_output(output) -> SourceCollectionResult:
+    if isinstance(output, SourceCollectionResult):
+        return output
+    return SourceCollectionResult(documents=list(output))
 
 
 def _call_sector_adapter_stage(sector_route: SectorRoute, role: str, *args):
@@ -341,10 +349,17 @@ def run_pipeline(
             else:
                 output = _call_sector_adapter_stage(result.sector_route, role, *args)
             if role == "collector":
+                result.source_collection = _normalize_collection_output(output)
+                output = list(result.source_collection.documents)
                 result.collected_source_documents = list(output)
             if role == "validator":
                 profile = result.sector_route.matched_profile
-                minimum = profile.min_validated_documents
+                minimum = (
+                    result.source_collection.minimum_validated_documents
+                    if result.source_collection
+                    and result.source_collection.minimum_validated_documents is not None
+                    else profile.min_validated_documents
+                )
                 max_recollections = profile.max_validation_recollection_attempts
                 recollection_attempt = 0
                 while minimum > 0 and len(output) < minimum and recollection_attempt < max_recollections:
@@ -387,7 +402,13 @@ def run_pipeline(
                         )
                     finally:
                         reset_collection_events(progress_token)
+                    retry_collection = _normalize_collection_output(retry_raw)
+                    retry_raw = list(retry_collection.documents)
                     result.collected_source_documents.extend(retry_raw)
+                    if result.source_collection is not None:
+                        result.source_collection = result.source_collection.model_copy(
+                            update={"documents": list(result.collected_source_documents)}
+                        )
                     result.trace.append(
                         StageTrace(stage="sector_adapter.collector.recollection", status=StageStatus.OK)
                     )
@@ -429,10 +450,11 @@ def run_pipeline(
                 usable = _usable_analyses(output)
                 profile = result.sector_route.matched_profile
                 minimum = profile.min_analyzed_documents
+                target = max(minimum, profile.target_analyzed_documents)
                 max_recollections = profile.max_analysis_recollection_attempts
                 recollection_attempt = 0
 
-                while minimum > 0 and len(usable) < minimum and recollection_attempt < max_recollections:
+                while target > 0 and len(usable) < target and recollection_attempt < max_recollections:
                     recollection_attempt += 1
                     previous_context = result.source_plan.search_context
                     if previous_context is None:
@@ -460,7 +482,8 @@ def run_pipeline(
                                 *previous_context.validation_feedback,
                                 (
                                     f"Analyzer retained {len(usable)} usable documents; "
-                                    f"collect replacement evidence for missing needs: {missing_needs}."
+                                    f"collect toward the target of {target} usable documents "
+                                    f"with replacement evidence for missing needs: {missing_needs}."
                                 ),
                             ],
                         }
@@ -476,7 +499,13 @@ def run_pipeline(
                         )
                     finally:
                         reset_collection_events(progress_token)
+                    retry_collection = _normalize_collection_output(retry_raw)
+                    retry_raw = list(retry_collection.documents)
                     result.collected_source_documents.extend(retry_raw)
+                    if result.source_collection is not None:
+                        result.source_collection = result.source_collection.model_copy(
+                            update={"documents": list(result.collected_source_documents)}
+                        )
                     result.trace.append(
                         StageTrace(stage="sector_adapter.collector.analysis_recollection", status=StageStatus.OK)
                     )
@@ -525,6 +554,12 @@ def run_pipeline(
                             "insufficient usable analyses after bounded recollection "
                             f"({len(usable)} < {minimum})"
                         ),
+                    )
+                if target > 0 and len(usable) < target:
+                    print(
+                        "[synthesis] proceeding below analyzer target after bounded "
+                        f"recollection ({len(usable)} < {target}); minimum {minimum} satisfied",
+                        file=sys.stderr,
                     )
 
                 for analysis in output:

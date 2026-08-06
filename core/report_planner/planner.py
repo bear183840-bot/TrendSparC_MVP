@@ -15,7 +15,12 @@ from __future__ import annotations
 from pathlib import Path
 
 from audience.contracts import load_audience_profile
-from common.contracts import ReportPlan, ReportPurposeClassification, TrendSynthesis
+from common.contracts import (
+    ReportPlan,
+    ReportPurposeClassification,
+    SectionEvidenceRefs,
+    TrendSynthesis,
+)
 from core.report_purpose.classifier import recommended_sections_for
 
 _BASE_SECTIONS = ["overview"]
@@ -43,6 +48,41 @@ _SECTION_GROUPS = {
     "recommended_action": "action",
     "strategic_recommendation": "action",
     "improvement_plan": "action",
+    "decision_required": "action",
+}
+
+_CLAIM_TYPES_BY_SECTION = {
+    "overview": {"key_point", "business_impact"},
+    "key_points": {"key_point"},
+    "current_situation": {"key_point", "business_impact", "comparison", "metric"},
+    "market_status": {"key_point", "business_impact", "comparison", "metric"},
+    "near_term_outlook": {"opportunity", "monitoring", "key_point"},
+    "issue": {"risk", "weakness", "key_point"},
+    "problem": {"risk", "weakness", "key_point"},
+    "root_cause": {"risk", "weakness", "key_point"},
+    "risk": {"risk", "weakness"},
+    "risk_and_opportunity": {"risk", "opportunity", "strength", "weakness"},
+    "impact": {"business_impact", "risk", "opportunity"},
+    "trend": {"key_point", "opportunity", "monitoring"},
+    "opportunity": {"opportunity", "strength"},
+    "investment_signal": {"opportunity", "business_impact", "monitoring"},
+    "response_actions": {"action"},
+    "recommended_action": {"action"},
+    "strategic_recommendation": {"action"},
+    "improvement_plan": {"action"},
+    "decision_required": {"action"},
+    "key_metrics": {"key_point", "business_impact", "monitoring", "metric"},
+    "timeline": {"key_point", "monitoring"},
+}
+
+_METRIC_SECTIONS = {"current_situation", "market_status", "impact", "key_metrics", "timeline", "investment_signal"}
+_COMPARISON_SECTIONS = {"current_situation", "market_status", "impact"}
+_CONTENT_SENSITIVE_SECTIONS = {
+    "key_metrics": "검증된 수치 자료가 없음",
+    "timeline": "서로 다른 시점의 근거가 충분하지 않음",
+    "market_status": "시장 수치 또는 비교 근거가 없음",
+    "risk_and_opportunity": "위험·기회 근거가 없음",
+    "recommended_action": "검증된 행동 근거가 없음",
 }
 
 
@@ -65,6 +105,106 @@ def _load_intent_emphasis(purpose_id: str) -> str | None:
         if path.is_file():
             return path.read_text(encoding="utf-8")
     return None
+
+
+def _has_timeline_evidence(synthesis: TrendSynthesis) -> bool:
+    periods_by_label: dict[str, set[str]] = {}
+    for point in synthesis.metric_series:
+        if point.label and point.period:
+            periods_by_label.setdefault(point.label, set()).add(point.period)
+    if any(len(periods) >= 2 for periods in periods_by_label.values()):
+        return True
+    claim_dates = {
+        claim.as_of_date for claim in synthesis.grounded_claims if claim.as_of_date
+    }
+    return len(claim_dates) >= 2
+
+
+def _has_claim_slot(sections: list[str], claim_types: set[str]) -> bool:
+    return any(
+        bool(_CLAIM_TYPES_BY_SECTION.get(section, set()) & claim_types)
+        for section in sections
+    )
+
+
+def _content_backed_sections(
+    synthesis: TrendSynthesis, existing_sections: list[str]
+) -> list[str]:
+    sections: list[str] = []
+    claim_types = {claim.claim_type for claim in synthesis.grounded_claims}
+    if synthesis.metric_series and not any(
+        section in _METRIC_SECTIONS for section in existing_sections
+    ):
+        sections.append("key_metrics")
+    if synthesis.comparison_points and not any(
+        section in _COMPARISON_SECTIONS for section in existing_sections
+    ):
+        sections.append("market_status")
+    if _has_timeline_evidence(synthesis) and "timeline" not in existing_sections:
+        sections.append("timeline")
+    strategic_types = {"risk", "opportunity", "strength", "weakness"}
+    if claim_types & strategic_types and not _has_claim_slot(
+        existing_sections, claim_types & strategic_types
+    ):
+        sections.append("risk_and_opportunity")
+    if (
+        "action" in claim_types or synthesis.recommended_actions
+    ) and not _has_claim_slot(existing_sections, {"action"}):
+        sections.append("recommended_action")
+    if (synthesis.sources or synthesis.source_ids) and "sources" not in existing_sections:
+        sections.append("sources")
+    return sections
+
+
+def _section_evidence_refs(
+    section: str, synthesis: TrendSynthesis
+) -> SectionEvidenceRefs:
+    allowed_types = _CLAIM_TYPES_BY_SECTION.get(section)
+    if section == "sources":
+        claims = list(synthesis.grounded_claims)
+    elif allowed_types is None:
+        claims = []
+    else:
+        claims = [
+            claim for claim in synthesis.grounded_claims
+            if claim.claim_type in allowed_types
+        ]
+    if section == "timeline":
+        claims = [claim for claim in claims if claim.as_of_date]
+    claim_ids = [claim.synthesis_claim_id for claim in claims]
+    claim_id_set = set(claim_ids)
+    conclusion_ids = [
+        conclusion.conclusion_id
+        for conclusion in synthesis.conclusions
+        if section == "overview"
+        or claim_id_set.intersection(conclusion.supporting_claim_ids)
+    ]
+    metric_ids = []
+    if section in _METRIC_SECTIONS:
+        metric_ids = [
+            point.metric_id for point in synthesis.metric_series if point.metric_id
+        ]
+        if section == "timeline" and not _has_timeline_evidence(synthesis):
+            metric_ids = []
+    comparison_ids = [
+        point.comparison_id
+        for point in synthesis.comparison_points
+        if section in _COMPARISON_SECTIONS and point.comparison_id
+    ]
+    return SectionEvidenceRefs(
+        conclusion_ids=list(dict.fromkeys(conclusion_ids)),
+        claim_ids=list(dict.fromkeys(claim_ids)),
+        metric_ids=list(dict.fromkeys(metric_ids)),
+        comparison_ids=list(dict.fromkeys(comparison_ids)),
+    )
+
+
+def _has_section_evidence(section: str, refs: SectionEvidenceRefs) -> bool:
+    if section == "timeline":
+        return bool(refs.metric_ids or refs.claim_ids)
+    return bool(
+        refs.conclusion_ids or refs.claim_ids or refs.metric_ids or refs.comparison_ids
+    )
 
 
 def _coerce_report_purpose(
@@ -110,15 +250,38 @@ def plan_report(
         # content_quality_validator.detect_secondary_purpose.
         purpose_sections = [*purpose_sections, *recommended_sections_for(purpose.secondary_purpose_id)]
     if profile.report_structure:
-        # A fixed report_structure is a deliberate, stable page shape for this
-        # audience (today: executive) — purpose still shapes the CONTENT written
-        # into each fixed section (see report_generator/generator.py), but it
-        # must not inject additional top-level sections on top of that shape.
-        sections = _dedupe_semantic_sections(list(profile.report_structure))
+        # Keep the audience's required page shape stable. Evidence-backed
+        # sections may still be appended when the collected material has a
+        # distinct shape (for example, a real comparison table).
+        audience_sections = list(profile.report_structure)
     else:
         # No fixed shape for this audience — purpose-recommended sections are
         # the primary structure, with the audience's focus areas layered in.
-        sections = _dedupe_semantic_sections(_BASE_SECTIONS + list(purpose_sections) + list(profile.focus))
+        audience_sections = _BASE_SECTIONS + list(purpose_sections) + list(profile.focus)
+
+    candidate_sections = _dedupe_semantic_sections(
+        [*audience_sections, *_content_backed_sections(synthesis, audience_sections)]
+    )
+    required_groups = {
+        _SECTION_GROUPS.get(section, section)
+        for section in [*audience_sections, *_BASE_SECTIONS, *purpose_sections]
+    }
+    sections: list[str] = []
+    section_evidence_map: dict[str, SectionEvidenceRefs] = {}
+    omitted_sections: dict[str, str] = {}
+    for section in candidate_sections:
+        refs = _section_evidence_refs(section, synthesis)
+        group = _SECTION_GROUPS.get(section, section)
+        omission_reason = _CONTENT_SENSITIVE_SECTIONS.get(section)
+        if (
+            omission_reason
+            and group not in required_groups
+            and not _has_section_evidence(section, refs)
+        ):
+            omitted_sections[section] = omission_reason
+            continue
+        sections.append(section)
+        section_evidence_map[section] = refs
 
     return ReportPlan(
         request_id=synthesis.request_id,
@@ -126,6 +289,8 @@ def plan_report(
         primary_intent=purpose_id,
         report_purpose=purpose,
         sections=sections,
+        section_evidence_map=section_evidence_map,
+        omitted_sections=omitted_sections,
         format=profile.format_preference,
         intent_emphasis=_load_intent_emphasis(purpose_id),
     )

@@ -1,4 +1,10 @@
-from common.contracts import ComparisonPoint, DocumentAnalysis, MetricPoint, ReportPurposeClassification
+from common.contracts import (
+    ComparisonPoint,
+    DocumentAnalysis,
+    GroundedClaim,
+    MetricPoint,
+    ReportPurposeClassification,
+)
 from core.report_generator.generator import generate_report
 from core.report_planner.planner import plan_report
 from core.synthesis.synthesizer import synthesize
@@ -46,6 +52,39 @@ def test_synthesis_distinguishes_documents_from_unique_sources():
     assert synthesis.source_count == 2
     assert synthesis.unique_source_count == 1
     assert synthesis.source_ids == ["KOCCA"]
+
+
+def test_report_sections_preserve_internal_conclusion_and_claim_links(monkeypatch):
+    monkeypatch.delenv("TRENDSPARC_REPORT_GENERATOR_API_KEY", raising=False)
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    synthesis = synthesize(
+        "req_provenance",
+        "sk_broadband",
+        [
+            DocumentAnalysis(
+                doc_id="doc:1",
+                source_id="source1",
+                grounded_claims=[
+                    GroundedClaim(
+                        claim_id="risk1",
+                        claim_type="risk",
+                        claim="해지율 상승 위험",
+                        evidence_quote="해지율이 상승했다",
+                        confidence="high",
+                    )
+                ],
+            )
+        ],
+    )
+    plan = plan_report(synthesis, "management", "current_status")
+
+    report = generate_report("주요 위험은?", synthesis, plan, "management")
+    risk_section = next(section for section in report.sections if section.section_id == "risk")
+
+    assert [claim.synthesis_claim_id for claim in risk_section.grounded_claims] == [
+        "doc:1:risk1"
+    ]
+    assert risk_section.conclusions[0].supporting_claim_ids == ["doc:1:risk1"]
 
 
 def test_report_generator_creates_distinct_issue_impact_action_sections(monkeypatch):

@@ -6,6 +6,8 @@ from sources.collectors import ai_search_harness as harness_module
 from sources.collectors.ai_search_harness import (
     HarnessConfig,
     _attribute_source,
+    _grounded_candidates,
+    _prioritize_candidates,
     _doc_id,
     _initial_query,
     _parse_round_judgment,
@@ -138,7 +140,144 @@ def test_question_harness_runs_one_session_without_per_source_search_slots():
     request = json.loads(openai_client.responses.calls[0]["input"][1]["content"])
     assert request["current_round_query"] == context.question
     assert "registered_source_hint" not in request
+    assert [hint["name"] for hint in request["registered_source_hints"]] == [
+        source.name for source in sources
+    ]
     assert [doc.source_id for doc in docs] == ["SK브로드밴드 뉴스룸", "전자신문 (통신)"]
+
+
+def test_scraped_extensionless_pdf_keeps_firecrawl_media_type():
+    class _PdfFirecrawl:
+        def scrape(self, url, formats):
+            return types.SimpleNamespace(
+                markdown="PDF 본문 " * 100,
+                metadata=types.SimpleNamespace(contentType="application/pdf"),
+            )
+
+    document, attempts = harness_module._scrape_candidate(
+        _PdfFirecrawl(),
+        types.SimpleNamespace(
+            url="https://www.kmcc.go.kr/download.do?fileSeq=70246",
+            title="방송시장 보고서",
+        ),
+        [_source(name="방송미디어통신위원회", url="https://www.kmcc.go.kr")],
+        HarnessConfig(),
+    )
+
+    assert attempts == 1
+    assert document is not None
+    assert document.media_type == "application/pdf"
+
+
+def test_candidates_prefer_registered_domains_and_spread_across_domains():
+    sources = [
+        _source(name="등록 A", url="https://registered-a.example.com"),
+        _source(name="등록 B", url="https://registered-b.example.com"),
+    ]
+    response = _response(
+        citations=[
+            _citation_annotation("https://ordinary.example.com/first"),
+            _citation_annotation("https://registered-a.example.com/one"),
+            _citation_annotation("https://registered-a.example.com/two"),
+            _citation_annotation("https://registered-b.example.com/one"),
+        ],
+        sufficient=False,
+    )
+
+    selected = _prioritize_candidates(
+        _grounded_candidates(response), sources, existing_documents=[], limit=3
+    )
+
+    assert [candidate.url for candidate in selected] == [
+        "https://registered-a.example.com/one",
+        "https://registered-b.example.com/one",
+        "https://ordinary.example.com/first",
+    ]
+
+
+def test_candidate_domain_limit_relaxes_from_two_to_three_only_when_needed():
+    candidates = [
+        _citation_annotation(f"https://single.example.com/{index}")
+        for index in range(1, 5)
+    ]
+
+    selected = _prioritize_candidates(
+        candidates,
+        [],
+        existing_documents=[],
+        limit=5,
+        desired_total=5,
+    )
+
+    assert [candidate.url for candidate in selected] == [
+        "https://single.example.com/1",
+        "https://single.example.com/2",
+        "https://single.example.com/3",
+    ]
+
+
+def test_question_harness_retains_more_than_sufficiency_floor_when_gaps_remain():
+    first_urls = [f"https://source{index}.example.com/a" for index in range(1, 6)]
+    second_urls = ["https://source6.example.com/b", "https://source7.example.com/b"]
+    first_ids = [_doc_id(f"source{index}.example.com", url) for index, url in enumerate(first_urls, 1)]
+    second_ids = [
+        _doc_id(f"source{index}.example.com", url)
+        for index, url in zip((6, 7), second_urls)
+    ]
+    openai_client = _FakeOpenAI(
+        [
+            _response(
+                citations=[_citation_annotation(url) for url in first_urls],
+                sufficient=False,
+            ),
+            _response(
+                citations=[_citation_annotation(url) for url in second_urls],
+                sufficient=True,
+            ),
+        ],
+        [
+            EvidenceCoverageAssessment(
+                sufficient=False,
+                relevant_doc_ids=first_ids,
+                covered_information_needs=[],
+                missing_information_needs=["strategy"],
+                next_queries=["strategy evidence"],
+                reason="gap remains",
+            ),
+            EvidenceCoverageAssessment(
+                sufficient=True,
+                relevant_doc_ids=[*first_ids, *second_ids],
+                covered_information_needs=["strategy"],
+                missing_information_needs=[],
+                next_queries=[],
+                reason="covered",
+            ),
+        ],
+    )
+    context = WebSearchContext(
+        question="question",
+        information_needs=["strategy"],
+        suggested_terms=["topic"],
+    )
+
+    result = run_question_search_harness_result(
+        openai_client,
+        _FakeFirecrawl(),
+        [],
+        ["topic"],
+        HarnessConfig(
+            target_docs=5,
+            max_collected_docs=10,
+            min_scraped_docs_for_sufficient=5,
+            max_candidates_per_round=5,
+            assess_scraped_evidence=True,
+        ),
+        context,
+    )
+
+    assert result.sufficient is True
+    assert len(result.documents) == 7
+    assert [document.doc_id for document in result.documents] == [*first_ids, *second_ids]
 
 
 def test_question_harness_uses_scraped_evidence_gaps_for_follow_up_search():
@@ -634,11 +773,13 @@ def test_harness_stops_at_max_rounds_when_still_insufficient():
     round1 = _response(
         citations=[_citation_annotation("https://news.sktelecom.com/a1")], sufficient=False, next_queries=["다음 시도1"]
     )
+    # Use independent domains so this test isolates max_rounds rather than
+    # the separate per-domain diversity ceiling.
     round2 = _response(
-        citations=[_citation_annotation("https://news.sktelecom.com/a2")], sufficient=False, next_queries=["다음 시도2"]
+        citations=[_citation_annotation("https://industry.example.com/a2")], sufficient=False, next_queries=["다음 시도2"]
     )
     round3 = _response(
-        citations=[_citation_annotation("https://news.sktelecom.com/a3")], sufficient=False, next_queries=["다음 시도3"]
+        citations=[_citation_annotation("https://research.example.org/a3")], sufficient=False, next_queries=["다음 시도3"]
     )
     openai_client = _FakeOpenAI([round1, round2, round3])
     firecrawl_client = _FakeFirecrawl()

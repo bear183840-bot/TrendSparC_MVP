@@ -31,7 +31,7 @@ _KNOWN_CONTENT_KEYS = {
     "risks", "opportunities", "strengths", "weaknesses", "actions",
     "metric_points", "comparison_points", "monitoring_indicators",
     "business_impacts", "source_count", "unique_source_count", "limitations",
-    "label", "value", "delta", "items",
+    "grounded_claims", "conclusions", "label", "value", "delta", "items",
 }
 
 

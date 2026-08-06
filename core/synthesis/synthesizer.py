@@ -12,7 +12,13 @@ from common.content_quality_validator import (
     dedupe_structured_across_sections,
     extract_metric_points_from_evidence,
 )
-from common.contracts import DocumentAnalysis, SynthesisClaim, SynthesisSource, TrendSynthesis
+from common.contracts import (
+    DocumentAnalysis,
+    SynthesisClaim,
+    SynthesisConclusion,
+    SynthesisSource,
+    TrendSynthesis,
+)
 
 
 def _append_text(highlights: list[str], label: str, value: str | None, doc_id: str) -> None:
@@ -121,6 +127,11 @@ def synthesize(
             analysis_actions = _grounded_values(analysis, "action")
             analysis_monitoring = _grounded_values(analysis, "monitoring")
             analysis_evidence = [claim.evidence_quote for claim in analysis.grounded_claims]
+            metric_claim_by_quote = {
+                claim.evidence_quote: claim.claim_id
+                for claim in analysis.grounded_claims
+                if claim.claim_type == "metric"
+            }
             comparison_claim_ids = {
                 claim.claim_id
                 for claim in analysis.grounded_claims
@@ -143,6 +154,7 @@ def synthesize(
             analysis_actions = analysis.recommended_actions
             analysis_monitoring = analysis.monitoring_indicators
             analysis_evidence = analysis.evidence
+            metric_claim_by_quote = {}
             analysis_comparisons = analysis.comparison_points
 
         _append_items(highlights, "Key Point", analysis_key_points, analysis.doc_id)
@@ -164,35 +176,61 @@ def synthesize(
             strengths.append(_tag(analysis_strength, analysis.doc_id))
         if analysis_weakness:
             weaknesses.append(_tag(analysis_weakness, analysis.doc_id))
-        metric_series.extend(
-            point.model_copy(
-                update={
-                    "doc_id": analysis.doc_id,
-                    "source_id": source_id,
-                    "source_url": analysis.source_url,
-                }
+        verified_claim_ids = {claim.claim_id for claim in analysis.grounded_claims}
+        for metric_index, point in enumerate(analysis.metric_points, 1):
+            evidence_claim_id = (
+                point.evidence_claim_id
+                if point.evidence_claim_id in verified_claim_ids
+                else None
             )
-            for point in analysis.metric_points
-        )
+            metric_series.append(
+                point.model_copy(
+                    update={
+                        "metric_id": point.metric_id or f"{analysis.doc_id}:metric:{metric_index}",
+                        "evidence_claim_id": evidence_claim_id,
+                        "evidence_synthesis_claim_id": (
+                            f"{analysis.doc_id}:{evidence_claim_id}"
+                            if evidence_claim_id
+                            else None
+                        ),
+                        "doc_id": analysis.doc_id,
+                        "source_id": source_id,
+                        "source_url": analysis.source_url,
+                    }
+                )
+            )
         # The analyzer's own structured-output pass doesn't catch every
         # number - a revenue/profit figure stated inline as prose in this
         # document's own evidence sentences (e.g. "2025년 매출: 4조
         # 5,406억원 (전년 대비 3% 증가)") would otherwise stay untouched free
         # text, invisible to KPI ranking/chart shape classification. Regex-
         # extracted, never estimated - see content_quality_validator.
-        metric_series.extend(
-            point.model_copy(
-                update={
-                    "doc_id": analysis.doc_id,
-                    "source_id": source_id,
-                    "source_url": analysis.source_url,
-                }
-            )
-            for point in extract_metric_points_from_evidence(analysis_evidence)
-        )
+        extracted_index = len(analysis.metric_points)
+        for evidence_text in analysis_evidence:
+            for point in extract_metric_points_from_evidence([evidence_text]):
+                extracted_index += 1
+                evidence_claim_id = metric_claim_by_quote.get(evidence_text)
+                metric_series.append(
+                    point.model_copy(
+                        update={
+                            "metric_id": f"{analysis.doc_id}:metric:{extracted_index}",
+                            "evidence_claim_id": evidence_claim_id,
+                            "evidence_synthesis_claim_id": (
+                                f"{analysis.doc_id}:{evidence_claim_id}"
+                                if evidence_claim_id
+                                else None
+                            ),
+                            "evidence_quote": evidence_text,
+                            "doc_id": analysis.doc_id,
+                            "source_id": source_id,
+                            "source_url": analysis.source_url,
+                        }
+                    )
+                )
         comparison_points.extend(
             point.model_copy(
                 update={
+                    "comparison_id": point.comparison_id or f"{analysis.doc_id}:comparison:{index}",
                     "evidence_synthesis_claim_id": (
                         f"{analysis.doc_id}:{point.evidence_claim_id}"
                         if point.evidence_claim_id
@@ -203,7 +241,7 @@ def synthesize(
                     "source_url": analysis.source_url,
                 }
             )
-            for point in analysis_comparisons
+            for index, point in enumerate(analysis_comparisons, 1)
         )
         recommended_actions.extend(_tag(value, analysis.doc_id) for value in analysis_actions if value)
         monitoring_indicators.extend(_tag(value, analysis.doc_id) for value in analysis_monitoring if value)
@@ -216,6 +254,16 @@ def synthesize(
     # collapse exact duplicates (same label/period/value/unit/doc_id) rather
     # than showing the identical number twice in one KPI row/chart.
     metric_series = dedupe_structured_across_sections([metric_series])[0]
+    conclusions = [
+        SynthesisConclusion(
+            conclusion_id=f"rule:{claim.synthesis_claim_id}",
+            conclusion=claim.claim,
+            supporting_claim_ids=[claim.synthesis_claim_id],
+            confidence=claim.confidence,
+        )
+        for claim in grounded_claims
+        if claim.claim
+    ]
 
     return TrendSynthesis(
         request_id=request_id,
@@ -239,6 +287,7 @@ def synthesize(
         confidence_labels=confidence_labels,
         doc_source_map=doc_source_map,
         grounded_claims=grounded_claims,
+        conclusions=conclusions,
         sources=sources,
         covered_information_needs=covered_information_needs,
         missing_information_needs=[

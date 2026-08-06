@@ -6,7 +6,12 @@ import sectors.sk_broadband.adapter.analyzer as sk_broadband_analyzer
 import sectors.sk_broadband.adapter.collector as sk_broadband_collector
 import sectors.sk_broadband.adapter.processor as sk_broadband_processor
 import sectors.sk_broadband.adapter.validator as sk_broadband_validator
-from common.contracts import DocumentAnalysis, SourceDocument, UserRequest
+from common.contracts import (
+    DocumentAnalysis,
+    SourceCollectionResult,
+    SourceDocument,
+    UserRequest,
+)
 from common.errors import StageStatus
 from core.request_pipeline.pipeline import run_pipeline
 
@@ -192,15 +197,90 @@ def test_pipeline_recollects_when_validation_leaves_fewer_than_profile_minimum(m
     result = run_pipeline(request, dry_run=False)
 
     assert result.halted_at_stage is None
-    assert len(collector_plans) == 2
+    # One validation recollection reaches the hard minimum, then one bounded
+    # analysis recollection still tries to approach the profile target (5).
+    assert len(collector_plans) == 3
     retry_context = collector_plans[1].search_context
     assert set(retry_context.excluded_urls) == {
         "https://one.example.com/a",
         "https://bad.example.com/a",
     }
     assert retry_context.validation_feedback
-    assert [analysis.doc_id for analysis in result.document_analyses] == ["d1", "d2"]
+    assert [analysis.doc_id for analysis in result.document_analyses] == ["d1", "d2", "d3"]
     assert any(trace.stage == "sector_adapter.collector.recollection" for trace in result.trace)
+    assert any(
+        trace.stage == "sector_adapter.collector.analysis_recollection"
+        for trace in result.trace
+    )
+
+
+def test_harness_collection_contract_requires_five_validated_documents(monkeypatch):
+    initial = [
+        SourceDocument(
+            doc_id=f"d{index}",
+            source_id=f"s{index}",
+            title=f"source {index}",
+            url=f"https://source{index}.example/a",
+            content="evidence" * 100,
+        )
+        for index in range(1, 5)
+    ]
+    replacements = [
+        SourceDocument(
+            doc_id=f"d{index}",
+            source_id=f"s{index}",
+            title=f"source {index}",
+            url=f"https://source{index}.example/a",
+            content="evidence" * 100,
+        )
+        for index in range(5, 7)
+    ]
+    calls = []
+
+    def fake_collect(source_plan):
+        calls.append(source_plan)
+        documents = initial if len(calls) == 1 else replacements
+        return SourceCollectionResult(
+            documents=documents,
+            collection_mode="ai_search_harness",
+            minimum_validated_documents=5,
+        )
+
+    monkeypatch.setattr(sk_broadband_collector, "collect", fake_collect)
+    monkeypatch.setattr(sk_broadband_processor, "process", lambda documents: documents)
+    monkeypatch.setattr(
+        sk_broadband_validator,
+        "validate",
+        lambda documents, search_context=None: documents,
+    )
+    monkeypatch.setattr(
+        sk_broadband_analyzer,
+        "analyze",
+        lambda documents, question, information_needs=None: [
+            DocumentAnalysis(
+                doc_id=document.doc_id,
+                relevant_to_question=True,
+                usable_for_synthesis=True,
+            )
+            for document in documents
+        ],
+    )
+
+    result = run_pipeline(
+        _make_request(
+            "SK브로드밴드 IPTV 경쟁 현황은?",
+            requested_sector_id="sk_broadband",
+        ),
+        dry_run=False,
+    )
+
+    assert result.halted_at_stage is None
+    assert len(calls) == 2
+    assert result.source_collection is not None
+    assert result.source_collection.collection_mode == "ai_search_harness"
+    assert result.source_collection.minimum_validated_documents == 5
+    assert len(result.source_collection.documents) == 6
+    assert len(result.document_analyses) == 6
 
 
 def test_pipeline_recollects_when_analyzer_leaves_fewer_than_profile_minimum(monkeypatch):
@@ -261,6 +341,10 @@ def test_pipeline_recollects_when_analyzer_leaves_fewer_than_profile_minimum(mon
         "https://one.example/a",
         "https://bad.example/a",
     }
+    assert any(
+        "target of 5 usable documents" in feedback
+        for feedback in collector_plans[1].search_context.validation_feedback
+    )
     assert {analysis.doc_id for analysis in result.document_analyses} == {"d1", "d2", "d3"}
     assert any(
         trace.stage == "sector_adapter.collector.analysis_recollection"
