@@ -1,0 +1,94 @@
+{
+  "_note": "TrendSynthesis-level fixture for --synthesis-fixture. future_business purpose: opportunity-heavy, single-criterion competitor comparison, mixed-unit one-off metrics (deliberately not a time series).",
+  "request_id": "req_synthetic_future_business",
+  "sector_id": "sk_broadband",
+  "question": "SK브로드밴드가 2026년 이후 신규 성장 동력으로 AI 데이터센터 사업 외에 어떤 사업 기회를 검토해야 할까?",
+  "audience_id": "executive",
+  "purpose_id": "future_business",
+  "highlights": [
+    "SK브로드밴드는 판교 데이터센터 외에 기업용 클라우드·AIDC(AI Data Center) 확장을 검토 중이며, 2026년 하반기 2개 지역에 신규 데이터센터 부지 확보를 추진하고 있다. [doc_id=www.newspim.com:f001e2f9c688aabf]",
+    "B tv+ max의 광고 기반 무료 시청(FAST) 모델이 2026년 상반기 시범 도입되어 콘텐츠 광고 매출이라는 신규 수익원 가능성이 확인됐다. [doc_id=blog.bworld.co.kr:a198235c989ad273]",
+    "홈보안·IoT 결합상품(스마트홈) 시장은 연 12% 성장 중이며, SK브로드밴드의 기존 홈 인프라(셋톱박스·공유기)를 활용한 진입 여지가 있다. [doc_id=www.etnews.com:fdb9ff84ad062c04]",
+    "경쟁사(KT)는 이미 AI 로봇·헬스케어 등 비통신 사업으로 다각화를 진행 중이라 상대적으로 SK브로드밴드의 신사업 다각화 속도가 느리다는 평가가 있다. [doc_id=biz.chosun.com:25729e70dd2a1d1f]"
+  ],
+  "synthesis_text": "AI 데이터센터 외에 SK브로드밴드가 검토할 만한 신규 성장 동력으로는 (1) FAST 기반 광고 수익 모델, (2) 스마트홈·IoT 결합상품, (3) B2B 클라우드 확장이 거론된다. 다만 경쟁사 대비 비통신 다각화 속도가 늦다는 점은 리스크 요인이다.",
+  "source_count": 6,
+  "unique_source_count": 5,
+  "source_ids": [
+    "www.newspim.com",
+    "blog.bworld.co.kr",
+    "www.etnews.com",
+    "biz.chosun.com",
+    "file.alphasquare.co.kr"
+  ],
+  "key_points": [
+    "시장 변화: AIDC 확장을 위한 신규 부지 확보 추진 중 [doc_id=www.newspim.com:f001e2f9c688aabf]",
+    "전략 영향: FAST 모델 시범 도입으로 광고 매출 가능성 확인 [doc_id=blog.bworld.co.kr:a198235c989ad273]",
+    "Opportunity: 스마트홈·IoT 결합상품 시장 연 12% 성장 [doc_id=www.etnews.com:fdb9ff84ad062c04]",
+    "Risk: 경쟁사 대비 비통신 사업 다각화 속도가 뒤처짐 [doc_id=biz.chosun.com:25729e70dd2a1d1f]"
+  ],
+  "business_impacts": [
+    "신규 사업 다각화가 지연되면 통신·IPTV 매출 정체 시 대체 성장 동력 부재 위험이 있음 [doc_id=biz.chosun.com:25729e70dd2a1d1f]"
+  ],
+  "risks": [
+    "경쟁사(KT) 대비 비통신 사업 다각화 속도 지연 [doc_id=biz.chosun.com:25729e70dd2a1d1f]",
+    "AIDC 신규 부지 확보 지연 시 데이터센터 매출 성장세 둔화 가능 [doc_id=www.newspim.com:f001e2f9c688aabf]"
+  ],
+  "opportunities": [
+    "FAST 기반 광고 수익 모델 확대 [doc_id=blog.bworld.co.kr:a198235c989ad273]",
+    "스마트홈·IoT 결합상품 시장 진입 [doc_id=www.etnews.com:fdb9ff84ad062c04]",
+    "AIDC 2개 지역 신규 확장을 통한 B2B 클라우드 매출 확대 [doc_id=www.newspim.com:f001e2f9c688aabf]"
+  ],
+  "strengths": [
+    "기존 홈 인프라(셋톱박스·공유기) 보유로 스마트홈 진입 장벽이 낮음 [doc_id=www.etnews.com:fdb9ff84ad062c04]",
+    "판교 데이터센터 운영 경험을 AIDC 확장에 활용 가능 [doc_id=www.newspim.com:f001e2f9c688aabf]"
+  ],
+  "weaknesses": [
+    "비통신 신사업 다각화 속도가 경쟁사 대비 느림 [doc_id=biz.chosun.com:25729e70dd2a1d1f]"
+  ],
+  "metric_series": [
+    {"label": "스마트홈·IoT 결합상품 시장 성장률", "period": "연간", "value": 12.0, "unit": "%"},
+    {"label": "AIDC 신규 부지", "period": "2026년 하반기(계획)", "value": 2.0, "unit": "개 지역"},
+    {"label": "FAST 시범 도입", "period": "2026년 상반기", "value": 1.0, "unit": "건"}
+  ],
+  "comparison_points": [
+    {"entity": "SK브로드밴드", "criterion": "비통신 신사업 다각화 속도", "value": "느림", "level": "low"},
+    {"entity": "KT", "criterion": "비통신 신사업 다각화 속도", "value": "AI 로봇·헬스케어 등 진행 중", "level": "high"}
+  ],
+  "recommended_actions": [
+    "FAST 기반 광고 수익 모델의 2026년 하반기 정식 출시 검토 [doc_id=blog.bworld.co.kr:a198235c989ad273]",
+    "스마트홈·IoT 결합상품 파일럿 사업 기획 착수 [doc_id=www.etnews.com:fdb9ff84ad062c04]",
+    "AIDC 신규 부지 확보 일정 가속화 및 B2B 클라우드 영업 조직 강화 [doc_id=www.newspim.com:f001e2f9c688aabf]"
+  ],
+  "monitoring_indicators": [
+    "FAST 모델 시범 서비스 광고 매출 추이",
+    "스마트홈·IoT 결합상품 시장 경쟁사 진입 동향",
+    "AIDC 신규 부지 확보 진행 상황"
+  ],
+  "evidence": [
+    "SK브로드밴드는 판교 데이터센터 외에 2026년 하반기 2개 지역 신규 데이터센터 부지 확보를 추진 중이다. [doc_id=www.newspim.com:f001e2f9c688aabf]",
+    "B tv+ max의 FAST 모델이 2026년 상반기 시범 도입됐다. [doc_id=blog.bworld.co.kr:a198235c989ad273]",
+    "스마트홈·IoT 결합상품 시장은 연 12% 성장하고 있다. [doc_id=www.etnews.com:fdb9ff84ad062c04]",
+    "KT는 AI 로봇·헬스케어 등 비통신 사업 다각화를 이미 진행 중이다. [doc_id=biz.chosun.com:25729e70dd2a1d1f]"
+  ],
+  "confidence_labels": [
+    "high [doc_id=www.newspim.com:f001e2f9c688aabf]",
+    "medium [doc_id=blog.bworld.co.kr:a198235c989ad273]",
+    "medium [doc_id=www.etnews.com:fdb9ff84ad062c04]",
+    "medium [doc_id=biz.chosun.com:25729e70dd2a1d1f]"
+  ],
+  "doc_source_map": {
+    "www.newspim.com:f001e2f9c688aabf": "www.newspim.com",
+    "blog.bworld.co.kr:a198235c989ad273": "blog.bworld.co.kr",
+    "www.etnews.com:fdb9ff84ad062c04": "www.etnews.com",
+    "biz.chosun.com:25729e70dd2a1d1f": "biz.chosun.com",
+    "file.alphasquare.co.kr:67083446d465940b": "file.alphasquare.co.kr"
+  },
+  "corroborated_points": [
+    "AIDC 확장 계획은 newspim과 alphasquare 두 출처에서 공통 확인됨"
+  ],
+  "uncorroborated_points": [
+    "스마트홈·IoT 결합상품 시장 연 12% 성장률은 etnews 단일 출처 기반"
+  ],
+  "contradictions": []
+}

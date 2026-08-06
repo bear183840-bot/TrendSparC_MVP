@@ -168,6 +168,13 @@ def _block_type(section: str, content: dict, preferred_types: list[str] | None =
         return static_type
     if content.get("actions"):
         return "list"
+    # Prose bullets are a text block. Without this, any section whose static
+    # type was withdrawn for lack of qualifying data (e.g. "trend", mapped to
+    # chart but holding only narrative key_points) fell all the way through to
+    # "auto" - which means "no idea what this is" and asks for a new block
+    # type, when plain text was the right answer all along.
+    if content.get("key_points") or content.get("opportunities") or content.get("risks"):
+        return "text"
     if content.get("evidence"):
         return "evidence"
     _suggest_new_block_type(section, content)

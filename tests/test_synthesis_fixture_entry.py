@@ -19,6 +19,7 @@ from core.request_pipeline.synthesis_fixture import load_synthesis_fixture
 _FIXTURES = Path(__file__).parent / "fixtures"
 _REVENUE = _FIXTURES / "synthesis_revenue_trend.json"
 _IPTV = _FIXTURES / "synthesis_iptv_competition.json"
+_FUTURE = _FIXTURES / "synthesis_future_business.json"
 
 
 def _run(path: Path, audience: str | None = None):
@@ -69,6 +70,11 @@ def test_collection_stages_are_skipped_not_silently_absent():
     [
         (_REVENUE, {"key_metrics", "timeline", "near_term_outlook"}, {"chart", "timeline"}),
         (_IPTV, {"issue", "impact", "response_actions"}, {"matrix", "list"}),
+        (
+            _FUTURE,
+            {"trend", "opportunity", "investment_signal", "strategic_recommendation"},
+            {"matrix", "metrics", "list"},
+        ),
     ],
 )
 def test_each_purpose_produces_its_own_sections_and_blocks(path, expected_sections, expected_blocks):
@@ -76,6 +82,38 @@ def test_each_purpose_produces_its_own_sections_and_blocks(path, expected_sectio
 
     assert expected_sections <= set(result.report_plan.sections)
     assert expected_blocks <= set(_block_types(result))
+
+
+def test_the_three_purposes_do_not_share_a_section_list():
+    plans = [tuple(_run(path).report_plan.sections) for path in (_REVENUE, _IPTV, _FUTURE)]
+    assert len(set(plans)) == 3
+
+
+def test_one_off_metrics_in_different_units_are_kpis_not_a_chart():
+    """future_business carries 12%, 2개 지역 and 1건 - three unrelated numbers.
+
+    Plotting them on shared axes would invent a comparison that doesn't exist,
+    so the section must land on the KPI block instead.
+    """
+    result = _run(_FUTURE)
+    by_section = {block.section: block.block_type for block in result.layout.blocks}
+
+    assert by_section["investment_signal"] == "metrics"
+    assert "chart" not in by_section.values()
+
+
+def test_narrative_section_is_text_not_an_unclassified_auto_block():
+    """"trend" is statically mapped to chart, but holds only prose here.
+
+    Withdrawing the chart used to drop it all the way to "auto", which means
+    "no idea what this is" and requests a new block type - plain text was the
+    right answer.
+    """
+    result = _run(_FUTURE)
+    by_section = {block.section: block.block_type for block in result.layout.blocks}
+
+    assert by_section["trend"] == "text"
+    assert "auto" not in by_section.values()
 
 
 def test_metric_rich_fixture_keeps_its_key_metrics_section():
