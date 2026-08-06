@@ -153,7 +153,7 @@
   "strategic_dimensions": ["유료방송 가입자 방어", "OTT·콘텐츠 경쟁력", "결합상품과 ARPU", "네트워크·IDC 성장", "AI 미디어 개인화", "규제와 망 비용"],
   "min_validated_documents": 2,
   "max_validation_recollection_attempts": 1,
-  "min_analyzed_documents": 2,
+  "min_analyzed_documents": 3,
   "target_analyzed_documents": 5,
   "max_analysis_recollection_attempts": 1,
   "pipeline_entrypoint": "sectors.sk_broadband.adapter",

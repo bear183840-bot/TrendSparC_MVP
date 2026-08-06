@@ -41,6 +41,7 @@ from common.contracts import (
     WebSearchHarnessResult,
 )
 from core.source_planner.query_strategy import build_source_search_terms
+from sources.collectors.document_media import detect_document_media_type
 from sources.collectors.firecrawl_web import response_markdown
 
 _SYSTEM_PROMPT = (
@@ -89,6 +90,9 @@ class HarnessConfig:
     model: str = "gpt-4o"
     max_rounds: int = 3
     target_docs: int = 2  # mirrors _MAX_RESULTS_PER_SOURCE convention
+    # Optional hard retention cap. When omitted, legacy behavior uses
+    # target_docs as both the stopping target and final cap.
+    max_collected_docs: int | None = None
     min_content_length: int = 250  # mirrors validator._MIN_CONTENT_LENGTH
     search_context_size: str = "medium"
     call_timeout_seconds: int = 30
@@ -295,8 +299,14 @@ def _prioritize_candidates(
     all_sources: list[PlannedSource],
     existing_documents: list[SourceDocument],
     limit: int,
+    desired_total: int | None = None,
 ) -> list[_Citation]:
-    """Prefer registered domains while spreading candidates across domains."""
+    """Prefer registered domains and diversity, with a bounded fallback.
+
+    Two documents per domain is the normal ceiling. Only when that leaves the
+    collection below ``desired_total`` do we admit a third document from a
+    domain; the fallback never permits a fourth.
+    """
     if limit <= 0:
         return []
 
@@ -343,7 +353,30 @@ def _prioritize_candidates(
         selected.append(candidate)
         if len(selected) >= limit:
             break
+
+    target = desired_total if desired_total is not None else len(existing_documents) + limit
+    if len(existing_documents) + len(selected) >= target:
+        return selected
+
+    for _, candidate, _ in ranked:
+        if candidate in selected:
+            continue
+        domain = urlparse(candidate.url).netloc.lower()
+        selected_from_domain = sum(
+            1
+            for selected_candidate in selected
+            if urlparse(selected_candidate.url).netloc.lower() == domain
+        )
+        if not domain or existing_domain_counts.get(domain, 0) + selected_from_domain >= 3:
+            continue
+        selected.append(candidate)
+        if len(selected) >= limit or len(existing_documents) + len(selected) >= target:
+            break
     return selected
+
+
+def _maximum_documents(config: HarnessConfig) -> int:
+    return config.max_collected_docs or config.target_docs
 
 
 def _attribute_source(url: str, all_sources: list[PlannedSource]) -> tuple[str, str | None]:
@@ -406,6 +439,9 @@ def _scrape_candidate(
             title=citation.title or "Untitled",
             url=citation.url,
             content=markdown,
+            media_type=detect_document_media_type(
+                citation.url, citation.title, payload
+            ),
             reliability_tier=reliability_tier,
         ),
         attempts,
@@ -437,7 +473,7 @@ def _call_round(
     request_payload = {
         "search_context": context_payload,
         "current_round_query": query,
-        "target_relevant_documents": config.target_docs,
+        "target_relevant_documents": _maximum_documents(config),
         "minimum_relevant_documents_for_target": config.min_scraped_docs_for_sufficient,
         "instructions": (
             "Search anywhere on the live web. Return up to "
@@ -616,6 +652,7 @@ def _run_search_harness_result(
     accepted_doc_ids: set[str] = set()
     covered_information_needs: list[str] = []
     missing_information_needs = list(search_context.information_needs) if search_context else []
+    maximum_documents = _maximum_documents(config)
 
     for round_index in range(config.max_rounds):
         tried_queries.append(query)
@@ -636,6 +673,7 @@ def _run_search_harness_result(
             all_sources,
             documents,
             max(0, config.max_candidates_per_round),
+            desired_total=config.min_scraped_docs_for_sufficient,
         )
         label = source.name if source is not None else "question"
         print(
@@ -661,7 +699,7 @@ def _run_search_harness_result(
             scrape_call_count += attempts
             if document is not None:
                 documents.append(document)
-            if len(documents) >= config.target_docs:
+            if len(documents) >= maximum_documents:
                 break
 
         sufficient, next_queries = _parse_round_judgment(response)
@@ -716,6 +754,8 @@ def _run_search_harness_result(
             if sufficient and len(documents) >= config.min_scraped_docs_for_sufficient:
                 final_sufficient = True
                 break
+        if len(documents) >= maximum_documents:
+            break
         if scrape_call_count >= config.max_total_scrape_calls:
             break
         if (
@@ -737,7 +777,7 @@ def _run_search_harness_result(
             break
 
     return WebSearchHarnessResult(
-        documents=final_documents[: config.target_docs],
+        documents=final_documents[:maximum_documents],
         sufficient=final_sufficient,
         covered_information_needs=covered_information_needs,
         missing_information_needs=missing_information_needs,

@@ -29,6 +29,7 @@ from firecrawl.v2.types import ScrapeOptions
 
 from common.contracts import (
     PlannedSource,
+    SourceCollectionResult,
     SourceDocument,
     SourcePlan,
     WebSearchContext,
@@ -42,6 +43,7 @@ from sources.collectors.ai_search_harness import (
     run_question_search_harness_result,
 )
 from sources.collectors.kofic_pdf import collect_pdf_markdown_from_detail_url
+from sources.collectors.document_media import detect_document_media_type
 from sources.collectors.firecrawl_web import response_markdown
 
 _API_KEY_ENV_VAR = "FIRECRAWL_API_KEY"
@@ -91,8 +93,8 @@ _AI_GATE_MODEL = "gpt-4o-mini"
 _AI_GATED_SEARCH_METHOD = "ai_gated_search"
 _SPECIAL_COLLECTION_METHODS = {"kofic_pdf_post_download", _AI_GATED_SEARCH_METHOD}
 _QUESTION_SEARCH_EVENT_NAME = "OpenAI 웹검색"
-_QUESTION_HARNESS_MAX_DOCS = 7  # collect 6-7 relevant originals when the web has enough evidence
-_QUESTION_HARNESS_TARGET_MIN_DOCS = 6
+_QUESTION_HARNESS_MIN_DOCS = 5
+_QUESTION_HARNESS_MAX_DOCS = 10
 _MIN_REQUIRED_SOURCE_DOCUMENTS = 2
 # Defensive cap on top of source_planner.select_top_sources()'s 6-source
 # selection (6 sources * _MAX_RESULTS_PER_SOURCE = 12) — stops collection
@@ -237,6 +239,7 @@ def _crawl_web_source(client: Firecrawl, source: PlannedSource, keywords: list[s
     documents: list[SourceDocument] = []
     for item in payload[:_MAX_RESULTS_PER_SOURCE]:
         markdown = getattr(item, "markdown", None)
+        content_response = item
         url = _item_url(item)
         if not url:
             continue
@@ -247,6 +250,7 @@ def _crawl_web_source(client: Firecrawl, source: PlannedSource, keywords: list[s
             )
             if scrape_status == "ok":
                 markdown = response_markdown(scrape_payload)
+                content_response = scrape_payload
         if not markdown:
             continue
         documents.append(
@@ -257,6 +261,9 @@ def _crawl_web_source(client: Firecrawl, source: PlannedSource, keywords: list[s
                 url=url,
                 published_at=_parse_published_at(_item_published_time(item)),
                 content=markdown,
+                media_type=detect_document_media_type(
+                    url, _item_title(item), content_response
+                ),
                 reliability_tier=source.reliability_tier,
             )
         )
@@ -613,6 +620,7 @@ def _crawl_kofic_pdf_source(
                 title=parsed.attachment.download_name,
                 url=detail_url,
                 content=parsed.markdown,
+                media_type="application/pdf",
                 reliability_tier=source.reliability_tier,
             )
         )
@@ -668,6 +676,7 @@ def _crawl_source_with_ai_gated_search(
         if not url:
             continue
         markdown = getattr(item, "markdown", None)
+        content_response = item
         if not markdown:
             scrape_status, scrape_payload = _run_with_timeout(
                 lambda: client.scrape(url, formats=["markdown"]),
@@ -675,6 +684,7 @@ def _crawl_source_with_ai_gated_search(
             )
             if scrape_status == "ok":
                 markdown = response_markdown(scrape_payload)
+                content_response = scrape_payload
         if not markdown:
             continue
         documents.append(
@@ -685,6 +695,9 @@ def _crawl_source_with_ai_gated_search(
                 url=url,
                 published_at=_parse_published_at(_item_published_time(item)),
                 content=markdown,
+                media_type=detect_document_media_type(
+                    url, _item_title(item), content_response
+                ),
                 reliability_tier=source.reliability_tier,
             )
         )
@@ -753,26 +766,16 @@ def _run_question_ai_harness(
             keywords,
             HarnessConfig(
                 model=model,
-                target_docs=_QUESTION_HARNESS_MAX_DOCS,
+                target_docs=_QUESTION_HARNESS_MIN_DOCS,
+                max_collected_docs=_QUESTION_HARNESS_MAX_DOCS,
                 assess_scraped_evidence=True,
-                # Six relevant originals are enough to finish successfully;
-                # seven is the bounded collection cap. The collector still
-                # permits a corroborated partial result of two documents after
-                # exhausting the search budget.
-                min_scraped_docs_for_sufficient=_QUESTION_HARNESS_TARGET_MIN_DOCS,
-                # One extra round beyond the default 3, specifically to give
-                # a gap-driven follow-up query (see run loop's next_queries)
-                # a real shot at covering an information need the first few
-                # rounds missed, before we accept a partial result below.
-                max_rounds=4,
-                # Raised from the module default of 2 -> more raw source
-                # documents considered per round, not just the first couple
-                # of grounded hits. max_total_scrape_calls raised to match
-                # (5 candidates/round * 4 rounds * up to 2 attempts each with
-                # the default 1 retry) so this budget, not the scrape-call
-                # ceiling, is what actually bounds each round.
+                # Five relevant originals is the sufficiency floor. If needs
+                # remain uncovered, later rounds may retain up to ten rather
+                # than truncating the useful evidence back to five.
+                min_scraped_docs_for_sufficient=_QUESTION_HARNESS_MIN_DOCS,
+                max_rounds=3,
                 max_candidates_per_round=5,
-                max_total_scrape_calls=40,
+                max_total_scrape_calls=25,
             ),
             search_context=search_context,
         )
@@ -882,7 +885,7 @@ def _collect_with_question_harness(
         # Special collectors are registered, purpose-built evidence paths.
         # Reserve their successfully collected documents before trimming the
         # web-harness overflow so the total still stays within the requested
-        # 6-7 originals without silently discarding the special source.
+        # 5-10 originals without silently discarding the special source.
         special_source_ids = {source.name for source in special_sources}
         special_documents = [
             document for document in documents if document.source_id in special_source_ids
@@ -894,7 +897,7 @@ def _collect_with_question_harness(
     return documents[:_QUESTION_HARNESS_MAX_DOCS]
 
 
-def collect(source_plan: SourcePlan) -> list[SourceDocument]:
+def collect(source_plan: SourcePlan) -> list[SourceDocument] | SourceCollectionResult:
     if not source_plan.planned_sources:
         raise PipelineStageError(stage=_STAGE, reason="no sources registered for sk_broadband")
     api_key = os.environ.get(_API_KEY_ENV_VAR)
@@ -903,7 +906,13 @@ def collect(source_plan: SourcePlan) -> list[SourceDocument]:
     client = Firecrawl(api_key=api_key)
     harness_key = os.environ.get(_HARNESS_API_KEY_ENV_VAR)
     if harness_key:
-        return _collect_with_question_harness(client, source_plan, api_key, harness_key)
+        return SourceCollectionResult(
+            documents=_collect_with_question_harness(
+                client, source_plan, api_key, harness_key
+            ),
+            collection_mode="ai_search_harness",
+            minimum_validated_documents=_QUESTION_HARNESS_MIN_DOCS,
+        )
     total = len(source_plan.planned_sources)
     documents: list[SourceDocument] = []
     for index, source in enumerate(source_plan.planned_sources):

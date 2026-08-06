@@ -265,7 +265,23 @@ class SourceDocument(BaseModel):
     url: Optional[str] = None
     published_at: Optional[datetime] = None
     content: Optional[str] = None
+    # MIME type detected by the collector. This is necessary for direct
+    # download endpoints whose URL/title has no `.pdf` suffix.
+    media_type: Optional[str] = None
     reliability_tier: Optional[str] = None
+
+
+class SourceCollectionResult(BaseModel):
+    """Documents plus the collection policy required by downstream stages.
+
+    Legacy collectors may still return ``list[SourceDocument]``. A collector
+    that enables a stricter mode uses this contract so the pipeline does not
+    need to inspect sector names or environment variables.
+    """
+
+    documents: list[SourceDocument] = Field(default_factory=list)
+    collection_mode: Literal["legacy", "ai_search_harness"] = "legacy"
+    minimum_validated_documents: Optional[int] = None
 
 
 class EvidenceCoverageAssessment(BaseModel):
@@ -343,6 +359,9 @@ class GroundedClaim(BaseModel):
     ]
     claim: str
     evidence_quote: str
+    # Stable analyzer-local paragraph identifier used to verify/repair the
+    # quote. It is provenance metadata and need not be rendered in the UI.
+    evidence_passage_id: Optional[str] = None
     evidence_location: Optional[str] = None
     as_of_date: Optional[str] = None
     source_url: Optional[str] = None

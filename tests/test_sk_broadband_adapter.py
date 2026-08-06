@@ -5,6 +5,7 @@ import pytest
 
 from common.contracts import (
     PlannedSource,
+    SourceCollectionResult,
     SourceDocument,
     SourcePlan,
     WebSearchContext,
@@ -18,6 +19,10 @@ from sectors.sk_broadband.adapter.analyzer import analyze
 from sectors.sk_broadband.adapter.collector import _crawl_source, collect
 from sectors.sk_broadband.adapter.processor import process
 from sectors.sk_broadband.adapter.validator import validate
+
+
+def _collected_documents(result):
+    return result.documents if isinstance(result, SourceCollectionResult) else result
 
 
 def _make_result(markdown, title="제목", url="https://example.com/article", published_time="2026-01-01T00:00:00+09:00"):
@@ -743,7 +748,7 @@ def test_broadband_question_harness_treats_ai_gated_search_source_as_special(mon
 
     monkeypatch.setattr(collector_module, "_crawl_source_with_ai_gated_search", fake_ai_gated)
 
-    docs = collect(plan)
+    docs = _collected_documents(collect(plan))
 
     assert special_calls == [gated.name]
     assert {doc.source_id for doc in docs} == {"뉴스", gated.name}
@@ -765,7 +770,7 @@ def test_broadband_collect_continues_when_one_source_fails(monkeypatch):
 
     monkeypatch.setattr(collector_module, "Firecrawl", lambda api_key: _PerDomainClient())
 
-    docs = collect(plan)
+    docs = _collected_documents(collect(plan))
 
     assert len(docs) == 1
     assert docs[0].source_id == "ok"
@@ -792,7 +797,7 @@ def test_broadband_collect_caps_total_documents_at_twelve(monkeypatch):
 
     monkeypatch.setattr(collector_module, "Firecrawl", lambda api_key: _TwoResultsClient())
 
-    docs = collect(plan)
+    docs = _collected_documents(collect(plan))
 
     assert len(docs) == 12
 
@@ -859,21 +864,27 @@ def test_broadband_collect_runs_question_harness_once_for_all_sources(monkeypatc
 
     monkeypatch.setattr(collector_module, "run_question_search_harness_result", fake_harness)
 
-    docs = collect(plan)
+    result = collect(plan)
+    assert isinstance(result, SourceCollectionResult)
+    assert result.collection_mode == "ai_search_harness"
+    assert result.minimum_validated_documents == 5
+    docs = result.documents
 
     assert len(docs) == 2
     assert docs[0].source_id == "broken"
     assert len(calls) == 1
     assert calls[0][0] == sources
-    assert calls[0][2].target_docs == 7
-    assert calls[0][2].min_scraped_docs_for_sufficient == 6
+    assert calls[0][2].target_docs == 5
+    assert calls[0][2].max_collected_docs == 10
+    assert calls[0][2].min_scraped_docs_for_sufficient == 5
     assert calls[0][2].min_independent_sources_for_sufficient == 2
     assert calls[0][2].assess_scraped_evidence is True
     # Raised from the ai_search_harness module default of 2 -> more raw
     # documents considered per round, with the scrape-call ceiling raised to
     # match so it isn't the thing actually bounding each round instead.
     assert calls[0][2].max_candidates_per_round == 5
-    assert calls[0][2].max_total_scrape_calls == 40
+    assert calls[0][2].max_rounds == 3
+    assert calls[0][2].max_total_scrape_calls == 25
 
 
 def test_broadband_question_harness_keeps_special_kofic_collector(monkeypatch):
@@ -920,11 +931,11 @@ def test_broadband_question_harness_keeps_special_kofic_collector(monkeypatch):
 
     monkeypatch.setattr(collector_module, "_crawl_kofic_pdf_source", fake_kofic)
 
-    docs = collect(plan)
+    docs = _collected_documents(collect(plan))
 
     assert special_calls == ["영화진흥위원회(KOFIC)"]
-    assert len(docs) == 7
-    assert [doc.doc_id for doc in docs] == ["k1", "k2", "w1", "w2", "w3", "w4", "w5"]
+    assert len(docs) == 9
+    assert [doc.doc_id for doc in docs] == ["w1", "w2", "w3", "w4", "w5", "w6", "w7", "k1", "k2"]
 
 
 def test_broadband_question_harness_rejects_fewer_than_two_documents(monkeypatch):
@@ -986,7 +997,7 @@ def test_broadband_question_harness_accepts_partial_coverage_instead_of_all_or_n
         ),
     )
 
-    docs = collect(plan)
+    docs = _collected_documents(collect(plan))
 
     assert [doc.doc_id for doc in docs] == ["a", "b"]
 
@@ -1031,7 +1042,7 @@ def test_broadband_question_harness_counts_kofic_toward_sufficiency(monkeypatch)
         ],
     )
 
-    docs = collect(plan)
+    docs = _collected_documents(collect(plan))
 
     assert {doc.doc_id for doc in docs} == {"a", "k1"}
 
@@ -1300,6 +1311,14 @@ def _make_response(
     return types.SimpleNamespace(choices=[types.SimpleNamespace(message=message)])
 
 
+def _make_quote_repair_response(repairs, refusal=None):
+    message = types.SimpleNamespace(
+        content=json.dumps({"repairs": repairs}, ensure_ascii=False),
+        refusal=refusal,
+    )
+    return types.SimpleNamespace(choices=[types.SimpleNamespace(message=message)])
+
+
 class _FakeCompletions:
     def __init__(self, response):
         self._response = response
@@ -1313,6 +1332,25 @@ class _FakeCompletions:
 class _FakeOpenAI:
     def __init__(self, response):
         self.chat = types.SimpleNamespace(completions=_FakeCompletions(response))
+
+
+class _SequenceFakeCompletions:
+    def __init__(self, responses):
+        self._responses = list(responses)
+        self.calls = []
+
+    def create(self, **kwargs):
+        self.calls.append(kwargs)
+        if not self._responses:
+            raise AssertionError("no more fake analyzer responses queued")
+        return self._responses.pop(0)
+
+
+class _SequenceFakeOpenAI:
+    def __init__(self, responses):
+        self.chat = types.SimpleNamespace(
+            completions=_SequenceFakeCompletions(responses)
+        )
 
 
 def test_broadband_analyzer_uses_structured_schema(monkeypatch):
@@ -1348,6 +1386,81 @@ def test_broadband_analyzer_uses_structured_schema(monkeypatch):
         "OTT와 IPTV 경쟁 변화",
         "경쟁사별 가입자 수치",
     ]
+    assert "content" not in user_payload["document"]
+    assert user_payload["document"]["evidence_passages"][0]["passage_id"] == "P001"
+
+
+def test_broadband_analyzer_chunks_any_long_pdf_and_merges_one_document(monkeypatch):
+    monkeypatch.setenv("TRENDSPARC_SK_BROADBAND_ANALYZER_API_KEY", "test-key")
+    first_quote = "PDF 앞부분에 IPTV 시장 현황이 있다."
+    later_quote = "2026년 IPTV 가입자는 120만 명이다."
+    document = SourceDocument(
+        doc_id="kmcc:70246",
+        source_id="방송미디어통신위원회",
+        title="방송시장 보고서",
+        url="https://www.kmcc.go.kr/download.do?fileSeq=70246",
+        content=first_quote + ("가" * 11900) + "\n\n" + later_quote + ("나" * 1000),
+        media_type="application/pdf",
+        reliability_tier="official",
+    )
+    first_response = _make_response(
+        summary="시장 현황 요약",
+        grounded_claims=[
+            {
+                "claim_id": "c1",
+                "claim_type": "key_point",
+                "claim": "IPTV 시장 현황을 제시한다.",
+                "evidence_quote": first_quote,
+                "evidence_location": "본문 앞부분",
+                "as_of_date": None,
+                "confidence": "high",
+            }
+        ],
+    )
+    second_response = _make_response(
+        summary="가입자 수치 요약",
+        grounded_claims=[
+            {
+                "claim_id": "c1",
+                "claim_type": "metric",
+                "claim": "2026년 IPTV 가입자는 120만 명이다.",
+                "evidence_quote": later_quote,
+                "evidence_location": "후반부 표",
+                "as_of_date": "2026년",
+                "confidence": "high",
+            }
+        ],
+        metric_points=[
+            {
+                "label": "IPTV 가입자",
+                "period": "2026년",
+                "value": 120,
+                "unit": "만 명",
+                "evidence_claim_id": "c1",
+            }
+        ],
+    )
+    fake_openai = _SequenceFakeOpenAI([first_response, second_response])
+    monkeypatch.setattr(analyzer_module, "OpenAI", lambda api_key: fake_openai)
+    monkeypatch.setattr(analyzer_module, "_load_system_prompt", lambda: "system prompt")
+
+    results = analyze(
+        [document],
+        "IPTV 시장 현황과 가입자는?",
+        ["OTT와 IPTV 경쟁 변화"],
+    )
+
+    assert len(results) == 1
+    assert len(fake_openai.chat.completions.calls) == 2
+    assert [claim.claim_id for claim in results[0].grounded_claims] == [
+        "pdf1:c1",
+        "pdf2:c1",
+    ]
+    assert results[0].grounded_claims[1].evidence_location.startswith("PDF 청크 2/2")
+    assert results[0].grounded_claims[1].evidence_passage_id.startswith("pdf2:P")
+    assert results[0].metric_points[0].evidence_claim_id == "pdf2:c1"
+    assert results[0].metric_points[0].evidence_quote == later_quote
+    assert results[0].source_url == document.url
 
 
 def test_broadband_analyzer_rejects_claim_quote_not_found_in_source(monkeypatch):
@@ -1378,6 +1491,136 @@ def test_broadband_analyzer_rejects_claim_quote_not_found_in_source(monkeypatch)
     assert result.relevance_level == "direct"
     assert result.analysis_validation_status == "insufficient_grounding"
     assert result.usable_for_synthesis is False
+
+
+def test_broadband_analyzer_repairs_failed_quote_once_without_changing_claim(monkeypatch):
+    monkeypatch.setenv("TRENDSPARC_SK_BROADBAND_ANALYZER_API_KEY", "test-key")
+    exact_quote = "2026년 IPTV 가입자는 120만 명으로 집계됐다."
+    document = _document().model_copy(
+        update={"content": f"시장 개요 문단이다.\n\n{exact_quote}\n\n후속 설명이다."}
+    )
+    original_claim = "2026년 IPTV 가입자는 120만 명이다."
+    analysis_response = _make_response(
+        grounded_claims=[
+            {
+                "claim_id": "c1",
+                "claim_type": "metric",
+                "claim": original_claim,
+                "evidence_passage_id": "P001",
+                "evidence_quote": "가입자가 약 120만 명이다.",
+                "evidence_location": "가입자 현황",
+                "as_of_date": "2026년",
+                "confidence": "high",
+            }
+        ]
+    )
+    repair_response = _make_quote_repair_response(
+        [
+            {
+                "claim_id": "c1",
+                "evidence_passage_id": "P002",
+                "evidence_quote": exact_quote,
+            }
+        ]
+    )
+    fake_openai = _SequenceFakeOpenAI([analysis_response, repair_response])
+    monkeypatch.setattr(analyzer_module, "OpenAI", lambda api_key: fake_openai)
+    monkeypatch.setattr(analyzer_module, "_load_system_prompt", lambda: "system prompt")
+
+    result = analyze([document], "2026년 IPTV 가입자는?")[0]
+
+    assert len(fake_openai.chat.completions.calls) == 2
+    assert len(result.grounded_claims) == 1
+    assert result.grounded_claims[0].claim == original_claim
+    assert result.grounded_claims[0].evidence_quote == exact_quote
+    assert result.grounded_claims[0].evidence_passage_id == "P002"
+    assert result.analysis_validation_status == "verified"
+    assert result.usable_for_synthesis is True
+    repair_payload = json.loads(
+        fake_openai.chat.completions.calls[1]["messages"][1]["content"]
+    )
+    assert repair_payload["claims_to_repair"][0]["claim"] == original_claim
+    assert "P002" in repair_payload["claims_to_repair"][0]["candidate_passage_ids"]
+    assert any(
+        passage["passage_id"] == "P002"
+        for passage in repair_payload["candidate_passages"]
+    )
+
+
+def test_broadband_analyzer_keeps_valid_claim_when_other_quote_repair_fails(monkeypatch):
+    monkeypatch.setenv("TRENDSPARC_SK_BROADBAND_ANALYZER_API_KEY", "test-key")
+    exact_quote = "OTT 시장 변화와 IPTV 경쟁에 관한 본문입니다."
+    analysis_response = _make_response(
+        grounded_claims=[
+            {
+                "claim_id": "good",
+                "claim_type": "key_point",
+                "claim": "OTT와 IPTV가 경쟁한다.",
+                "evidence_passage_id": "P001",
+                "evidence_quote": exact_quote,
+                "evidence_location": "본문",
+                "as_of_date": None,
+                "confidence": "high",
+            },
+            {
+                "claim_id": "bad",
+                "claim_type": "risk",
+                "claim": "원문에 없는 위험이다.",
+                "evidence_passage_id": "P001",
+                "evidence_quote": "원문에 없는 인용",
+                "evidence_location": None,
+                "as_of_date": None,
+                "confidence": "low",
+            },
+        ]
+    )
+    repair_response = _make_quote_repair_response(
+        [
+            {
+                "claim_id": "bad",
+                "evidence_passage_id": "P001",
+                "evidence_quote": "여전히 원문에 없는 인용",
+            }
+        ]
+    )
+    fake_openai = _SequenceFakeOpenAI([analysis_response, repair_response])
+    monkeypatch.setattr(analyzer_module, "OpenAI", lambda api_key: fake_openai)
+    monkeypatch.setattr(analyzer_module, "_load_system_prompt", lambda: "system prompt")
+
+    result = analyze([_document()], "OTT 시장 변화는?")[0]
+
+    assert [claim.claim_id for claim in result.grounded_claims] == ["good"]
+    assert result.analysis_validation_status == "partial_grounding"
+    assert result.usable_for_synthesis is True
+
+
+def test_broadband_analyzer_normalizes_safe_pdf_spacing_artifacts(monkeypatch):
+    monkeypatch.setenv("TRENDSPARC_SK_BROADBAND_ANALYZER_API_KEY", "test-key")
+    document = _document().model_copy(
+        update={"content": "IPTV\u00a0가입자는 120만\u200b 명이다."}
+    )
+    response = _make_response(
+        grounded_claims=[
+            {
+                "claim_id": "c1",
+                "claim_type": "metric",
+                "claim": "IPTV 가입자는 120만 명이다.",
+                "evidence_passage_id": "P001",
+                "evidence_quote": "IPTV 가입자는 120만 명이다.",
+                "evidence_location": "본문",
+                "as_of_date": None,
+                "confidence": "high",
+            }
+        ]
+    )
+    fake_openai = _FakeOpenAI(response)
+    monkeypatch.setattr(analyzer_module, "OpenAI", lambda api_key: fake_openai)
+    monkeypatch.setattr(analyzer_module, "_load_system_prompt", lambda: "system prompt")
+
+    result = analyze([document], "IPTV 가입자는?")[0]
+
+    assert [claim.claim_id for claim in result.grounded_claims] == ["c1"]
+    assert result.analysis_validation_status == "verified"
 
 
 def test_broadband_analyzer_keeps_only_metrics_found_in_source(monkeypatch):

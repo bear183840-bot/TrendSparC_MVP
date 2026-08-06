@@ -38,6 +38,7 @@ from common.contracts import (
     ReportPlan,
     ReportPurposeClassification,
     SectorRoute,
+    SourceCollectionResult,
     SourceDocument,
     SourceCollectionEvent,
     SourcePlan,
@@ -124,6 +125,7 @@ class PipelineResult(BaseModel):
     sector_route: Optional[SectorRoute] = None
     source_plan: Optional[SourcePlan] = None
     collection_events: list[SourceCollectionEvent] = Field(default_factory=list)
+    source_collection: Optional[SourceCollectionResult] = None
     report_purpose: Optional[ReportPurposeClassification] = None
     # Raw documents exactly as returned by the sector collector, before the
     # processor strips boilerplate or the validator drops documents. Kept so
@@ -137,6 +139,12 @@ class PipelineResult(BaseModel):
     layout: Optional[DynamicLayout] = None
     halted_at_stage: Optional[str] = None
     direct_answer: Optional[str] = None
+
+
+def _normalize_collection_output(output) -> SourceCollectionResult:
+    if isinstance(output, SourceCollectionResult):
+        return output
+    return SourceCollectionResult(documents=list(output))
 
 
 def _call_sector_adapter_stage(sector_route: SectorRoute, role: str, *args):
@@ -340,10 +348,17 @@ def run_pipeline(
             else:
                 output = _call_sector_adapter_stage(result.sector_route, role, *args)
             if role == "collector":
+                result.source_collection = _normalize_collection_output(output)
+                output = list(result.source_collection.documents)
                 result.collected_source_documents = list(output)
             if role == "validator":
                 profile = result.sector_route.matched_profile
-                minimum = profile.min_validated_documents
+                minimum = (
+                    result.source_collection.minimum_validated_documents
+                    if result.source_collection
+                    and result.source_collection.minimum_validated_documents is not None
+                    else profile.min_validated_documents
+                )
                 max_recollections = profile.max_validation_recollection_attempts
                 recollection_attempt = 0
                 while minimum > 0 and len(output) < minimum and recollection_attempt < max_recollections:
@@ -386,7 +401,13 @@ def run_pipeline(
                         )
                     finally:
                         reset_collection_events(progress_token)
+                    retry_collection = _normalize_collection_output(retry_raw)
+                    retry_raw = list(retry_collection.documents)
                     result.collected_source_documents.extend(retry_raw)
+                    if result.source_collection is not None:
+                        result.source_collection = result.source_collection.model_copy(
+                            update={"documents": list(result.collected_source_documents)}
+                        )
                     result.trace.append(
                         StageTrace(stage="sector_adapter.collector.recollection", status=StageStatus.OK)
                     )
@@ -477,7 +498,13 @@ def run_pipeline(
                         )
                     finally:
                         reset_collection_events(progress_token)
+                    retry_collection = _normalize_collection_output(retry_raw)
+                    retry_raw = list(retry_collection.documents)
                     result.collected_source_documents.extend(retry_raw)
+                    if result.source_collection is not None:
+                        result.source_collection = result.source_collection.model_copy(
+                            update={"documents": list(result.collected_source_documents)}
+                        )
                     result.trace.append(
                         StageTrace(stage="sector_adapter.collector.analysis_recollection", status=StageStatus.OK)
                     )
