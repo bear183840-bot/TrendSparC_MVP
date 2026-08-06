@@ -12,7 +12,7 @@ SK Broadband 섹터의 실행용 Source를 관리한다. 이 섹터는 1차 발�
 | SK텔레콤 IR 자료실 (SK브로드밴드 연결 실적) | `official` | `analysis` | `official` | 연결 자회사 매출·실적 IR 자료 |
 | KT 뉴스룸 | `competitor_official` | `press_release` | `official` | 경쟁사 공식 발표 비교 |
 | 한국콘텐츠진흥원(KOCCA) | `market_analysis` | `analysis` | `official` | 콘텐츠·미디어 산업 통계/시장자료 |
-| 영화진흥위원회(KOFIC) | `market_analysis` | `analysis` | `official` | 영화산업 결산·콘텐츠 소비 흐름 |
+| 영화진흥위원회(KOFIC) | `market_analysis` | `analysis` | `official` | 영화산업 결산·SK브로드밴드 IPTV VOD 이용 통계(VKOBIS 연동) |
 | 전자신문(통신) | `search` | `analysis` | `analyst_media` | 통신·미디어 뉴스 보완 |
 | 왓챠피디아 | `user_sentiment` | `review` | `user_generated` | 콘텐츠/OTT 사용자 반응 참고 |
 | LG유플러스 뉴스룸 | `competitor_official` | `press_release` | `official` | 경쟁사(U+tv) 공식 발표 비교 |
@@ -50,7 +50,11 @@ SK Broadband 섹터의 실행용 Source를 관리한다. 이 섹터는 1차 발�
 ### 영화진흥위원회(KOFIC)
 
 - 영화산업 결산, 영화관 입장권 통합전산망, 산업 통계 PDF 자료를 제공하는 공공기관
-- IPTV·OTT·B tv 콘텐츠 소비 흐름과 영화/영상 콘텐츠 시장 변화를 보는 보조 Source
+- 단순 극장 통계 기관이 아니다 — KOFIC은 2013년 SK브로드밴드를 포함한 주요 IPTV/플랫폼
+  사업자(KT, LG유플러스, 홈초이스)와 데이터 연동 협약을 맺어, 온라인상영관 통합전산망(VKOBIS)을
+  통해 SK브로드밴드(B tv) 등 IPTV 플랫폼의 디지털 영화 VOD 이용 건수·온라인 박스오피스 순위,
+  극장·온라인(IPTV) 합산 관람 데이터까지 집계한다(2026-08-06 사용자 확인) — SK브로드밴드 IPTV VOD
+  사업 자체와 직접 연결되는 자료다
 - 웹 상세 페이지에서 PDF 다운로드 파라미터를 추출한 뒤 Firecrawl parse로 본문을 수집한다.
 
 ### 전자신문(통신)
@@ -98,6 +102,30 @@ KOFIC는 PDF 자료가 많아 일반 HTML 크롤링만으로는 본문을 안정
 5. Firecrawl parse로 PDF 본문을 markdown으로 변환
 
 PDF 전용 로직은 `sources/collectors/kofic_pdf.py`에 분리되어 있으며, 브로드밴드 adapter는 해당 helper만 호출한다.
+
+## AI 게이팅 검색 (`collection_method: "ai_gated_search"`)
+
+KOFIC처럼 고정된 게시판/PDF 다운로드가 필요하지는 않지만, 일반 role 기반 검색어
+사다리(`build_source_search_terms`/`build_search_queries`)로는 그 사이트 특유의
+용어를 못 맞추거나(예: 사용자 질문 문구와 그 사이트 자체 표현이 다름), 아무
+질문에나 무조건 검색을 시도하는 게 낭비인 소스가 나오면 이 방식을 쓴다. KOFIC의
+관련성 게이트/검색어 생성 로직(`_ai_source_gate_relevant`,
+`_ai_generate_search_query`, `sectors/sk_broadband/adapter/collector/__init__.py`)
+을 그대로 재사용하는 범용 버전이며, KOFIC의 게시판 목록 파싱이나 PDF 다운로드
+같은 사이트 전용 코드는 전혀 없다 — 순수하게 "GPT가 쓸지 판단 → GPT가 검색어를
+만듦 → Firecrawl이 도메인 제한 검색+스크랩"만 한다.
+
+1. GPT가 질문이 이 소스의 등록된 `topics`와 관련 있는지 먼저 판단(무관하면 아예
+   수집을 건너뜀)
+2. GPT가 이 소스의 `topics`에 맞는 짧은 검색어 하나를 생성(사용자 질문 원문이
+   아니라 그 사이트가 쓸 법한 표현으로)
+3. Firecrawl이 그 검색어로 해당 소스 도메인에 한정해 검색 + 스크랩
+
+**폴백 없음**: GPT 판단이 "무관"이거나, 검색어 생성이 실패/빈 값이거나, 검색
+결과가 0건이면 그 소스는 그냥 0건으로 끝난다 — 기존 규칙 기반 사다리로 재시도하지
+않는다(2026-08-06 사용자 결정, KOFIC 검색 경로에서 먼저 적용됨). 등록만 하면
+`sources/registry/sk_broadband/sources.json`의 `collection_method`에
+`"ai_gated_search"`를 추가하는 것으로 끝 — 새 소스 전용 코드는 필요 없다.
 
 ## 향후 검토 Source
 
