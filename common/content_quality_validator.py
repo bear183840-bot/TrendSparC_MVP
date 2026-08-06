@@ -202,7 +202,20 @@ def dedupe_structured_across_sections(section_items: list[list[Any]]) -> list[li
     for items in section_items:
         kept: list[Any] = []
         for item in items:
-            key = tuple(sorted(item.model_dump().items()))
+            data = item.model_dump()
+            # Identity/provenance fields describe how a fact is routed, not
+            # the fact itself. Ignore them for semantic duplicate detection
+            # while retaining doc/source fields so independent documents are
+            # not accidentally collapsed into one.
+            for field in (
+                "metric_id",
+                "comparison_id",
+                "evidence_claim_id",
+                "evidence_synthesis_claim_id",
+                "evidence_quote",
+            ):
+                data.pop(field, None)
+            key = tuple(sorted(data.items()))
             if key in seen:
                 continue
             seen.add(key)

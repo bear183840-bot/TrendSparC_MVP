@@ -178,7 +178,14 @@ def _repair_section(
     # requested from the OpenAI report writer (see _REPORT_SCHEMA) — always take them
     # from the rule-based fallback, which copies them unmodified from synthesis. This
     # keeps numbers/comparisons exactly as the analyzer extracted them, never rewritten.
-    for field in ("strengths", "weaknesses", "metric_points", "comparison_points"):
+    for field in (
+        "strengths",
+        "weaknesses",
+        "metric_points",
+        "comparison_points",
+        "grounded_claims",
+        "conclusions",
+    ):
         data[field] = fallback_data[field]
     if not data.get("confidence"):
         data["confidence"] = fallback.confidence
@@ -213,6 +220,19 @@ def _fallback_report(
     for section_id in report_plan.sections:
         key_points = synthesis.key_points or synthesis.highlights
         kwargs: dict[str, list] = {}
+        refs = report_plan.section_evidence_map.get(section_id)
+        claim_ids = set(refs.claim_ids) if refs else set()
+        metric_ids = set(refs.metric_ids) if refs else set()
+        comparison_ids = set(refs.comparison_ids) if refs else set()
+        kwargs["grounded_claims"] = [
+            claim for claim in synthesis.grounded_claims
+            if claim.synthesis_claim_id in claim_ids
+        ]
+        conclusion_ids = set(refs.conclusion_ids) if refs else set()
+        kwargs["conclusions"] = [
+            conclusion for conclusion in synthesis.conclusions
+            if conclusion.conclusion_id in conclusion_ids
+        ]
         if section_id in {"issue", "problem", "root_cause", "risk"}:
             kwargs["risks"] = _take(synthesis.risks, limit)
             kwargs["weaknesses"] = _take(synthesis.weaknesses, limit)
@@ -247,6 +267,16 @@ def _fallback_report(
         else:
             kwargs["key_points"] = _take(key_points, limit)
             kwargs["evidence"] = _take(synthesis.evidence, limit)
+        if "metric_points" in kwargs and metric_ids:
+            kwargs["metric_points"] = [
+                point for point in kwargs["metric_points"]
+                if point.metric_id in metric_ids
+            ]
+        if "comparison_points" in kwargs and comparison_ids:
+            kwargs["comparison_points"] = [
+                point for point in kwargs["comparison_points"]
+                if point.comparison_id in comparison_ids
+            ]
         section_ids.append(section_id)
         kwargs_list.append(kwargs)
 
@@ -332,6 +362,10 @@ def generate_report(
                 ),
                 "instructions": report_plan.intent_emphasis,
                 "required_sections": report_plan.sections,
+                "section_evidence_map": {
+                    section_id: refs.model_dump()
+                    for section_id, refs in report_plan.section_evidence_map.items()
+                },
             },
             "audience": profile.model_dump(),
             "synthesis": synthesis.model_dump(),
@@ -365,6 +399,8 @@ def generate_report(
                         "at least 4 distinct items in actions, each ending with its own [doc_id=...] citation "
                         "drawn from synthesis.recommended_actions - do not under-fill them to 1-2 items. "
                         "Keep every [doc_id=...] marker attached to its claim, never invent facts, and state uncertainty. "
+                        "Use purpose.section_evidence_map to decide which verified conclusions, claims, metrics, and "
+                        "comparisons belong in each section; never move an unsupported fact into another section. "
                         "Copy names in canonical_entities exactly; never abbreviate, translate, or respell them. "
                         "Put recommendations in actions, risks in risks, opportunities in opportunities, and sources in evidence. "
                         "Return every required section_id exactly once and in the supplied order. "

@@ -1386,9 +1386,32 @@ def test_broadband_analyzer_keeps_only_metrics_found_in_source(monkeypatch):
         update={"content": "2025년 IPTV 가입자는 100만 명이다. OTT 시장 변화와 IPTV 경쟁에 관한 본문입니다."}
     )
     response = _make_response(
+        grounded_claims=[
+            {
+                "claim_id": "metric1",
+                "claim_type": "metric",
+                "claim": "2025년 IPTV 가입자는 100만 명이다.",
+                "evidence_quote": "2025년 IPTV 가입자는 100만 명이다.",
+                "evidence_location": "본문",
+                "as_of_date": "2025년",
+                "confidence": "high",
+            }
+        ],
         metric_points=[
-            {"label": "IPTV 가입자", "period": "2025년", "value": 100, "unit": "만 명"},
-            {"label": "매출", "period": "2024년", "value": 999, "unit": "억원"},
+            {
+                "label": "IPTV 가입자",
+                "period": "2025년",
+                "value": 100,
+                "unit": "만 명",
+                "evidence_claim_id": "metric1",
+            },
+            {
+                "label": "매출",
+                "period": "2024년",
+                "value": 999,
+                "unit": "억원",
+                "evidence_claim_id": "metric1",
+            },
         ]
     )
     fake_openai = _FakeOpenAI(response)
@@ -1400,6 +1423,8 @@ def test_broadband_analyzer_keeps_only_metrics_found_in_source(monkeypatch):
     assert len(result.metric_points) == 1
     assert result.metric_points[0].period == "2025년"
     assert result.metric_points[0].value == 100
+    assert result.metric_points[0].evidence_claim_id == "metric1"
+    assert result.metric_points[0].evidence_quote == "2025년 IPTV 가입자는 100만 명이다."
 
 
 def test_broadband_analyzer_keeps_only_comparisons_linked_to_verified_claims(monkeypatch):

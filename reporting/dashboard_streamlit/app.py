@@ -40,6 +40,20 @@ from reporting.dashboard_streamlit.theme import dashboard_css
 
 SECTORS_DIR = PROJECT_ROOT / "sectors"
 _SECTOR_ENGLISH_NAME = re.compile(r"\(([^)]+)\)")
+_INTERNAL_PROVENANCE_KEYS = {"grounded_claims", "conclusions"}
+
+
+def _without_internal_provenance(value):
+    """Remove audit-only claim graphs from user-visible debug JSON."""
+    if isinstance(value, dict):
+        return {
+            key: _without_internal_provenance(item)
+            for key, item in value.items()
+            if key not in _INTERNAL_PROVENANCE_KEYS
+        }
+    if isinstance(value, list):
+        return [_without_internal_provenance(item) for item in value]
+    return value
 
 
 def _sector_english_label(sector_id: str, display_name: str) -> str:
@@ -320,5 +334,9 @@ with st.expander("실행 기록 및 원본 계약"):
     st.json({
         "trace": [trace.model_dump(mode="json") for trace in result.trace],
         "attachments": [item.model_dump(mode="json") for item in result.attachment_extractions],
-        "layout": result.layout.model_dump(mode="json") if result.layout else None,
+        "layout": (
+            _without_internal_provenance(result.layout.model_dump(mode="json"))
+            if result.layout
+            else None
+        ),
     })

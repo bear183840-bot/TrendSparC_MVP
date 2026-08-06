@@ -21,6 +21,20 @@ from reporting.dashboard_streamlit.blocks.base import BlockDefinition
 from reporting.dashboard_streamlit.blocks.registry import register
 from reporting.dashboard_streamlit.components import clean_citation
 
+_INTERNAL_PROVENANCE_KEYS = {"grounded_claims", "conclusions"}
+
+
+def _without_internal_provenance(value: Any) -> Any:
+    if isinstance(value, dict):
+        return {
+            key: _without_internal_provenance(item)
+            for key, item in value.items()
+            if key not in _INTERNAL_PROVENANCE_KEYS
+        }
+    if isinstance(value, list):
+        return [_without_internal_provenance(item) for item in value]
+    return value
+
 
 class AutoContent(BaseModel):
     """Structural fallback - shape varies per section, kept open on purpose."""
@@ -68,7 +82,7 @@ def _render_scalar_or_collection(label: str, value: Any) -> None:
 
 def render_auto(block: DashboardBlock) -> None:
     for key, value in block.content.items():
-        if key in {"title", "section_id"}:
+        if key in {"title", "section_id", *_INTERNAL_PROVENANCE_KEYS}:
             continue
         _render_scalar_or_collection(key, value)
     if block.data is not None:
@@ -117,7 +131,7 @@ def render_custom(block: DashboardBlock) -> None:
     st.caption(f"'{block.block_type}' 블록은 임시 표시 방식으로 렌더링됩니다.")
     data = _shared.payload(block)
     if data not in (None, {}, []):
-        st.json(data)
+        st.json(_without_internal_provenance(data))
 
 
 register(BlockDefinition(block_type="auto", schema=AutoContent, render=render_auto, description="블록 타입 미지정 시 필드를 그대로 나열하는 구조적 폴백."))

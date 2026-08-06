@@ -63,6 +63,10 @@ _SYSTEM_PROMPT = (
     "keeping older material only when it is necessary historical context.\n"
     "Never return a URL listed in search_context.excluded_urls. Use any "
     "validation_feedback to replace documents rejected by downstream checks.\n"
+    "When registered_source_hints are supplied, prefer relevant documents from "
+    "those registered domains. Do not force an inaccessible or off-topic registered "
+    "source: use other grounded web sources as fallbacks, and keep the result set "
+    "diverse across independent domains.\n"
     "STRICT RELEVANCE RULE: only cite an article if it is substantively "
     "ABOUT the query's core subject. Do not cite an article that merely "
     "mentions the subject in passing while primarily covering something "
@@ -162,6 +166,27 @@ def _fallback_next_query(
     return query
 
 
+def _diversity_follow_up_query(
+    search_context: WebSearchContext | None,
+    tried_queries: list[str],
+) -> str | None:
+    """Build a bounded fallback when evidence is sound but still too sparse."""
+    if search_context is None:
+        return None
+    anchor = (search_context.company_name or search_context.question).strip()
+    if not anchor:
+        return None
+    for angle in (
+        "공식 발표 통계",
+        "산업 분석 경쟁사 비교",
+        "시장 전망 대응 전략",
+    ):
+        query = f"{anchor} {angle}"
+        if query not in tried_queries:
+            return query
+    return None
+
+
 def _parse_round_judgment(response) -> tuple[bool, list[str]]:
     """Gracefully extract {"sufficient": ..., "next_queries": [...]} from the
     round's free-text reply. Tries the last non-empty line first (the model
@@ -253,6 +278,74 @@ def _grounded_candidates(response) -> list[_Citation]:
     return deduped
 
 
+def _registered_source_index(url: str, all_sources: list[PlannedSource]) -> int | None:
+    """Return registry order for a matching domain, or ``None`` when unregistered."""
+    netloc = urlparse(url).netloc.lower()
+    for index, source in enumerate(all_sources):
+        candidate_domain = urlparse(source.url or "").netloc.lower()
+        if candidate_domain and (
+            netloc == candidate_domain or netloc.endswith("." + candidate_domain)
+        ):
+            return index
+    return None
+
+
+def _prioritize_candidates(
+    candidates: list[_Citation],
+    all_sources: list[PlannedSource],
+    existing_documents: list[SourceDocument],
+    limit: int,
+) -> list[_Citation]:
+    """Prefer registered domains while spreading candidates across domains."""
+    if limit <= 0:
+        return []
+
+    indexed = [
+        (position, candidate, _registered_source_index(candidate.url, all_sources))
+        for position, candidate in enumerate(candidates)
+    ]
+    ranked = sorted(
+        indexed,
+        key=lambda item: (
+            item[2] is None,
+            item[2] if item[2] is not None else len(all_sources),
+            item[0],
+        ),
+    )
+    existing_domain_counts: dict[str, int] = {}
+    for document in existing_documents:
+        domain = urlparse(document.url or "").netloc.lower()
+        if domain:
+            existing_domain_counts[domain] = existing_domain_counts.get(domain, 0) + 1
+
+    selected: list[_Citation] = []
+    selected_domains: set[str] = set()
+    for _, candidate, _ in ranked:
+        domain = urlparse(candidate.url).netloc.lower()
+        if not domain or existing_domain_counts.get(domain, 0) >= 2 or domain in selected_domains:
+            continue
+        selected.append(candidate)
+        selected_domains.add(domain)
+        if len(selected) >= limit:
+            return selected
+
+    for _, candidate, _ in ranked:
+        if candidate in selected:
+            continue
+        domain = urlparse(candidate.url).netloc.lower()
+        selected_from_domain = sum(
+            1
+            for selected_candidate in selected
+            if urlparse(selected_candidate.url).netloc.lower() == domain
+        )
+        if not domain or existing_domain_counts.get(domain, 0) + selected_from_domain >= 2:
+            continue
+        selected.append(candidate)
+        if len(selected) >= limit:
+            break
+    return selected
+
+
 def _attribute_source(url: str, all_sources: list[PlannedSource]) -> tuple[str, str | None]:
     """Match a grounded URL's domain against every registered source in this
     pipeline run (not just the one that triggered this search round) and
@@ -322,6 +415,7 @@ def _scrape_candidate(
 def _call_round(
     openai_client,
     source: PlannedSource | None,
+    all_sources: list[PlannedSource],
     query: str,
     config: HarnessConfig,
     search_context: WebSearchContext | None = None,
@@ -343,12 +437,26 @@ def _call_round(
     request_payload = {
         "search_context": context_payload,
         "current_round_query": query,
+        "target_relevant_documents": config.target_docs,
+        "minimum_relevant_documents_for_target": config.min_scraped_docs_for_sufficient,
         "instructions": (
             "Search anywhere on the live web. Return up to "
             f"{config.max_candidates_per_round} distinct, strictly on-topic evidence URLs "
-            "for this round. Registered sources are attribution and reliability metadata, "
-            "not a list of domains that must each be searched."
+            "for this round. Prefer relevant registered sources first, then use other "
+            "grounded web sources to fill evidence gaps. Favor independent domains and "
+            "different evidence types over near-duplicate coverage."
         ),
+        "registered_source_hints": [
+            {
+                "name": registered_source.name,
+                "url": registered_source.url,
+                "role": registered_source.role or "unspecified",
+                "reliability_tier": registered_source.reliability_tier,
+                "topics": registered_source.topics,
+            }
+            for registered_source in all_sources
+            if registered_source.url
+        ],
     }
     if source is not None:
         request_payload["registered_source_hint"] = {
@@ -413,6 +521,7 @@ def _assess_scraped_evidence(
         "perspective": search_context.perspective,
         "report_purpose_id": search_context.report_purpose_id,
         "required_information_needs": search_context.information_needs,
+        "minimum_relevant_document_count": config.min_scraped_docs_for_sufficient,
         "documents": [
             {
                 "doc_id": document.doc_id,
@@ -436,7 +545,8 @@ def _assess_scraped_evidence(
                         "Evaluate only the supplied Firecrawl source text. Mark a document relevant "
                         "only when it contains substantive evidence for the original question, not a "
                         "passing mention. Identify which required information needs are actually covered. "
-                        "Set sufficient=true only when the evidence can support a defensible answer. "
+                        "Set sufficient=true only when the evidence can support a defensible answer and "
+                        "the supplied minimum_relevant_document_count is met. "
                         "If evidence is missing, propose 1-3 focused web queries targeting only those gaps."
                     ),
                 },
@@ -503,13 +613,16 @@ def _run_search_harness_result(
     rounds_completed = 0
     final_sufficient = False
     final_documents: list[SourceDocument] = []
+    accepted_doc_ids: set[str] = set()
     covered_information_needs: list[str] = []
     missing_information_needs = list(search_context.information_needs) if search_context else []
 
     for round_index in range(config.max_rounds):
         tried_queries.append(query)
         try:
-            response = _call_round(openai_client, source, query, config, search_context)
+            response = _call_round(
+                openai_client, source, all_sources, query, config, search_context
+            )
         except Exception as exc:  # noqa: BLE001
             label = source.name if source is not None else "question"
             print(f"[ai_search_harness] round call failed for '{label}': {exc}", file=sys.stderr)
@@ -518,7 +631,12 @@ def _run_search_harness_result(
 
         candidates = _grounded_candidates(response)
         new_candidates = [candidate for candidate in candidates if candidate.url not in attempted_urls]
-        round_candidates = new_candidates[: max(0, config.max_candidates_per_round)]
+        round_candidates = _prioritize_candidates(
+            new_candidates,
+            all_sources,
+            documents,
+            max(0, config.max_candidates_per_round),
+        )
         label = source.name if source is not None else "question"
         print(
             f"[ai_search_harness] round {round_index + 1} for '{label}' query='{query}': "
@@ -563,11 +681,27 @@ def _run_search_harness_result(
                     search_context.information_needs if search_context else [],
                 )
                 relevant_ids = set(assessment.relevant_doc_ids)
-                final_documents = [document for document in documents if document.doc_id in relevant_ids]
+                accepted_doc_ids.update(relevant_ids)
+                final_documents = [
+                    document for document in documents
+                    if document.doc_id in accepted_doc_ids
+                ]
+                # Retain good evidence across rounds while allowing weak pages
+                # to be replaced instead of consuming the target-doc budget.
+                documents = list(final_documents)
                 covered_information_needs = assessment.covered_information_needs
                 missing_information_needs = assessment.missing_information_needs
                 sufficient = assessment.sufficient
                 next_queries = assessment.next_queries
+                if (
+                    len(final_documents) < config.min_scraped_docs_for_sufficient
+                    and not next_queries
+                ):
+                    diversity_query = _diversity_follow_up_query(
+                        search_context, tried_queries
+                    )
+                    if diversity_query:
+                        next_queries = [diversity_query]
             else:
                 sufficient = False
                 next_queries = []

@@ -428,10 +428,11 @@ def run_pipeline(
                 usable = _usable_analyses(output)
                 profile = result.sector_route.matched_profile
                 minimum = profile.min_analyzed_documents
+                target = max(minimum, profile.target_analyzed_documents)
                 max_recollections = profile.max_analysis_recollection_attempts
                 recollection_attempt = 0
 
-                while minimum > 0 and len(usable) < minimum and recollection_attempt < max_recollections:
+                while target > 0 and len(usable) < target and recollection_attempt < max_recollections:
                     recollection_attempt += 1
                     previous_context = result.source_plan.search_context
                     if previous_context is None:
@@ -459,7 +460,8 @@ def run_pipeline(
                                 *previous_context.validation_feedback,
                                 (
                                     f"Analyzer retained {len(usable)} usable documents; "
-                                    f"collect replacement evidence for missing needs: {missing_needs}."
+                                    f"collect toward the target of {target} usable documents "
+                                    f"with replacement evidence for missing needs: {missing_needs}."
                                 ),
                             ],
                         }
@@ -524,6 +526,12 @@ def run_pipeline(
                             "insufficient usable analyses after bounded recollection "
                             f"({len(usable)} < {minimum})"
                         ),
+                    )
+                if target > 0 and len(usable) < target:
+                    print(
+                        "[synthesis] proceeding below analyzer target after bounded "
+                        f"recollection ({len(usable)} < {target}); minimum {minimum} satisfied",
+                        file=sys.stderr,
                     )
 
                 for analysis in output:

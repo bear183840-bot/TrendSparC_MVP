@@ -154,6 +154,7 @@
   "min_validated_documents": 2,
   "max_validation_recollection_attempts": 1,
   "min_analyzed_documents": 2,
+  "target_analyzed_documents": 5,
   "max_analysis_recollection_attempts": 1,
   "pipeline_entrypoint": "sectors.sk_broadband.adapter",
   "system_prompt_path": "sectors/sk_broadband/prompts/system_prompt.md"

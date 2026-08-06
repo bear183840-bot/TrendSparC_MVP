@@ -1,7 +1,7 @@
 import json
 import types
 
-from common.contracts import SynthesisClaim, TrendSynthesis
+from common.contracts import SynthesisClaim, SynthesisConclusion, TrendSynthesis
 from core.synthesis import ai_based as synthesis_ai_module
 from core.synthesis.ai_based import refine_synthesis_ai
 
@@ -22,12 +22,20 @@ def _rule_based_result(
     )
 
 
-def _make_response(highlights, synthesis_text, refusal=None, claim_groups=None, contradictions=None):
+def _make_response(
+    highlights,
+    synthesis_text,
+    refusal=None,
+    claim_groups=None,
+    contradictions=None,
+    conclusions=None,
+):
     message = types.SimpleNamespace(
         content=json.dumps(
             {
                 "highlights": highlights,
                 "synthesis_text": synthesis_text,
+                "conclusions": conclusions or [],
                 "claim_groups": claim_groups or [],
                 "contradictions": contradictions or [],
             }
@@ -111,6 +119,55 @@ def test_uses_ai_output_when_api_key_configured(monkeypatch):
     assert result.sector_id == rule_based.sector_id
     assert result.grounded_claims == [grounded_claim]
     assert result.covered_information_needs == ["현황"]
+
+
+def test_ai_conclusions_keep_only_verified_support_ids(monkeypatch):
+    monkeypatch.setenv("TRENDSPARC_SYNTHESIS_AI_API_KEY", "test-key")
+    response = _make_response(
+        ["요약"],
+        "종합 결론",
+        conclusions=[
+            {
+                "conclusion": "검증된 결론",
+                "supporting_claim_ids": ["doc1:c1"],
+                "confidence": "high",
+            },
+            {
+                "conclusion": "일부 근거가 조작된 결론",
+                "supporting_claim_ids": ["doc1:c1", "invented:c10"],
+                "confidence": "high",
+            },
+        ],
+    )
+    monkeypatch.setattr(synthesis_ai_module, "OpenAI", lambda api_key: _FakeOpenAI(response))
+    claim = SynthesisClaim(
+        synthesis_claim_id="doc1:c1",
+        claim_id="c1",
+        claim_type="key_point",
+        claim="검증된 주장",
+        evidence_quote="원문 근거",
+        confidence="high",
+        doc_id="doc1",
+        source_id="source1",
+    )
+    rule_based = _rule_based_result(
+        ["요약"],
+        grounded_claims=[claim],
+        conclusions=[
+            SynthesisConclusion(
+                conclusion_id="rule:doc1:c1",
+                conclusion="검증된 주장",
+                supporting_claim_ids=["doc1:c1"],
+                confidence="high",
+            )
+        ],
+    )
+
+    result = refine_synthesis_ai(rule_based, "질문")
+
+    assert len(result.conclusions) == 1
+    assert result.conclusions[0].conclusion == "검증된 결론"
+    assert result.conclusions[0].supporting_claim_ids == ["doc1:c1"]
 
 
 def test_falls_back_to_rule_based_on_api_failure(monkeypatch):

@@ -192,15 +192,21 @@ def test_pipeline_recollects_when_validation_leaves_fewer_than_profile_minimum(m
     result = run_pipeline(request, dry_run=False)
 
     assert result.halted_at_stage is None
-    assert len(collector_plans) == 2
+    # One validation recollection reaches the hard minimum, then one bounded
+    # analysis recollection still tries to approach the profile target (5).
+    assert len(collector_plans) == 3
     retry_context = collector_plans[1].search_context
     assert set(retry_context.excluded_urls) == {
         "https://one.example.com/a",
         "https://bad.example.com/a",
     }
     assert retry_context.validation_feedback
-    assert [analysis.doc_id for analysis in result.document_analyses] == ["d1", "d2"]
+    assert [analysis.doc_id for analysis in result.document_analyses] == ["d1", "d2", "d3"]
     assert any(trace.stage == "sector_adapter.collector.recollection" for trace in result.trace)
+    assert any(
+        trace.stage == "sector_adapter.collector.analysis_recollection"
+        for trace in result.trace
+    )
 
 
 def test_pipeline_recollects_when_analyzer_leaves_fewer_than_profile_minimum(monkeypatch):
@@ -261,6 +267,10 @@ def test_pipeline_recollects_when_analyzer_leaves_fewer_than_profile_minimum(mon
         "https://one.example/a",
         "https://bad.example/a",
     }
+    assert any(
+        "target of 5 usable documents" in feedback
+        for feedback in collector_plans[1].search_context.validation_feedback
+    )
     assert {analysis.doc_id for analysis in result.document_analyses} == {"d1", "d2", "d3"}
     assert any(
         trace.stage == "sector_adapter.collector.analysis_recollection"

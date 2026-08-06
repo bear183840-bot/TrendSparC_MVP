@@ -49,7 +49,7 @@ _ANALYSIS_SCHEMA = {
                     "claim_id": {"type": "string", "description": "문서 안에서 고유한 짧은 ID, 예: c1."},
                     "claim_type": {
                         "type": "string",
-                        "enum": ["key_point", "business_impact", "risk", "opportunity", "strength", "weakness", "comparison", "action", "monitoring"],
+                        "enum": ["key_point", "business_impact", "risk", "opportunity", "strength", "weakness", "comparison", "metric", "action", "monitoring"],
                     },
                     "claim": {"type": "string"},
                     "evidence_quote": {"type": "string", "description": "원문에서 그대로 복사한 짧은 문장 또는 구절."},
@@ -76,8 +76,12 @@ _ANALYSIS_SCHEMA = {
                     "period": {"type": "string", "description": "문서에 명시된 시점 그대로, 예: '2023년 2분기'"},
                     "value": {"type": "number"},
                     "unit": {"type": "string", "description": "예: '만 명', '억원'. 없으면 빈 문자열."},
+                    "evidence_claim_id": {
+                        "type": "string",
+                        "description": "이 수치 전체를 직접 인용한 claim_type=metric grounded_claim의 claim_id.",
+                    },
                 },
-                "required": ["label", "period", "value", "unit"],
+                "required": ["label", "period", "value", "unit", "evidence_claim_id"],
                 "additionalProperties": False,
             },
         },
@@ -162,9 +166,16 @@ def _number_is_in_content(value: float, content: str) -> bool:
     return any(re.search(rf"(?<![\d.]){re.escape(candidate)}(?![\d.])", compact) for candidate in candidates)
 
 
-def _verified_metric_points(data: dict, analyzed_content: str) -> list[dict]:
+def _verified_metric_points(
+    data: dict, analyzed_content: str, grounded_claims: list[dict]
+) -> list[dict]:
     verified: list[dict] = []
     normalized_content = _normalized_text(analyzed_content)
+    metric_claims = {
+        claim["claim_id"]: claim
+        for claim in grounded_claims
+        if claim["claim_type"] == "metric"
+    }
     for point in data.get("metric_points", []):
         period = _normalized_text(str(point.get("period", "")))
         unit = _normalized_text(str(point.get("unit", "")))
@@ -175,7 +186,18 @@ def _verified_metric_points(data: dict, analyzed_content: str) -> list[dict]:
             continue
         if not isinstance(value, (int, float)) or not _number_is_in_content(float(value), analyzed_content):
             continue
-        verified.append(point)
+        evidence_claim = metric_claims.get(point.get("evidence_claim_id"))
+        if evidence_claim is None:
+            continue
+        quote = evidence_claim["evidence_quote"]
+        normalized_quote = _normalized_text(quote)
+        if period not in normalized_quote:
+            continue
+        if unit and unit not in normalized_quote:
+            continue
+        if not _number_is_in_content(float(value), quote):
+            continue
+        verified.append({**point, "evidence_quote": quote})
     return verified
 
 
@@ -227,6 +249,9 @@ def _analyze_document(
                 "comparison_points로 추출하되 명시되지 않은 값은 추정하거나 계산하지 말 것. 특히 재무제표나 "
                 "실적 표는 같은 항목이 3Q25/3Q24/2Q25처럼 여러 시점 컬럼으로 나란히 나오는 경우가 많으므로, "
                 "한 시점만 뽑지 말고 같은 label로 시점마다 별도의 metric_point를 표에 있는 시점 수만큼 전부 추출하라. "
+                "metric_points의 모든 수치는 값·단위·시점을 함께 직접 인용한 "
+                "claim_type=metric grounded_claim을 먼저 만들고, 그 claim_id를 "
+                "evidence_claim_id로 연결하라. "
                 "관련성은 direct/partial/background/irrelevant 중 하나로 분류하고 이유를 적어라. 질문에 답하는 모든 "
                 "핵심 주장은 grounded_claims에 넣고, evidence_quote는 반드시 입력 document.content에서 짧게 그대로 복사하라. "
                 "각 claim에는 용도에 맞는 claim_type을 지정하라. 위험·기회·비교·액션 등 전략 판단은 반드시 "
@@ -307,7 +332,7 @@ def _analyze_document(
             opportunity=_joined_claims(grounded_claims, "opportunity"),
             strength=_joined_claims(grounded_claims, "strength"),
             weakness=_joined_claims(grounded_claims, "weakness"),
-            metric_points=_verified_metric_points(data, analyzed_content),
+            metric_points=_verified_metric_points(data, analyzed_content, grounded_claims),
             comparison_points=_verified_comparison_points(data, grounded_claims),
             recommended_actions=action_claims,
             monitoring_indicators=_claim_texts(grounded_claims, "monitoring"),

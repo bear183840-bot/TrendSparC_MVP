@@ -38,6 +38,30 @@ def _adaptation(audience_id: str, adapted_sections: dict) -> AudienceAdaptation:
     return AudienceAdaptation(request_id="req_content_type", audience_id=audience_id, adapted_sections=adapted_sections)
 
 
+def test_internal_provenance_survives_layout_without_affecting_block_type():
+    plan = _plan("_default", ["overview"])
+    provenance = [
+        {
+            "synthesis_claim_id": "doc1:c1",
+            "claim_id": "c1",
+            "claim_type": "key_point",
+            "claim": "검증된 주장",
+            "evidence_quote": "원문 근거",
+            "confidence": "high",
+            "doc_id": "doc1",
+        }
+    ]
+    adaptation = _adaptation(
+        "_default",
+        {"overview": {"title": "종합 결론", "grounded_claims": provenance}},
+    )
+
+    layout = generate_layout(plan, adaptation)
+
+    assert layout.blocks[0].block_type == "text"
+    assert layout.blocks[0].content["grounded_claims"] == provenance
+
+
 def test_two_period_metric_series_renders_as_chart_even_when_static_table_says_otherwise():
     # "opportunity" is statically mapped to "matrix" - proves real content wins over that fallback.
     plan = _plan("_default", ["opportunity"])

@@ -34,7 +34,13 @@ import sys
 
 from openai import OpenAI
 
-from common.contracts import Contradiction, ContradictingClaim, CorroboratedPoint, TrendSynthesis
+from common.contracts import (
+    Contradiction,
+    ContradictingClaim,
+    CorroboratedPoint,
+    SynthesisConclusion,
+    TrendSynthesis,
+)
 
 _API_KEY_ENV_VAR = "TRENDSPARC_SYNTHESIS_AI_API_KEY"
 _MODEL = "gpt-4o-mini"
@@ -45,10 +51,9 @@ _MIN_INDEPENDENT_SOURCES_FOR_CORROBORATION = 2
 
 _SYSTEM_PROMPT = """You are a synthesis assistant for TrendSparC, an internal AI \
 trend-intelligence tool used across multiple, unrelated business sectors. You will be \
-given the original question the user asked, plus a flat JSON array of key_points \
-already extracted from several source documents about that question — some may \
-restate the same fact in different words, and they carry no particular order. Each \
-point is tagged with the doc_id of the document it came from.
+given the original question, verified structured claims, and a legacy flat list of \
+tagged points for backward compatibility. Each structured claim has a stable \
+synthesis_claim_id that already passed Analyzer quote verification.
 
 Your job:
 - Remove near-duplicate points (the same fact stated more than once, even if worded \
@@ -59,7 +64,12 @@ original question (not just "important in general").
 - Write a short (2-4 sentence) synthesis_text paragraph in Korean that directly \
 answers the original question using the remaining points — a "so what" overview \
 grounded in what was actually asked, not a generic bullet-point restatement.
-- Separately, group the ORIGINAL (pre-deduplication) key_points by underlying claim: \
+- Return a conclusions array. Each conclusion must be supported only by IDs from the \
+supplied verified_claims array. Put every supporting synthesis_claim_id in \
+supporting_claim_ids and assign a conservative confidence. Do not return a conclusion \
+when no verified claim supports it. The IDs are internal provenance metadata and are \
+not presentation copy.
+- Separately, group the legacy pre-deduplication tagged points by underlying claim: \
 for each group of >= 1 point that states essentially the same fact (even if worded \
 differently across documents), list the claim and every doc_id that stated it. \
 Include single-doc_id groups too — do not skip claims that only appear once. Do not \
@@ -83,6 +93,22 @@ _SCHEMA = {
     "properties": {
         "highlights": {"type": "array", "items": {"type": "string"}},
         "synthesis_text": {"type": "string"},
+        "conclusions": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "additionalProperties": False,
+                "properties": {
+                    "conclusion": {"type": "string"},
+                    "supporting_claim_ids": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                    },
+                    "confidence": {"type": "string", "enum": ["low", "medium", "high"]},
+                },
+                "required": ["conclusion", "supporting_claim_ids", "confidence"],
+            },
+        },
         "claim_groups": {
             "type": "array",
             "items": {
@@ -119,7 +145,7 @@ _SCHEMA = {
             },
         },
     },
-    "required": ["highlights", "synthesis_text", "claim_groups", "contradictions"],
+    "required": ["highlights", "synthesis_text", "conclusions", "claim_groups", "contradictions"],
     "additionalProperties": False,
 }
 
@@ -177,15 +203,56 @@ def _filter_contradictions(raw_contradictions: list[dict], doc_source_map: dict[
     return contradictions
 
 
+def _validated_conclusions(
+    raw_conclusions: list[dict], rule_based_result: TrendSynthesis
+) -> list[SynthesisConclusion]:
+    """Keep only conclusions whose every retained support ID really exists."""
+    known_claim_ids = {
+        claim.synthesis_claim_id for claim in rule_based_result.grounded_claims
+    }
+    conclusions: list[SynthesisConclusion] = []
+    for index, item in enumerate(raw_conclusions, 1):
+        text = item.get("conclusion")
+        raw_supporting_ids = list(dict.fromkeys(item.get("supporting_claim_ids") or []))
+        if (
+            not text
+            or not raw_supporting_ids
+            or any(claim_id not in known_claim_ids for claim_id in raw_supporting_ids)
+        ):
+            continue
+        conclusions.append(
+            SynthesisConclusion(
+                conclusion_id=f"ai-conclusion-{index}",
+                conclusion=text,
+                supporting_claim_ids=raw_supporting_ids,
+                confidence=item.get("confidence") or "medium",
+            )
+        )
+    return conclusions
+
+
 def refine_synthesis_ai(rule_based_result: TrendSynthesis, question: str) -> TrendSynthesis:
     api_key = os.environ.get(_API_KEY_ENV_VAR)
-    if not api_key or not rule_based_result.highlights:
+    if not api_key or not (rule_based_result.highlights or rule_based_result.grounded_claims):
         return rule_based_result
 
     try:
         client = OpenAI(api_key=api_key)
         user_content = json.dumps(
-            {"question": question, "key_points": rule_based_result.highlights},
+            {
+                "question": question,
+                "verified_claims": [
+                    {
+                        "synthesis_claim_id": claim.synthesis_claim_id,
+                        "claim_type": claim.claim_type,
+                        "claim": claim.claim,
+                        "source_id": claim.source_id,
+                        "confidence": claim.confidence,
+                    }
+                    for claim in rule_based_result.grounded_claims
+                ],
+                "legacy_tagged_points": rule_based_result.highlights,
+            },
             ensure_ascii=False,
         )
         response = client.chat.completions.create(
@@ -214,6 +281,9 @@ def refine_synthesis_ai(rule_based_result: TrendSynthesis, question: str) -> Tre
         contradictions = _filter_contradictions(
             data.get("contradictions") or [], rule_based_result.doc_source_map
         )
+        conclusions = _validated_conclusions(
+            data.get("conclusions") or [], rule_based_result
+        )
         return rule_based_result.model_copy(
             update={
                 "highlights": data["highlights"],
@@ -221,6 +291,7 @@ def refine_synthesis_ai(rule_based_result: TrendSynthesis, question: str) -> Tre
                 "corroborated_points": corroborated_points,
                 "uncorroborated_points": uncorroborated_points,
                 "contradictions": contradictions,
+                "conclusions": conclusions or rule_based_result.conclusions,
             }
         )
     except Exception as exc:  # noqa: BLE001 - AI refinement is best-effort, never fatal

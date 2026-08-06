@@ -62,6 +62,11 @@ def adapt_for_audience(
                 "unique_source_count": generated_report.unique_source_count,
                 "limitations": generated_report.limitations,
                 "generation_mode": generated_report.generation_mode,
+                # Internal provenance only; dashboard renderers intentionally
+                # ignore these IDs and keep the visible summary clean.
+                "conclusions": [
+                    conclusion.model_dump() for conclusion in synthesis.conclusions
+                ],
             }
         }
         adapted_sections.update({section.section_id: section.model_dump() for section in generated_report.sections})
@@ -87,6 +92,8 @@ def adapt_for_audience(
             "highlights": list(visible_highlights),
             "source_count": synthesis.source_count,
             "unique_source_count": synthesis.unique_source_count,
+            "conclusions": [conclusion.model_dump() for conclusion in synthesis.conclusions],
+            "grounded_claims": [claim.model_dump() for claim in synthesis.grounded_claims],
         }
 
     return AudienceAdaptation(

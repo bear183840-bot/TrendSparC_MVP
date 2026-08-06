@@ -122,6 +122,9 @@ class SectorProfile(BaseModel):
     min_validated_documents: int = 0
     max_validation_recollection_attempts: int = 0
     min_analyzed_documents: int = 0
+    # Desired evidence depth. The pipeline recollects toward this value but
+    # only halts when `min_analyzed_documents` is not met.
+    target_analyzed_documents: int = 0
     max_analysis_recollection_attempts: int = 0
     pipeline_entrypoint: Optional[str] = None
     system_prompt_path: Optional[str] = None
@@ -293,6 +296,13 @@ class MetricPoint(BaseModel):
     period: str
     value: float
     unit: Optional[str] = None
+    # Stable synthesis-level identity and provenance. Analyzer-produced points
+    # may leave these empty; the rule-based synthesizer fills them without
+    # asking an LLM to invent or alter a number.
+    metric_id: Optional[str] = None
+    evidence_claim_id: Optional[str] = None
+    evidence_synthesis_claim_id: Optional[str] = None
+    evidence_quote: Optional[str] = None
     doc_id: Optional[str] = None
     source_id: Optional[str] = None
     source_url: Optional[str] = None
@@ -307,6 +317,7 @@ class ComparisonPoint(BaseModel):
     criterion: str
     value: str
     level: Optional[Literal["low", "medium", "high"]] = None
+    comparison_id: Optional[str] = None
     evidence_claim_id: Optional[str] = None
     evidence_synthesis_claim_id: Optional[str] = None
     doc_id: Optional[str] = None
@@ -326,6 +337,7 @@ class GroundedClaim(BaseModel):
         "strength",
         "weakness",
         "comparison",
+        "metric",
         "action",
         "monitoring",
     ]
@@ -422,6 +434,7 @@ class SynthesisClaim(BaseModel):
         "strength",
         "weakness",
         "comparison",
+        "metric",
         "action",
         "monitoring",
     ]
@@ -435,6 +448,19 @@ class SynthesisClaim(BaseModel):
     source_title: Optional[str] = None
     source_url: Optional[str] = None
     reliability_tier: Optional[str] = None
+
+
+class SynthesisConclusion(BaseModel):
+    """One synthesized conclusion linked only to verified analyzer claims.
+
+    The IDs are internal audit metadata. UI renderers intentionally show the
+    conclusion text without exposing its claim graph.
+    """
+
+    conclusion_id: str
+    conclusion: str
+    supporting_claim_ids: list[str] = Field(default_factory=list)
+    confidence: Literal["low", "medium", "high"] = "medium"
 
 
 class CorroboratedPoint(BaseModel):
@@ -478,6 +504,7 @@ class TrendSynthesis(BaseModel):
     # legacy tagged strings above, these preserve the verified quote and full
     # document/source provenance without requiring string parsing.
     grounded_claims: list[SynthesisClaim] = Field(default_factory=list)
+    conclusions: list[SynthesisConclusion] = Field(default_factory=list)
     sources: list[SynthesisSource] = Field(default_factory=list)
     covered_information_needs: list[str] = Field(default_factory=list)
     missing_information_needs: list[str] = Field(default_factory=list)
@@ -495,6 +522,15 @@ class TrendSynthesis(BaseModel):
     contradictions: list[Contradiction] = Field(default_factory=list)
 
 
+class SectionEvidenceRefs(BaseModel):
+    """Internal evidence routing for one report section; never UI copy."""
+
+    conclusion_ids: list[str] = Field(default_factory=list)
+    claim_ids: list[str] = Field(default_factory=list)
+    metric_ids: list[str] = Field(default_factory=list)
+    comparison_ids: list[str] = Field(default_factory=list)
+
+
 class ReportPlan(BaseModel):
     request_id: str
     audience_id: str
@@ -503,6 +539,8 @@ class ReportPlan(BaseModel):
     primary_intent: str
     report_purpose: Optional[ReportPurposeClassification] = None
     sections: list[str] = Field(default_factory=list)
+    section_evidence_map: dict[str, SectionEvidenceRefs] = Field(default_factory=dict)
+    omitted_sections: dict[str, str] = Field(default_factory=dict)
     format: Literal["dashboard", "html", "pdf"] = "html"
     intent_emphasis: Optional[str] = None
 
@@ -528,6 +566,10 @@ class GeneratedReportSection(BaseModel):
     comparison_points: list[ComparisonPoint] = Field(default_factory=list)
     actions: list[str] = Field(default_factory=list)
     monitoring_indicators: list[str] = Field(default_factory=list)
+    # Internal provenance only. Audience/layout/UI layers must preserve this
+    # field but do not render claim IDs or quote linkage by default.
+    grounded_claims: list[SynthesisClaim] = Field(default_factory=list)
+    conclusions: list[SynthesisConclusion] = Field(default_factory=list)
     confidence: Optional[str] = None
 
 
