@@ -202,8 +202,10 @@ def dashboard_css(dark: bool, accent_theme: str = "orange") -> str:
       background:color-mix(in srgb,var(--ts-accent) 6%,var(--ts-panel)); }}
     .ts-under-evidenced h3 {{ margin:0 0 .3rem; font-size:.92rem; }}
     .ts-under-evidenced p {{ margin:0; font-size:.8rem; color:var(--ts-muted); line-height:1.5; }}
-    /* Deployment stamp - fixed bottom-right, deliberately quiet. */
-    .ts-build-stamp {{ position:fixed; right:.85rem; bottom:.6rem; z-index:60;
+    /* Deployment stamp - bottom-LEFT, deliberately quiet. Streamlit Cloud
+       renders its own "Manage app" control fixed at bottom-right, which sat
+       on top of this and hid it. */
+    .ts-build-stamp {{ position:fixed; left:.85rem; bottom:.6rem; z-index:60;
       padding:.2rem .5rem; border-radius:5px; font-size:.66rem; font-weight:600;
       letter-spacing:.01em; color:var(--ts-muted); background:var(--ts-panel);
       border:1px solid color-mix(in srgb,var(--ts-line) 45%,transparent);
