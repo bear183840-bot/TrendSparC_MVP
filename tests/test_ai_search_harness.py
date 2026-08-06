@@ -502,6 +502,84 @@ def test_harness_uses_model_proposed_next_queries_across_rounds_not_a_ladder():
     assert "대안 쿼리 A" in round2_user_message
 
 
+def test_harness_deprioritizes_a_domain_that_already_failed_to_scrape_this_run():
+    # Real pattern live-observed against sk_broadband: skbroadband.com's own
+    # press pages repeatedly failed to scrape (proxy/tunnel error, timeout)
+    # across rounds, while other candidates the model already found for a
+    # later round went untried because the failing domain kept winning the
+    # per-round top-N slots on relevance alone.
+    domain_a_first = "https://a.example.com/press-1"
+    domain_a_second = "https://a.example.com/press-2"
+    domain_b = "https://b.example.com/article"
+    domain_c = "https://c.example.com/article"
+    round1 = _response(citations=[_citation_annotation(domain_a_first)], sufficient=False, next_queries=["다음 쿼리"])
+    round2 = _response(
+        # domain A's new page still ranks first per the model's own order -
+        # only our own within-run failure memory should push it back.
+        citations=[
+            _citation_annotation(domain_a_second),
+            _citation_annotation(domain_b),
+            _citation_annotation(domain_c),
+        ],
+        sufficient=True,
+    )
+    openai_client = _FakeOpenAI([round1, round2])
+    firecrawl_client = _FakeFirecrawl(markdown_by_url={domain_a_first: None, domain_a_second: None})
+
+    docs = run_ai_search_harness(
+        openai_client, firecrawl_client, _source(), [_source()], _KEYWORDS, HarnessConfig(max_candidates_per_round=2)
+    )
+
+    # domain_a_second never gets a scrape attempt at all - deprioritized out
+    # of round 2's top-2 selection in favor of the two fresh domains.
+    assert domain_a_second not in firecrawl_client.scrape_calls
+    assert domain_b in firecrawl_client.scrape_calls
+    assert domain_c in firecrawl_client.scrape_calls
+    assert len(docs) == 2
+
+
+def test_harness_never_scrapes_a_registry_blocked_domain():
+    # SectorProfile.blocked_scrape_domains -> WebSearchContext.excluded_domains:
+    # a site the scrape provider currently cannot reach at all (verified
+    # 2026-08-06 for skbroadband.com) must not consume candidate slots or
+    # scrape budget, even though the model still surfaces it as relevant.
+    blocked = "https://www.blocked.example.com/press-1"
+    blocked_subdomain = "https://corp.blocked.example.com/press-2"
+    allowed = "https://allowed.example.com/article"
+    response = _response(
+        citations=[
+            _citation_annotation(blocked),
+            _citation_annotation(blocked_subdomain),
+            _citation_annotation(allowed),
+        ],
+        sufficient=True,
+    )
+    openai_client = _FakeOpenAI([response])
+    firecrawl_client = _FakeFirecrawl()
+    context = WebSearchContext(question="질문", excluded_domains=["blocked.example.com"])
+
+    docs = run_question_search_harness(
+        openai_client, firecrawl_client, [_source()], _KEYWORDS, HarnessConfig(), context
+    )
+
+    assert firecrawl_client.scrape_calls == [allowed]
+    assert [doc.url for doc in docs] == [allowed]
+
+
+def test_harness_tells_the_model_about_excluded_domains():
+    openai_client = _FakeOpenAI([_response(citations=[], sufficient=True)])
+    context = WebSearchContext(question="질문", excluded_domains=["blocked.example.com"])
+
+    run_question_search_harness(
+        openai_client, _FakeFirecrawl(), [_source()], _KEYWORDS, HarnessConfig(), context
+    )
+
+    system_prompt = openai_client.responses.calls[0]["input"][0]["content"]
+    payload = json.loads(openai_client.responses.calls[0]["input"][1]["content"])
+    assert "excluded_domains" in system_prompt
+    assert payload["search_context"]["excluded_domains"] == ["blocked.example.com"]
+
+
 def test_harness_falls_back_to_deterministic_query_when_judgment_unparseable():
     source = _source(topics=["B tv 신규 서비스"])
     round1 = _response(citations=[], sufficient=False, include_judgment=False)  # no JSON block at all

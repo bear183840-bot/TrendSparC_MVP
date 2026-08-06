@@ -61,7 +61,10 @@ _SYSTEM_PROMPT = (
     "Use the supplied as_of_date and the question's requested time range. "
     "For current-status questions prefer the newest reliable evidence, while "
     "keeping older material only when it is necessary historical context.\n"
-    "Never return a URL listed in search_context.excluded_urls. Use any "
+    "Never return a URL listed in search_context.excluded_urls, and never "
+    "return a URL on any domain listed in search_context.excluded_domains "
+    "(those sites cannot currently be retrieved, so citing them wastes the "
+    "round) - find the same facts on another site instead. Use any "
     "validation_feedback to replace documents rejected by downstream checks.\n"
     "STRICT RELEVANCE RULE: only cite an article if it is substantively "
     "ABOUT the query's core subject. Do not cite an article that merely "
@@ -251,6 +254,24 @@ def _grounded_candidates(response) -> list[_Citation]:
         seen.add(candidate.url)
         deduped.append(candidate)
     return deduped
+
+
+def _domain(url: str) -> str:
+    return urlparse(url).netloc.lower()
+
+
+def _is_excluded_domain(url: str, excluded_domains: list[str]) -> bool:
+    """True when the URL sits on (or under) a registry-blocked domain - see
+    SectorProfile.blocked_scrape_domains. Subdomain-aware, so blocking
+    "example.com" also blocks "www.example.com" and "corp.example.com"."""
+    netloc = _domain(url)
+    for excluded in excluded_domains:
+        normalized = excluded.strip().lower()
+        if not normalized:
+            continue
+        if netloc == normalized or netloc.endswith("." + normalized):
+            return True
+    return False
 
 
 def _attribute_source(url: str, all_sources: list[PlannedSource]) -> tuple[str, str | None]:
@@ -499,6 +520,16 @@ def _run_search_harness_result(
     pending_queries: list[str] = []
     documents: list[SourceDocument] = []
     attempted_urls: set[str] = set(search_context.excluded_urls) if search_context else set()
+    # Domains that already failed to scrape earlier in *this* run (timeout,
+    # proxy/tunnel error, etc.) - live-observed against skbroadband.com's own
+    # press pages repeatedly failing via Firecrawl across multiple rounds
+    # while other candidates the model already found went untried. Only
+    # deprioritizes (never excludes outright): a domain that failed once
+    # this run is unlikely to succeed moments later, so other already-found
+    # candidates are a better use of the remaining scrape budget, but if
+    # nothing else is available the domain still gets a fair try.
+    failed_domains: set[str] = set()
+    excluded_domains = list(search_context.excluded_domains) if search_context else []
     scrape_call_count = 0
     rounds_completed = 0
     final_sufficient = False
@@ -518,6 +549,21 @@ def _run_search_harness_result(
 
         candidates = _grounded_candidates(response)
         new_candidates = [candidate for candidate in candidates if candidate.url not in attempted_urls]
+        # Hard guard for registry-blocked domains: the system prompt already
+        # asks the model to avoid them, but a model instruction is not an
+        # enforcement mechanism, so drop them here regardless.
+        blocked = [candidate for candidate in new_candidates if _is_excluded_domain(candidate.url, excluded_domains)]
+        if blocked:
+            print(
+                f"[ai_search_harness] skipped {len(blocked)} candidate(s) on registry-blocked "
+                f"domain(s): {sorted({_domain(candidate.url) for candidate in blocked})}",
+                file=sys.stderr,
+            )
+        new_candidates = [candidate for candidate in new_candidates if candidate not in blocked]
+        # Stable sort: candidates from a domain that hasn't failed yet this
+        # run come first, but a failed-domain candidate is never dropped -
+        # it just sinks behind fresher options within this round's own list.
+        new_candidates = sorted(new_candidates, key=lambda candidate: _domain(candidate.url) in failed_domains)
         round_candidates = new_candidates[: max(0, config.max_candidates_per_round)]
         label = source.name if source is not None else "question"
         print(
@@ -543,6 +589,8 @@ def _run_search_harness_result(
             scrape_call_count += attempts
             if document is not None:
                 documents.append(document)
+            else:
+                failed_domains.add(_domain(citation.url))
             if len(documents) >= config.target_docs:
                 break
 

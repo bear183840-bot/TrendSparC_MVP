@@ -117,6 +117,13 @@ class SectorProfile(BaseModel):
     # branches on a sector id; adding a new sector only requires profile data.
     key_metrics: list[str] = Field(default_factory=list)
     strategic_dimensions: list[str] = Field(default_factory=list)
+    # Optional, registry-owned list of domains to keep out of AI web-search
+    # results for this sector - for a site that is currently unscrapable
+    # (e.g. the scrape provider cannot reach it) rather than one that is
+    # untrustworthy. Core reads this generically and never branches on a
+    # sector id. Remove an entry once the site works again; it is a
+    # temporary operational block, not a judgement about the source.
+    blocked_scrape_domains: list[str] = Field(default_factory=list)
     # Optional, registry-owned post-validation recovery policy. Core reads
     # these values generically and never branches on a sector id.
     min_validated_documents: int = 0
@@ -222,6 +229,9 @@ class WebSearchContext(BaseModel):
     as_of_date: Optional[str] = None
     country_code: str = "KR"
     excluded_urls: list[str] = Field(default_factory=list)
+    # Whole domains to keep out of results, unlike the per-URL excluded_urls
+    # above. Sourced from the routed SectorProfile.blocked_scrape_domains.
+    excluded_domains: list[str] = Field(default_factory=list)
     validation_feedback: list[str] = Field(default_factory=list)
 
 

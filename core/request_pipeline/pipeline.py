@@ -288,6 +288,7 @@ def run_pipeline(
                 information_needs=result.entities.information_needs,
                 suggested_terms=search_terms,
                 as_of_date=request.created_at.date().isoformat(),
+                excluded_domains=list(result.sector_route.matched_profile.blocked_scrape_domains),
             ),
         )
         result.source_plan = select_top_sources(
