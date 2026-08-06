@@ -20,6 +20,7 @@ _FIXTURES = Path(__file__).parent / "fixtures"
 _REVENUE = _FIXTURES / "synthesis_revenue_trend.json"
 _IPTV = _FIXTURES / "synthesis_iptv_competition.json"
 _FUTURE = _FIXTURES / "synthesis_future_business.json"
+_ROOT_CAUSE = _FIXTURES / "synthesis_root_cause.json"
 
 
 def _run(path: Path, audience: str | None = None):
@@ -69,11 +70,16 @@ def test_collection_stages_are_skipped_not_silently_absent():
     "path, expected_sections, expected_blocks",
     [
         (_REVENUE, {"key_metrics", "timeline", "near_term_outlook"}, {"chart", "timeline"}),
-        (_IPTV, {"issue", "impact", "response_actions"}, {"matrix", "list"}),
+        (_IPTV, {"issue", "impact", "response_actions"}, {"table", "list"}),
         (
             _FUTURE,
             {"trend", "opportunity", "investment_signal", "strategic_recommendation"},
             {"matrix", "metrics", "list"},
+        ),
+        (
+            _ROOT_CAUSE,
+            {"problem", "root_cause", "impact", "improvement_plan"},
+            {"matrix", "table", "chart", "list"},
         ),
     ],
 )
@@ -84,9 +90,10 @@ def test_each_purpose_produces_its_own_sections_and_blocks(path, expected_sectio
     assert expected_blocks <= set(_block_types(result))
 
 
-def test_the_three_purposes_do_not_share_a_section_list():
-    plans = [tuple(_run(path).report_plan.sections) for path in (_REVENUE, _IPTV, _FUTURE)]
-    assert len(set(plans)) == 3
+def test_the_four_purposes_do_not_share_a_section_list():
+    paths = (_REVENUE, _IPTV, _FUTURE, _ROOT_CAUSE)
+    plans = [tuple(_run(path).report_plan.sections) for path in paths]
+    assert len(set(plans)) == len(paths)
 
 
 def test_one_off_metrics_in_different_units_are_kpis_not_a_chart():
@@ -142,3 +149,19 @@ def test_audience_changes_tone_and_detail_but_not_structure():
     practitioner_items = sum(len(s.key_points) for s in practitioner.generated_report.sections)
     executive_items = sum(len(s.key_points) for s in executive.generated_report.sections)
     assert executive_items < practitioner_items
+
+
+def test_cause_ranking_lands_in_the_section_that_is_about_causes():
+    """Single ownership is "first in plan order" - except here.
+
+    root_cause's sections run problem -> root_cause -> impact, so the causes
+    ranked by contribution were claimed by Problem Definition, which merely
+    came first, leaving the Root Cause section to fall back on a SWOT matrix
+    that says nothing about causation.
+    """
+    result = _run(_ROOT_CAUSE)
+    owners = {s.section_id for s in result.generated_report.sections if s.comparison_points}
+    by_section = {b.section: b.block_type for b in result.layout.blocks}
+
+    assert owners == {"root_cause"}
+    assert by_section["root_cause"] == "table"

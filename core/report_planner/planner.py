@@ -77,7 +77,20 @@ _CLAIM_TYPES_BY_SECTION = {
 }
 
 _METRIC_SECTIONS = {"current_situation", "market_status", "impact", "key_metrics", "timeline", "investment_signal"}
-_COMPARISON_SECTIONS = {"current_situation", "market_status", "impact"}
+# Sections that can carry an entity-vs-entity comparison. The diagnostic
+# sections belong here as much as the descriptive ones: a root-cause report's
+# comparison is usually the causes ranked against each other, and with only
+# the descriptive sections listed that ranking was routed to "impact", where
+# it lost the block-type tie to the metric chart and rendered nowhere - while
+# the "root_cause" section, having no comparison data of its own, fell back to
+# a SWOT matrix that says nothing about causation.
+#
+# report_generator imports this rather than keeping its own copy; the two had
+# already drifted, so editing one silently did nothing.
+COMPARISON_SECTIONS = {
+    "current_situation", "market_status", "impact", "root_cause", "problem", "issue",
+}
+_COMPARISON_SECTIONS = COMPARISON_SECTIONS
 _CONTENT_SENSITIVE_SECTIONS = {
     "key_metrics": "검증된 수치 자료가 없음",
     "timeline": "서로 다른 시점의 근거가 충분하지 않음",

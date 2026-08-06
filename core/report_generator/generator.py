@@ -10,6 +10,7 @@ from copy import deepcopy
 from audience.contracts import load_audience_profile
 from common.content_quality_validator import dated_items, dedupe_structured_across_sections
 from common.contracts import GeneratedReport, GeneratedReportSection, ReportPlan, TrendSynthesis
+from core.report_planner.planner import COMPARISON_SECTIONS
 
 _DOC_ID_RE = re.compile(r"\[doc_id=([^\]]+)\]")
 
@@ -237,13 +238,15 @@ def _fallback_report(
             kwargs["risks"] = _take(synthesis.risks, limit)
             kwargs["weaknesses"] = _take(synthesis.weaknesses, limit)
             kwargs["evidence"] = _take(synthesis.evidence, limit)
+            if section_id in COMPARISON_SECTIONS:
+                kwargs["comparison_points"] = _take_raw(synthesis.comparison_points, limit)
         elif section_id == "risk_and_opportunity":
             kwargs["risks"] = _take(synthesis.risks, limit)
             kwargs["opportunities"] = _take(synthesis.opportunities, limit)
             kwargs["strengths"] = _take(synthesis.strengths, limit)
             kwargs["weaknesses"] = _take(synthesis.weaknesses, limit)
             kwargs["evidence"] = _take(synthesis.evidence, limit)
-        elif section_id in {"impact", "market_status", "current_situation"}:
+        elif section_id in COMPARISON_SECTIONS:
             kwargs["key_points"] = _take(synthesis.business_impacts or key_points, limit)
             kwargs["metric_points"] = _take_raw(synthesis.metric_series, limit)
             kwargs["comparison_points"] = _take_raw(synthesis.comparison_points, limit)
@@ -288,9 +291,20 @@ def _fallback_report(
     deduped_metric_points = dedupe_structured_across_sections(
         [kwargs.get("metric_points", []) for kwargs in kwargs_list]
     )
-    deduped_comparison_points = dedupe_structured_across_sections(
-        [kwargs.get("comparison_points", []) for kwargs in kwargs_list]
-    )
+    # "first in plan order" is the right owner except when a later section is
+    # specifically *about* the comparison. In a root-cause report the causes
+    # ranked by contribution belong under Root Cause, not under the Problem
+    # Definition that merely happens to come first.
+    comparison_lists = [kwargs.get("comparison_points", []) for kwargs in kwargs_list]
+    if "root_cause" in section_ids:
+        owner = section_ids.index("root_cause")
+        if comparison_lists[owner] or any(comparison_lists):
+            claimed = next((points for points in comparison_lists if points), [])
+            comparison_lists = [
+                claimed if index == owner else ([] if "comparison_points" in kwargs_list[index] else points)
+                for index, points in enumerate(comparison_lists)
+            ]
+    deduped_comparison_points = dedupe_structured_across_sections(comparison_lists)
     for kwargs, metric_points, comparison_points in zip(kwargs_list, deduped_metric_points, deduped_comparison_points):
         if "metric_points" in kwargs:
             kwargs["metric_points"] = metric_points
