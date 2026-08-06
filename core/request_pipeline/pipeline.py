@@ -634,6 +634,39 @@ def _run_pipeline_stages(
     return result
 
 
+def _merge_extracted_metrics(result: PipelineResult) -> None:
+    """Fold the report writer's evidence-verified figures into the synthesis.
+
+    Also re-runs the planner afterwards when the merge added something: a
+    section like key_metrics may have been omitted for "검증된 수치 자료가
+    없음" on the strength of the regex extractor alone, and that reason no
+    longer holds. Re-planning is a pure function over the synthesis - free,
+    no API call - and the generated sections are left untouched.
+    """
+    report, synthesis = result.generated_report, result.synthesis
+    if not report or not synthesis or not report.extracted_metric_series:
+        return
+    existing = {
+        (point.label, point.period, point.value, point.unit) for point in synthesis.metric_series
+    }
+    added = [
+        point for point in report.extracted_metric_series
+        if (point.label, point.period, point.value, point.unit) not in existing
+    ]
+    if not added:
+        return
+    print(
+        f"[report_generator] {len(added)} metric(s) recovered from evidence prose "
+        f"that the rule-based extractor missed",
+        file=sys.stderr,
+    )
+    synthesis.metric_series = [*synthesis.metric_series, *added]
+    if result.report_plan is not None:
+        result.report_plan = plan_report(
+            synthesis, result.report_plan.audience_id, result.report_purpose
+        )
+
+
 def _run_report_stages(
     result: PipelineResult,
     request: UserRequest,
@@ -682,6 +715,11 @@ def _run_report_stages(
             canonical_entities=canonical_entities,
             missing_information_needs=still_missing,
         )
+        # The dashboard's chart/KPI/timeline blocks read
+        # TrendSynthesis.metric_series, not the report's sections, so figures
+        # the report writer structured out of evidence prose have to be merged
+        # back or they would be extracted and then never drawn.
+        _merge_extracted_metrics(result)
         result.trace.append(StageTrace(stage="report_generator", status=StageStatus.OK))
     except PipelineStageError as exc:
         halt("report_generator", exc.reason, exc.detail)

@@ -8,20 +8,20 @@ from typing import Any
 import streamlit as st
 
 from common.content_quality_validator import dedupe_across_blocks
+from reporting.dashboard_streamlit.purpose_slots import (
+    LAST_RESORT,
+    ResolvedSlot,
+    resolve_slots,
+    under_evidenced,
+)
 from reporting.dashboard_streamlit.components import (
     bar_metric_groups,
     clean_citation,
     comparison_points_to_table,
     dedupe_clean,
     evidence_url,
-    has_cause_map,
-    has_comparison,
-    has_radar,
-    has_timeline,
-    has_timeseries,
     metric_comparison_groups,
     prefer_audience_content,
-    prefer_audience_content_raw,
     render_action_list,
     render_comparison_table,
     render_executive_summary,
@@ -108,6 +108,94 @@ def _item_markup(raw_value: str, result: Any, index: int) -> str:
     )
 
 
+def _render_under_evidenced_notice(resolved: list[ResolvedSlot]) -> None:
+    """Say it once at the top, rather than leaving the reader to infer it.
+
+    Half the slots coming up empty means collection failed, not that the
+    layout picked badly - and that is a different message from any single
+    empty card.
+    """
+    empty = [slot.slot.title for slot in resolved if slot.is_last_resort]
+    st.markdown(
+        '<div class="ts-card ts-under-evidenced"><h3>이 질문에 필요한 정보가 '
+        "충분히 수집되지 않았습니다</h3>"
+        f"<p>근거를 찾지 못한 항목: {escape(', '.join(empty))}. "
+        "아래 내용은 확보된 근거만으로 구성했습니다.</p></div>",
+        unsafe_allow_html=True,
+    )
+
+
+def _render_narrative_list(title: str, items: list[str], result: Any) -> None:
+    rows = "".join(_item_markup(value, result, index) for index, value in enumerate(items[:4], 1))
+    st.markdown(
+        f'<section class="ts-card ts-purpose-card"><h3>{escape(title)}</h3>'
+        f'<ol class="ts-compact-list">{rows}</ol></section>',
+        unsafe_allow_html=True,
+    )
+
+
+def _render_slot(
+    slot: ResolvedSlot,
+    items: list[str],
+    result: Any,
+    synthesis: Any,
+    risks: list[str],
+    opportunities: list[str],
+    strengths: list[str],
+    weaknesses: list[str],
+) -> None:
+    """Draw whichever block the slot resolved to, under the slot's own title."""
+    title, block_type = slot.slot.title, slot.block_type
+    if block_type == LAST_RESORT:
+        # Nothing for this slot survived any candidate. Silent: the
+        # under-evidenced notice above and the omitted-sections list below
+        # already account for it, and an apology card here would be the third
+        # copy of the same message.
+        return
+    if block_type == "narrative_list":
+        _render_narrative_list(title, items, result)
+        return
+
+    with st.container(border=True):
+        st.markdown(f'<div class="ts-card-inner"><h3>{escape(title)}</h3></div>', unsafe_allow_html=True)
+        if block_type == "chart":
+            render_metric_chart(synthesis.metric_series, title="확인된 수치 추이")
+        elif block_type == "bar":
+            for group in bar_metric_groups(synthesis.metric_series):
+                render_metric_bar(group)
+        elif block_type == "metric_comparison":
+            for period, points in metric_comparison_groups(synthesis.metric_series):
+                render_metric_comparison(period, points)
+        elif block_type in {"kpi_grid", "kpi_single"}:
+            render_kpi_row(synthesis.metric_series)
+        elif block_type == "timeline":
+            render_timeline(synthesis.evidence, synthesis.metric_series)
+        elif block_type == "table":
+            headers, rows = comparison_points_to_table(synthesis.comparison_points)
+            st.markdown(render_comparison_table(headers, rows), unsafe_allow_html=True)
+        elif block_type == "radar":
+            render_radar(synthesis.comparison_points)
+        elif block_type == "matrix":
+            st.markdown(
+                render_swot(
+                    strengths=strengths, weaknesses=weaknesses,
+                    opportunities=opportunities, threats=risks,
+                ),
+                unsafe_allow_html=True,
+            )
+        elif block_type == "cause_map":
+            render_cause_map(
+                risks,
+                dedupe_clean(synthesis.business_impacts, 3),
+                dedupe_clean(synthesis.recommended_actions, 3),
+            )
+        elif block_type == "action_list":
+            actions = dedupe_clean(synthesis.recommended_actions, 4)
+            render_action_list(
+                [(clean_citation(action), "", evidence_url(action, result)) for action in actions]
+            )
+
+
 def render_generic_dashboard(
     result: Any,
     question: str,
@@ -132,91 +220,26 @@ def render_generic_dashboard(
     render_executive_summary(summary, len(risks), len(opportunities))
     render_kpi_row(synthesis.metric_series, question_terms=question_terms)
 
-    # Each block type is offered only when the data is genuinely that shape:
-    # a metric tracked over 3+ periods is a trend line, the same metric at two
-    # periods is a before/after bar, several metrics sharing a unit at one
-    # period is an item comparison, and dated evidence is a timeline.
-    bar_groups = bar_metric_groups(synthesis.metric_series)
-    comparison_groups = metric_comparison_groups(synthesis.metric_series)
-    if has_timeseries(synthesis.metric_series) or bar_groups or comparison_groups:
-        with st.container(border=True):
-            if has_timeseries(synthesis.metric_series):
-                render_metric_chart(synthesis.metric_series, title="확인된 수치 추이")
-            for group in bar_groups:
-                render_metric_bar(group)
-            for period, points in comparison_groups:
-                render_metric_comparison(period, points)
+    # The purpose's slot skeleton drives the page: fixed order, but each slot
+    # takes the first block type its data can honestly support. See
+    # purpose_slots.py - a slot only reaches "정보 없음" after every candidate
+    # for its intent has been tried.
+    resolved = resolve_slots(purpose_id, synthesis, report)
+    if under_evidenced(resolved):
+        _render_under_evidenced_notice(resolved)
 
-    if has_timeline(synthesis.evidence, synthesis.metric_series):
-        with st.container(border=True):
-            st.markdown('<div class="ts-card-inner"><h3>Timeline</h3></div>', unsafe_allow_html=True)
-            render_timeline(synthesis.evidence, synthesis.metric_series)
-
-    if has_comparison(synthesis.comparison_points):
-        with st.container(border=True):
-            st.markdown('<div class="ts-card-inner"><h3>Comparison</h3></div>', unsafe_allow_html=True)
-            headers, rows = comparison_points_to_table(synthesis.comparison_points)
-            st.markdown(render_comparison_table(headers, rows), unsafe_allow_html=True)
-
-    # A radar needs every plotted entity to have a stated level on 3+ shared
-    # criteria; below that it silently isn't drawn and the table above carries
-    # the comparison instead.
-    if has_radar(synthesis.comparison_points):
-        with st.container(border=True):
-            st.markdown('<div class="ts-card-inner"><h3>Capability Radar</h3></div>', unsafe_allow_html=True)
-            render_radar(synthesis.comparison_points)
-
-    impacts = dedupe_clean(synthesis.business_impacts, 3)
-    cause_actions = dedupe_clean(synthesis.recommended_actions, 3)
-    if purpose_id == "root_cause" and has_cause_map(risks, impacts, cause_actions):
-        with st.container(border=True):
-            st.markdown('<div class="ts-card-inner"><h3>Cause Map</h3></div>', unsafe_allow_html=True)
-            render_cause_map(risks, impacts, cause_actions)
-
-    swot_field_count = sum(1 for field in (strengths, weaknesses, risks, opportunities) if field)
-    if swot_field_count >= _SWOT_QUALIFYING_FIELD_COUNT:
-        with st.container(border=True):
-            st.markdown('<div class="ts-card-inner"><h3>SWOT</h3></div>', unsafe_allow_html=True)
-            st.markdown(
-                render_swot(strengths=strengths, weaknesses=weaknesses, opportunities=opportunities, threats=risks),
-                unsafe_allow_html=True,
-            )
-
-    panel_defs = _panel_definitions(report)
-    # Neighbouring sections legitimately draw on overlapping evidence, so the
-    # same fact often shows up reworded in more than one - keep it in
-    # whichever section comes first and drop the restatement from the rest.
-    deduped_lists = dedupe_across_blocks(
-        [list(dict.fromkeys(raw_values or [])) for _, _, raw_values in panel_defs]
+    # Neighbouring slots legitimately draw on overlapping evidence, so the same
+    # fact often shows up reworded in more than one - keep it in whichever slot
+    # comes first and drop the restatement from the rest.
+    deduped_items = dedupe_across_blocks(
+        [list(dict.fromkeys(slot.items)) for slot in resolved]
     )
-    panels = []
-    for (title, panel_type, _), unique_raw in zip(panel_defs, deduped_lists):
-        unique_raw = unique_raw[:4]
-        rows = "".join(_item_markup(value, result, index) for index, value in enumerate(unique_raw, 1))
-        if not rows:
-            rows = '<li class="ts-empty">검증된 신호가 없습니다.</li>'
-        panels.append(
-            f'<section class="ts-card ts-purpose-card {panel_type}"><h3>{escape(title)}</h3>'
-            f'<ol class="ts-compact-list">{rows}</ol></section>'
-        )
-    if panels:
-        st.markdown(
-            '<div class="ts-section-grid ts-purpose-grid">' + "".join(panels) + "</div>",
-            unsafe_allow_html=True,
-        )
+    for slot, items in zip(resolved, deduped_items):
+        _render_slot(slot, items, result, synthesis, risks, opportunities, strengths, weaknesses)
+
     # Sections report_planner dropped for lack of evidence, shown with its
     # recorded reason so a gap in the report is visible rather than silent.
     render_omitted_sections(getattr(result.report_plan, "omitted_sections", None) if result.report_plan else None)
-
-    actions = prefer_audience_content_raw(report, "actions", synthesis.recommended_actions, 4)
-    # Expected impact is left empty until an action is genuinely linked to one
-    # (see render_action_list). It previously carried the constant string
-    # "Evidence-based priority" on every row, which said nothing about the
-    # action while occupying the column reserved for a real finding.
-    action_rows = [
-        (clean_citation(action), "", evidence_url(action, result)) for action in actions
-    ]
-    render_action_list(action_rows)
 
     with st.expander("Evidence & Sources"):
         st.markdown(render_source_list(result), unsafe_allow_html=True)

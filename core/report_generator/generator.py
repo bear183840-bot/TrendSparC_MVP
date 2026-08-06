@@ -9,8 +9,15 @@ from copy import deepcopy
 
 from audience.contracts import load_audience_profile
 from common.content_quality_validator import dated_items, dedupe_structured_across_sections
-from common.contracts import GeneratedReport, GeneratedReportSection, ReportPlan, TrendSynthesis
+from common.contracts import (
+    GeneratedReport,
+    GeneratedReportSection,
+    MetricPoint,
+    ReportPlan,
+    TrendSynthesis,
+)
 from core.report_planner.planner import COMPARISON_SECTIONS
+from core.sector_router.affiliates import foreign_entity_names_for
 
 _DOC_ID_RE = re.compile(r"\[doc_id=([^\]]+)\]")
 
@@ -85,9 +92,38 @@ _REPORT_SCHEMA = {
             },
         },
         "limitations": {"type": "array", "items": {"type": "string"}},
+        # Structured extraction of the figures already sitting in evidence
+        # prose. The regex extractor kept missing real numbers because Korean
+        # financial sentences carry an unbounded variety of qualifiers
+        # ("누적", "잠정", "연결", "전년 동기 대비 …"), and adding one pattern
+        # at a time never converged. Asking the model that is already reading
+        # this evidence costs no extra call. Every returned figure is still
+        # checked against the evidence text before it is accepted
+        # (_verified_ai_metric_points) - the model widens recall, it is never
+        # trusted for the number itself.
+        "metric_series": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "additionalProperties": False,
+                "properties": {
+                    "label": {"type": "string"},
+                    "period": {"type": "string"},
+                    "value": {"type": "number"},
+                    "unit": {"type": "string"},
+                    "source_sentence": {"type": "string"},
+                },
+                "required": ["label", "period", "value", "unit", "source_sentence"],
+            },
+        },
     },
-    "required": ["title", "executive_summary", "sections", "limitations"],
+    "required": ["title", "executive_summary", "sections", "limitations", "metric_series"],
 }
+
+# Digits, with separators stripped, must reappear in the sentence the model
+# says it read the figure from. "4조 5,406억원" -> "45406" is not literally in
+# the text, so the check is on the *significant digit runs* instead.
+_DIGIT_RUN_RE = re.compile(r"\d[\d,]*(?:\.\d+)?")
 
 
 def _take(values: list[str], limit: int) -> list[str]:
@@ -150,6 +186,68 @@ def _ensure_all_actions_reachable(
         else section
         for section in sections
     ]
+
+
+def _digit_runs(text: str) -> set[str]:
+    return {run.replace(",", "").rstrip(".0") or "0" for run in _DIGIT_RUN_RE.findall(text or "")}
+
+
+_LABEL_PERIOD_RE = re.compile(r"(?:20\d{2}|'\d{2})\s*년|\s*[1-4]\s*분기|\s*상반기|\s*하반기")
+_LABEL_NOISE_RE = re.compile(r"\b(?:누적|연결|별도|개별|잠정|연간|전사|예상|전망|추정)\b|[()（）]")
+_LABEL_ALIASES = {"매출액": "매출", "영업이익률": "영업이익률", "순이익률": "순이익률"}
+
+
+def normalize_metric_label(label: str) -> str:
+    """Strip period and qualifier text that belongs in `period`, not the label.
+
+    Live-observed: the model returned the same metric as "누적 연결 매출액",
+    "2026년 1분기 매출" and "2026년 2분기 매출 예상". Charts group points by
+    label, so three revenue figures that should have formed one 3-period trend
+    line stayed three unrelated one-off numbers and no chart was drawn. The
+    period is already carried in `period`; folding a copy of it into the label
+    only breaks the grouping.
+    """
+    cleaned = _LABEL_NOISE_RE.sub(" ", _LABEL_PERIOD_RE.sub(" ", label or ""))
+    cleaned = re.sub(r"\s+", " ", cleaned).strip(" ·-–")
+    return _LABEL_ALIASES.get(cleaned, cleaned) or (label or "").strip()
+
+
+def _verified_ai_metric_points(
+    raw_points: list[dict], synthesis: TrendSynthesis, foreign_names: set[str]
+) -> list[MetricPoint]:
+    """Keep only AI-extracted figures that are actually present in the evidence.
+
+    The model is allowed to *find* numbers the regex missed; it is not allowed
+    to state one. A point survives only if the digits of its value appear in
+    some evidence/key_point/highlight sentence, mirroring how
+    _verified_metric_points works in the sector analyzers. Figures whose label
+    names a different SK affiliate are dropped too - metric_series has no
+    subject field, so everything in it reads as this company's own number.
+    """
+    corpus = [*synthesis.evidence, *synthesis.key_points, *synthesis.highlights]
+    corpus_digits: set[str] = set()
+    for sentence in corpus:
+        corpus_digits |= _digit_runs(sentence)
+
+    verified: list[MetricPoint] = []
+    for raw in raw_points:
+        label = (raw.get("label") or "").strip()
+        if not label or not (raw.get("period") or "").strip():
+            continue
+        if any(name in label for name in foreign_names):
+            continue
+        stated = _digit_runs(raw.get("source_sentence", "")) | _digit_runs(str(raw.get("value", "")))
+        if not stated & corpus_digits:
+            continue
+        verified.append(
+            MetricPoint(
+                label=normalize_metric_label(label) or label,
+                period=raw["period"].strip(),
+                value=float(raw["value"]),
+                unit=(raw.get("unit") or "").strip() or None,
+            )
+        )
+    return verified
 
 
 def _diversity_limitations(synthesis: TrendSynthesis) -> list[str]:
@@ -425,7 +523,22 @@ def generate_report(
                         "and every limitation in the question's language. For a Korean question, all narrative "
                         "text must be Korean; keep only proper names and standard acronyms such as NVIDIA, HBM, "
                         "AI, and ARPU in English. Before returning JSON, verify every narrative field against "
-                        "the question's language."
+                        "the question's language.\n"
+                        "metric_series is a separate, mandatory job: read every sentence in "
+                        "synthesis.evidence, synthesis.key_points and synthesis.highlights and structure "
+                        "EVERY figure you find there (revenue, operating profit, subscriber counts, growth "
+                        "rates, forecasts) as {label, period, value, unit, source_sentence}. Qualifiers such "
+                        "as 누적, 잠정, 연결, 별도, or 전년 동기 대비 must never stop you from extracting the "
+                        "value - record the qualifier and the point in time in `period` instead (e.g. "
+                        "\"2024년 3분기 누적\", \"2026년 2분기(전망)\"). Always include the year in `period`; if a "
+                        "sentence says only \"2분기\", take the year from its surrounding context and write it "
+                        "out. Use the same `label` for the same metric across periods so a trend can be "
+                        "plotted, and express `value` in the unit you put in `unit` (for Korean currency use "
+                        "억원, so \"4조 5,406억원\" is value 45406 unit \"억원\"). Copy the sentence you took "
+                        "each figure from into `source_sentence` verbatim. "
+                        "Exclude any figure that belongs to a different company than the one the question is "
+                        "about - articles frequently report a sibling affiliate's results alongside this "
+                        "company's, and those numbers must not appear here. When in doubt, leave it out."
                     ),
                 },
                 {"role": "user", "content": json.dumps(payload, ensure_ascii=False)},
@@ -440,6 +553,9 @@ def generate_report(
             },
         )
         parsed = json.loads(response.output_text)
+        extracted_metrics = _verified_ai_metric_points(
+            parsed.get("metric_series") or [], synthesis, foreign_entity_names_for(synthesis.sector_id)
+        )
         fallback = _fallback_report(synthesis, report_plan, audience_id)
         fallback_by_id = {section.section_id: section for section in fallback.sections}
         returned_by_id = {
@@ -478,6 +594,7 @@ def generate_report(
             executive_summary=parsed["executive_summary"],
             sections=sections,
             limitations=limitations,
+            extracted_metric_series=extracted_metrics,
         )
     except Exception as exc:
         return _fallback_report(

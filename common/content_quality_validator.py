@@ -38,6 +38,33 @@ def dated_items(items: list[str]) -> list[str]:
     return [item for item in items if item and _TIMELINE_DATE_RE.search(item)]
 
 
+def has_renderable_content(*value_groups: Any) -> bool:
+    """Whether a panel has anything real to show.
+
+    A section with nothing in it used to be rendered anyway, as a card whose
+    only content was "검증된 신호가 없습니다." - three of those side by side
+    told the reader nothing while taking the space that the sections which did
+    have evidence could have used. A section that fails this check is dropped
+    entirely rather than filled with an apology.
+    """
+    for group in value_groups:
+        if group is None:
+            continue
+        if isinstance(group, str):
+            if group.strip():
+                return True
+            continue
+        for value in group:
+            if value is None:
+                continue
+            if isinstance(value, str):
+                if value.strip():
+                    return True
+            else:
+                return True
+    return False
+
+
 def period_sort_key(period: str) -> tuple:
     """Best-effort chronological key for a (year, quarter) style period
     string, regardless of whether the evidence wrote it "2025년 1분기",
@@ -185,8 +212,16 @@ _MIN_CONTENT_OVERLAP = 0.5
 
 
 def cited_figures(text: str) -> set[str]:
-    """Unit-bearing numbers quoted in a sentence, whitespace-normalized."""
-    return {re.sub(r"\s+", "", match.group()) for match in _FIGURE_RE.finditer(text or "")}
+    """Unit-bearing numbers quoted in a sentence, normalized for comparison.
+
+    Thousands separators are stripped along with whitespace: two sources
+    reporting the same profit as "5,376억원" and "5376억원" are stating one
+    fact, and keeping the comma made them look like two, which is how the
+    same figure ended up on the timeline twice in different words.
+    """
+    return {
+        re.sub(r"[\s,]+", "", match.group()) for match in _FIGURE_RE.finditer(text or "")
+    }
 
 
 def _content_tokens(text: str) -> set[str]:

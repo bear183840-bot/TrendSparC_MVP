@@ -614,6 +614,12 @@ class GeneratedReport(BaseModel):
     unique_source_count: int = 0
     limitations: list[str] = Field(default_factory=list)
     generation_mode: Literal["rule_based", "openai"] = "rule_based"
+    # Figures the report writer structured out of evidence prose that the
+    # rule-based regex extractor had missed, already checked back against the
+    # evidence text. The pipeline merges these into TrendSynthesis.metric_series
+    # so the dashboard's chart/KPI/timeline blocks - which read the synthesis,
+    # not the report - can finally see them. Empty on the rule_based path.
+    extracted_metric_series: list[MetricPoint] = Field(default_factory=list)
 
 
 class DashboardBlock(BaseModel):

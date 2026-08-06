@@ -36,6 +36,7 @@ from reporting.dashboard_streamlit.collection_progress_view import _STATUS_LABEL
 from reporting.dashboard_streamlit.generic_dashboard import render_generic_dashboard
 from reporting.dashboard_streamlit.issue_response_view import render_issue_response_dashboard
 from reporting.dashboard_streamlit.logo import wordmark_html
+from reporting.dashboard_streamlit.build_stamp import build_stamp_html
 from reporting.dashboard_streamlit.theme import dashboard_css
 
 SECTORS_DIR = PROJECT_ROOT / "sectors"
@@ -159,6 +160,10 @@ else:
         _html(recent_html + "</div>")
 
 _html(dashboard_css(st.session_state.dark_mode, st.session_state.accent_theme))
+# Streamlit Cloud redeploys on push, so this answers "is my fix live yet?"
+# without leaving the page. Rendered once, outside the result branches, so it
+# shows on the landing screen too.
+_html(build_stamp_html())
 
 if result is None:
     _html(

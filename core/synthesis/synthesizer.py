@@ -19,6 +19,7 @@ from common.contracts import (
     SynthesisSource,
     TrendSynthesis,
 )
+from core.sector_router.affiliates import drop_other_affiliates_metrics
 
 
 def _append_text(highlights: list[str], label: str, value: str | None, doc_id: str) -> None:
@@ -254,6 +255,7 @@ def synthesize(
     # collapse exact duplicates (same label/period/value/unit/doc_id) rather
     # than showing the identical number twice in one KPI row/chart.
     metric_series = dedupe_structured_across_sections([metric_series])[0]
+    metric_series = drop_other_affiliates_metrics(metric_series, sector_id)
     conclusions = [
         SynthesisConclusion(
             conclusion_id=f"rule:{claim.synthesis_claim_id}",

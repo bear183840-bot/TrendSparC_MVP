@@ -22,6 +22,7 @@ from common.content_quality_validator import (
     dated_items,
     filter_shared_comparison_axis,
     group_metric_points_by_label,
+    is_duplicate_statement,
     period_sort_key,
     rank_by_relevance,
     select_chartable_series,
@@ -501,12 +502,11 @@ def render_action_list(rows: list[tuple[str, str, str | None]]) -> None:
     carrying no information beyond "this row is above that row", which the
     row numbers already say.
     """
+    # No actions means no Recommended Actions block at all. A card whose only
+    # content is "근거에 연결된 권고 과제가 없습니다" occupies the space that
+    # the sections which do have evidence could use, and says nothing the
+    # omitted-sections note below the report doesn't already say.
     if not rows:
-        st.markdown(
-            '<section class="ts-actions"><h3>Recommended Actions</h3>'
-            '<p class="ts-empty">근거에 연결된 권고 과제가 없습니다.</p></section>',
-            unsafe_allow_html=True,
-        )
         return
     body_parts = []
     for index, (title, expected_impact, url) in enumerate(rows, 1):
@@ -769,6 +769,35 @@ def render_metric_comparison(period: str, points: list[Any]) -> None:
     )
 
 
+# A full year+quarter/month label, a bare year, and an apostrophe year
+# ("'24년" - standard in Korean financial copy) all pin a point in time.
+_FULL_PERIOD_RE = re.compile(r"(?:20\d{2}|'\d{2})\s*년(?:\s*(?:[1-4]\s*분기|\d{1,2}\s*월))?")
+_BARE_QUARTER_RE = re.compile(r"[1-4]\s*분기")
+
+
+def _timeline_period(sentence: str) -> str | None:
+    """The period label for a timeline row, or None if the year is unknown.
+
+    A quarter with no year ("2분기 매출액을 1조1522억원으로 예상") is only
+    usable when the sentence names a year somewhere else, in which case the
+    two are combined. Otherwise there is nothing to sort it by and it is left
+    out - an undated row silently placed among dated ones is worse than a
+    missing row.
+    """
+    full = _FULL_PERIOD_RE.search(sentence or "")
+    if full:
+        label = re.sub(r"\s+", " ", full.group(0)).strip()
+        if label.startswith("'"):
+            label = "20" + label[1:]
+        if _BARE_QUARTER_RE.search(label):
+            return label
+        quarter = _BARE_QUARTER_RE.search(sentence)
+        if quarter and "월" not in label:
+            return f"{label} {re.sub(r'\\s+', '', quarter.group(0))}"
+        return label
+    return None
+
+
 def timeline_entries(evidence: list[str], metric_points: list[Any]) -> list[tuple[str, str]]:
     """(period, text) pairs in chronological order, from evidence sentences
     that actually carry a date and from metric points that state a period.
@@ -779,16 +808,26 @@ def timeline_entries(evidence: list[str], metric_points: list[Any]) -> list[tupl
         if point.period:
             entries.append((point.period, f"{point.label} {_format_number(point.value)}{point.unit or ''}"))
     for sentence in dated_items(evidence):
-        # Quarter/month must be part of the captured label, not dropped:
-        # "2024년 3분기" and "2024년 1분기" would otherwise both read "2024년",
-        # collapsing into one indistinguishable step on the axis.
-        match = re.search(
-            r"(20\d{2}\s*년(?:\s*(?:[1-4]\s*분기|\d{1,2}\s*월))?|[1-4]\s*분기)", sentence
-        )
-        if match:
-            entries.append((match.group(1).strip(), clean_citation(sentence)))
+        period = _timeline_period(sentence)
+        # A bare "2분기" with no year anywhere in the sentence can't be placed
+        # on an axis, and guessing the year would be fabrication - so the
+        # entry is skipped rather than shown out of order. This is why the
+        # observed timeline had "3분기 '24년 …" sitting after 2026 entries.
+        if period:
+            entries.append((period, clean_citation(sentence)))
     deduped = list(dict.fromkeys(entries))
-    return sorted(deduped, key=lambda entry: period_sort_key(entry[0]))
+    # Two sentences can state the same fact in different words ("2026년 1분기
+    # 영업이익 5,376억원" and "1분기 영업이익이 5376억원을 기록"). Keyed on the
+    # figures they cite, so the restatement drops out.
+    unique: list[tuple[str, str]] = []
+    for period, text in deduped:
+        if any(
+            existing_period == period and is_duplicate_statement(existing_text, text)
+            for existing_period, existing_text in unique
+        ):
+            continue
+        unique.append((period, text))
+    return sorted(unique, key=lambda entry: period_sort_key(entry[0]))
 
 
 def has_timeline(evidence: list[str], metric_points: list[Any]) -> bool:

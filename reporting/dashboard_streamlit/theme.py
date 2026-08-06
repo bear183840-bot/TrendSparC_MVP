@@ -159,19 +159,23 @@ def dashboard_css(dark: bool, accent_theme: str = "orange") -> str:
     .ts-stat.risk b {{ color:var(--ts-accent); }} .ts-stat.opportunity b {{ color:var(--ts-teal); }}
     /* Key KPI - reference design 1a: label on the left, figure and its YoY
        delta right-aligned on the same row, in a light 2-up card grid. */
-    .ts-kpi-row {{ display:grid; grid-template-columns:repeat(auto-fit,minmax(210px,1fr)); gap:.75rem;
+    /* auto-FILL, not auto-fit: auto-fit collapses the empty tracks, so a
+       single KPI stretched across the whole row as one enormous bar. auto-fill
+       keeps the empty tracks, so one card is the same compact size as four. */
+    .ts-kpi-row {{ display:grid; grid-template-columns:repeat(auto-fill,minmax(190px,1fr)); gap:.75rem;
       margin-top:.65rem; }}
-    .ts-kpi-card {{ display:flex; justify-content:space-between; align-items:center; gap:.65rem;
-      padding:.9rem 1.05rem; border:1px solid color-mix(in srgb,var(--ts-line) 55%,transparent);
+    .ts-kpi-card {{ display:flex; flex-direction:column; justify-content:space-between; gap:.5rem;
+      min-height:104px; padding:.85rem 1rem;
+      border:1px solid color-mix(in srgb,var(--ts-line) 55%,transparent);
       border-radius:9px; background:var(--ts-panel); transition:border-color .15s, box-shadow .15s; }}
     .ts-kpi-card:hover {{ border-color:color-mix(in srgb,var(--ts-accent) 45%,var(--ts-line));
       box-shadow:0 2px 8px color-mix(in srgb,var(--ts-accent) 14%,transparent); }}
-    .ts-kpi-card > small {{ display:block; color:var(--ts-muted); font-size:.79rem; font-weight:500;
+    .ts-kpi-card > small {{ display:block; color:var(--ts-muted); font-size:.78rem; font-weight:500;
       text-transform:none; letter-spacing:0; margin-bottom:0; line-height:1.35; }}
-    .ts-kpi-figure {{ flex:none; text-align:right; }}
-    .ts-kpi-card b {{ display:block; text-align:right; font-size:1.28rem; font-weight:800;
+    .ts-kpi-figure {{ flex:none; }}
+    .ts-kpi-card b {{ display:block; font-size:1.32rem; font-weight:800;
       color:var(--ts-ink); letter-spacing:-.02em; white-space:nowrap; }}
-    .ts-kpi-delta {{ display:block; margin-top:.15rem; text-align:right; font-size:.72rem; font-weight:650;
+    .ts-kpi-delta {{ display:block; margin-top:.15rem; font-size:.72rem; font-weight:650;
       color:var(--ts-muted); white-space:nowrap; }}
     /* Evidence & Sources - reference design 1a's outlined "Link" chip. */
     .ts-source-list {{ list-style:none; margin:0; padding:0; }}
@@ -184,6 +188,27 @@ def dashboard_css(dark: bool, accent_theme: str = "orange") -> str:
       color:var(--ts-accent); text-decoration:none; font-weight:700; font-size:.68rem; white-space:nowrap; }}
     .ts-source-list a:hover {{ background:color-mix(in srgb,var(--ts-accent) 10%,transparent); }}
     .ts-section-grid {{ display:grid; grid-template-columns:1.05fr 1.1fr 1.35fr; gap:.7rem; margin-top:.65rem; }}
+    /* Korean has no inter-word break opportunity by default, so a track that
+       shrinks below its text's natural width wraps after *every syllable* -
+       the "글자가 세로로 깨지는" report. keep-all restores word-boundary
+       breaking; the minmax floors below stop tracks collapsing that far in
+       the first place. Both are needed: keep-all alone would overflow. */
+    .ts-card, .ts-card *, .ts-kpi-card, .ts-kpi-card * {{ word-break:keep-all; overflow-wrap:anywhere; }}
+    /* Shown once at the top when half the purpose's slots found no evidence -
+       that is a collection failure, not a layout one, and it reads differently
+       from any single thin card. */
+    .ts-under-evidenced {{ min-height:0; max-height:none; margin-top:.65rem;
+      border-color:color-mix(in srgb,var(--ts-accent) 40%,var(--ts-line));
+      background:color-mix(in srgb,var(--ts-accent) 6%,var(--ts-panel)); }}
+    .ts-under-evidenced h3 {{ margin:0 0 .3rem; font-size:.92rem; }}
+    .ts-under-evidenced p {{ margin:0; font-size:.8rem; color:var(--ts-muted); line-height:1.5; }}
+    /* Deployment stamp - fixed bottom-right, deliberately quiet. */
+    .ts-build-stamp {{ position:fixed; right:.85rem; bottom:.6rem; z-index:60;
+      padding:.2rem .5rem; border-radius:5px; font-size:.66rem; font-weight:600;
+      letter-spacing:.01em; color:var(--ts-muted); background:var(--ts-panel);
+      border:1px solid color-mix(in srgb,var(--ts-line) 45%,transparent);
+      opacity:.65; pointer-events:auto; }}
+    .ts-build-stamp:hover {{ opacity:1; }}
     /* Cards - reference design 1a: light hairline border, small radius, and a
        plain-weight title underscored by a fading accent rule (no pill badge). */
     .ts-card {{ min-height:185px; max-height:210px; padding:1.05rem 1.25rem;
@@ -306,7 +331,11 @@ def dashboard_css(dark: bool, accent_theme: str = "orange") -> str:
       justify-self:end; }}
     .ts-footer-note {{ display:flex; gap:1rem; margin-top:.45rem; padding:.45rem .8rem; border-bottom:1px solid var(--ts-orange);
       font-size:.82rem; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }}
-    .ts-purpose-grid {{ grid-template-columns:repeat(3,minmax(0,1fr)); }}
+    /* auto-fit with a real 260px floor: empty panels are now dropped rather
+       than filled with an apology, so the survivors must widen to take the
+       space. minmax(0,…) let a track shrink below its text's width, which is
+       what made Korean wrap one syllable per line. */
+    .ts-purpose-grid {{ grid-template-columns:repeat(auto-fit,minmax(260px,1fr)); }}
     .ts-compact-list {{ list-style:none; margin:0; padding:0; }}
     .ts-compact-list li {{ display:grid; grid-template-columns:30px minmax(0,1fr) 26px; gap:.45rem;
       align-items:start; margin:0; padding:.48rem 0; border-bottom:1px solid color-mix(in srgb,var(--ts-line) 38%,transparent);
