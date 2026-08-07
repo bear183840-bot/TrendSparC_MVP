@@ -20,6 +20,7 @@ from reporting.dashboard_streamlit.components import (
     comparison_points_to_table,
     dedupe_clean,
     evidence_url,
+    headline_stats,
     metric_comparison_groups,
     prefer_audience_content,
     render_action_list,
@@ -156,44 +157,76 @@ def _render_slot(
         _render_narrative_list(title, items, result)
         return
 
+    # Decide what the body will be BEFORE opening the card. The title used to
+    # be written first, so any block that then emitted nothing - an
+    # unrecognised block_type, or a renderer hitting its own internal guard -
+    # left a heading with an empty box under it. That is what "필요 역량"
+    # looked like: a header, no content, and no explanation either.
+    draw = _body_renderer(
+        block_type, result, synthesis, risks, opportunities, strengths, weaknesses
+    )
+    if draw is None:
+        return
     with st.container(border=True):
         st.markdown(f'<div class="ts-card-inner"><h3>{escape(title)}</h3></div>', unsafe_allow_html=True)
-        if block_type == "chart":
-            render_metric_chart(synthesis.metric_series, title="확인된 수치 추이")
-        elif block_type == "bar":
-            for group in bar_metric_groups(synthesis.metric_series):
-                render_metric_bar(group)
-        elif block_type == "metric_comparison":
-            for period, points in metric_comparison_groups(synthesis.metric_series):
-                render_metric_comparison(period, points)
-        elif block_type in {"kpi_grid", "kpi_single"}:
-            render_kpi_row(synthesis.metric_series)
-        elif block_type == "timeline":
-            render_timeline(synthesis.evidence, synthesis.metric_series)
-        elif block_type == "table":
-            headers, rows = comparison_points_to_table(synthesis.comparison_points)
-            st.markdown(render_comparison_table(headers, rows), unsafe_allow_html=True)
-        elif block_type == "radar":
-            render_radar(synthesis.comparison_points)
-        elif block_type == "matrix":
-            st.markdown(
-                render_swot(
-                    strengths=strengths, weaknesses=weaknesses,
-                    opportunities=opportunities, threats=risks,
-                ),
-                unsafe_allow_html=True,
-            )
-        elif block_type == "cause_map":
-            render_cause_map(
-                risks,
-                dedupe_clean(synthesis.business_impacts, 3),
-                dedupe_clean(synthesis.recommended_actions, 3),
-            )
-        elif block_type == "action_list":
-            actions = dedupe_clean(synthesis.recommended_actions, 4)
-            render_action_list(
+        draw()
+
+
+def _body_renderer(
+    block_type: str,
+    result: Any,
+    synthesis: Any,
+    risks: list[str],
+    opportunities: list[str],
+    strengths: list[str],
+    weaknesses: list[str],
+):
+    """A zero-arg callable that draws this block, or None if it would draw
+    nothing. Returning None is what keeps an empty card off the page."""
+    if block_type == "chart":
+        return lambda: render_metric_chart(synthesis.metric_series, title="확인된 수치 추이")
+    if block_type == "bar":
+        groups = bar_metric_groups(synthesis.metric_series)
+        return (lambda: [render_metric_bar(group) for group in groups]) if groups else None
+    if block_type == "metric_comparison":
+        groups = metric_comparison_groups(synthesis.metric_series)
+        return (
+            lambda: [render_metric_comparison(period, points) for period, points in groups]
+        ) if groups else None
+    if block_type in {"kpi_grid", "kpi_single"}:
+        return (lambda: render_kpi_row(synthesis.metric_series)) if synthesis.metric_series else None
+    if block_type == "timeline":
+        return lambda: render_timeline(synthesis.evidence, synthesis.metric_series)
+    if block_type == "table":
+        headers, rows = comparison_points_to_table(synthesis.comparison_points)
+        return (
+            lambda: st.markdown(render_comparison_table(headers, rows), unsafe_allow_html=True)
+        ) if rows else None
+    if block_type == "radar":
+        return lambda: render_radar(synthesis.comparison_points)
+    if block_type == "matrix":
+        return lambda: st.markdown(
+            render_swot(
+                strengths=strengths, weaknesses=weaknesses,
+                opportunities=opportunities, threats=risks,
+            ),
+            unsafe_allow_html=True,
+        )
+    if block_type == "cause_map":
+        return lambda: render_cause_map(
+            risks,
+            dedupe_clean(synthesis.business_impacts, 3),
+            dedupe_clean(synthesis.recommended_actions, 3),
+        )
+    if block_type == "action_list":
+        actions = dedupe_clean(synthesis.recommended_actions, 4)
+        return (
+            lambda: render_action_list(
                 [(clean_citation(action), "", evidence_url(action, result)) for action in actions]
             )
+        ) if actions else None
+    # An unrecognised block_type draws nothing rather than an empty titled box.
+    return None
 
 
 def render_generic_dashboard(
@@ -217,7 +250,7 @@ def render_generic_dashboard(
     question_terms = question.split()
 
     render_page_header(question, sector, audience, purpose)
-    render_executive_summary(summary, len(risks), len(opportunities))
+    render_executive_summary(summary, headline_stats(synthesis, purpose_id))
     render_kpi_row(synthesis.metric_series, question_terms=question_terms)
 
     # The purpose's slot skeleton drives the page: fixed order, but each slot

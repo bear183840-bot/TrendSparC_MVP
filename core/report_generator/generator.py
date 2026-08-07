@@ -8,7 +8,11 @@ import re
 from copy import deepcopy
 
 from audience.contracts import load_audience_profile
-from common.content_quality_validator import dated_items, dedupe_structured_across_sections
+from common.content_quality_validator import (
+    dated_items,
+    dedupe_across_blocks,
+    dedupe_structured_across_sections,
+)
 from common.contracts import (
     GeneratedReport,
     GeneratedReportSection,
@@ -22,6 +26,10 @@ from core.sector_router.affiliates import foreign_entity_names_for
 
 _DOC_ID_RE = re.compile(r"\[doc_id=([^\]]+)\]")
 
+
+# Sections whose job is to summarise the whole report. They yield a shared
+# item to any more specific section that also holds it.
+_SUMMARY_SECTIONS = {"overview", "executive_summary", "key_points"}
 
 _ACTION_SECTIONS = {
     "response_actions", "improvement_plan", "strategic_recommendation",
@@ -162,6 +170,38 @@ def _ensure_all_actions_reachable(
         else section
         for section in sections
     ]
+
+
+# Analyzers label each key point by what kind of signal it is - the sector
+# prompts ask for "시장 변화", "전략 영향", "Risk", "Opportunity", "Action"
+# prefixes. Sections that would otherwise all receive the same flat list can
+# take the slice that matches what they are about.
+_KEY_POINT_LABELS: dict[str, tuple[str, ...]] = {
+    "trend": ("시장 변화", "Market", "Trend"),
+    "market_status": ("시장 변화", "Market"),
+    "impact": ("전략 영향", "Impact"),
+    # Not "시장 변화": market_status owns that label, and both sections
+    # claiming it made the two cards restate each other.
+    "current_situation": ("전략 영향", "Opportunity"),
+}
+
+
+def _labelled_key_points(section_id: str, key_points: list[str], limit: int) -> list[str]:
+    """Key points whose analyzer label matches this section's subject.
+
+    Falls back to the whole list when the sector's analyzer doesn't use
+    labels, or when nothing matches - a section with its own slice is better
+    than a section with none, and losing a real point to a labelling
+    convention would be worse than repeating one.
+    """
+    prefixes = _KEY_POINT_LABELS.get(section_id)
+    if not prefixes:
+        return _take(key_points, limit)
+    matched = [
+        point for point in key_points
+        if any(point.strip().startswith(prefix) for prefix in prefixes)
+    ]
+    return _take(matched or key_points, limit)
 
 
 def _digit_runs(text: str) -> set[str]:
@@ -309,8 +349,16 @@ def _fallback_report(
             if conclusion.conclusion_id in conclusion_ids
         ]
         if section_id in {"issue", "problem", "root_cause", "risk"}:
-            kwargs["risks"] = _take(synthesis.risks, limit)
-            kwargs["weaknesses"] = _take(synthesis.weaknesses, limit)
+            # "문제 정의" states what is wrong (the observed weakness); "근본
+            # 원인" states why it happens (the risk driving it). Both used to
+            # take the same synthesis.risks list, so the two cards read
+            # identically in every root_cause report.
+            if section_id == "problem":
+                kwargs["key_points"] = _take(synthesis.weaknesses or key_points, limit)
+                kwargs["weaknesses"] = _take(synthesis.weaknesses, limit)
+            else:
+                kwargs["risks"] = _take(synthesis.risks, limit)
+                kwargs["weaknesses"] = _take(synthesis.weaknesses, limit)
             kwargs["evidence"] = _take(synthesis.evidence, limit)
             if section_id in COMPARISON_SECTIONS:
                 kwargs["comparison_points"] = _take_raw(synthesis.comparison_points, limit)
@@ -321,25 +369,58 @@ def _fallback_report(
             kwargs["weaknesses"] = _take(synthesis.weaknesses, limit)
             kwargs["evidence"] = _take(synthesis.evidence, limit)
         elif section_id in COMPARISON_SECTIONS:
-            kwargs["key_points"] = _take(synthesis.business_impacts or key_points, limit)
+            # business_impacts belongs to "영향"; market_status and
+            # current_situation both taking it made all three cards open with
+            # the same sentence. The others use their own labelled slice.
+            # A section already carrying a comparison table doesn't need a
+            # bullet restating what the table shows - and taking one made
+            # market_status echo trend's single "시장 변화" point.
+            if section_id == "impact":
+                kwargs["key_points"] = _take(synthesis.business_impacts, limit)
+            elif not synthesis.comparison_points:
+                kwargs["key_points"] = _labelled_key_points(section_id, key_points, limit)
             kwargs["metric_points"] = _take_raw(synthesis.metric_series, limit)
             kwargs["comparison_points"] = _take_raw(synthesis.comparison_points, limit)
             kwargs["evidence"] = _take(synthesis.evidence, limit)
         elif section_id in _ACTION_SECTIONS:
+            # No monitoring_indicators: an action section states what to do.
+            # The watch-list is a different question and belongs to the
+            # forward-looking section (investment_signal / near_term_outlook),
+            # whichever this purpose has - it was appearing under three
+            # headings at once.
             kwargs["actions"] = _take(synthesis.recommended_actions, limit)
-            kwargs["monitoring_indicators"] = _take(synthesis.monitoring_indicators, limit)
         elif section_id == "key_metrics":
+            # No monitoring_indicators here: this section lists the figures
+            # that were found, and the same watch-list was appearing verbatim
+            # under key_metrics, near_term_outlook and recommended_action at
+            # once. It belongs with the action it qualifies.
             kwargs["metric_points"] = _take_raw(synthesis.metric_series, limit)
-            kwargs["monitoring_indicators"] = _take(synthesis.monitoring_indicators, limit)
             kwargs["evidence"] = _take(synthesis.evidence, limit)
         elif section_id == "timeline":
             kwargs["key_points"] = _timeline_key_points(synthesis, limit)
-            kwargs["evidence"] = _take(synthesis.evidence, limit)
+            # Dated sentences only. Handing it the whole evidence list made the
+            # timeline's evidence identical to market_status's, so the section
+            # about *when* things happened cited the same undated prose as the
+            # section about what the market looks like now.
+            kwargs["evidence"] = _take(dated_items(synthesis.evidence), limit)
         elif section_id == "sources":
             kwargs["evidence"] = _take(synthesis.evidence, limit)
-        elif section_id in {"opportunity", "trend", "near_term_outlook", "investment_signal"}:
-            kwargs["opportunities"] = _take(synthesis.opportunities, limit)
+        # These four sections were given one identical opportunities list and
+        # one identical monitoring list each, so four differently-titled cards
+        # said exactly the same thing. They are different questions and now
+        # draw on different fields: what is changing, where the opening is,
+        # what to watch, and what happens next.
+        elif section_id == "trend":
+            kwargs["key_points"] = _labelled_key_points(section_id, key_points, limit)
             kwargs["metric_points"] = _take_raw(synthesis.metric_series, limit)
+        elif section_id == "opportunity":
+            kwargs["opportunities"] = _take(synthesis.opportunities, limit)
+            kwargs["strengths"] = _take(synthesis.strengths, limit)
+        elif section_id == "investment_signal":
+            kwargs["metric_points"] = _take_raw(synthesis.metric_series, limit)
+            kwargs["monitoring_indicators"] = _take(synthesis.monitoring_indicators, limit)
+        elif section_id == "near_term_outlook":
+            kwargs["opportunities"] = _take(synthesis.opportunities, limit)
             kwargs["monitoring_indicators"] = _take(synthesis.monitoring_indicators, limit)
         else:
             kwargs["key_points"] = _take(key_points, limit)
@@ -379,6 +460,38 @@ def _fallback_report(
                 for index, points in enumerate(comparison_lists)
             ]
     deduped_comparison_points = dedupe_structured_across_sections(comparison_lists)
+
+    # Same single-ownership rule for the narrative lists. Differentiating the
+    # section branches above stops the obvious copies, but neighbouring
+    # sections still restate each other, and one sentence repeated verbatim
+    # under three headings tells the reader nothing three times.
+    #
+    # `evidence` is deliberately NOT in this list. It is citation, not
+    # narrative: the same source sentence legitimately backs several sections,
+    # the timeline's evidence is a dated *subset* of what overview cites, and
+    # `sources` exists to list all of it. It also made block choice depend on
+    # audience - the per-audience item limit runs first, so which sentence
+    # survived deduplication differed between practitioner and executive, and
+    # the timeline block appeared for one and not the other.
+    for field in ("key_points", "risks", "opportunities", "actions", "monitoring_indicators"):
+        owned_indexes = [index for index, kwargs in enumerate(kwargs_list) if field in kwargs]
+        if len(owned_indexes) < 2:
+            continue
+        # Ownership goes to the most specific section, not the earliest one.
+        # "overview" summarises everything and sits first, so processing in
+        # plan order made it claim the very points that "trend" or "impact"
+        # had already narrowed down to their own subject - and those sections
+        # then fell back to their originals, restoring the duplicate.
+        owned_indexes.sort(key=lambda index: section_ids[index] in _SUMMARY_SECTIONS)
+        originals = [kwargs_list[index][field] for index in owned_indexes]
+        for index, values, original in zip(owned_indexes, dedupe_across_blocks(originals), originals):
+            # Emptying a section outright is worse than repeating a sentence:
+            # a section with nothing left is dropped from the report entirely
+            # (has_renderable_content), so over-eager deduplication silently
+            # deleted whole sections - the timeline lost its dated points to
+            # overview, and "trend" lost everything and fell to an
+            # unclassified block. Deduplication is a nicety; keep the section.
+            kwargs_list[index][field] = values or original
     for kwargs, metric_points, comparison_points in zip(kwargs_list, deduped_metric_points, deduped_comparison_points):
         if "metric_points" in kwargs:
             kwargs["metric_points"] = metric_points

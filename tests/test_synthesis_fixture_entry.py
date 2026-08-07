@@ -77,9 +77,13 @@ def test_collection_stages_are_skipped_not_silently_absent():
             {"matrix", "metrics", "list"},
         ),
         (
+            # No matrix: "문제 정의" now holds weaknesses rather than the same
+            # risks list "근본 원인" holds, so it no longer has the 2-of-4 SWOT
+            # coverage - which matches the live view, whose root_cause slots
+            # never offered a matrix in the first place.
             _ROOT_CAUSE,
             {"problem", "root_cause", "impact", "improvement_plan"},
-            {"matrix", "table", "bar", "list"},
+            {"table", "bar", "list"},
         ),
     ],
 )

@@ -7,6 +7,7 @@ from typing import Any
 import streamlit as st
 
 from reporting.dashboard_streamlit.components import (
+    headline_stats,
     bar_metric_groups,
     clean_citation,
     comparison_points_to_table,
@@ -65,7 +66,8 @@ def render_issue_response_dashboard(result: Any, question: str, sector: str, aud
     question_terms = question.split()
 
     render_page_header(question, sector, audience, purpose)
-    render_executive_summary(summary, len(risks), len(opportunities))
+    # This view only ever renders issue_response reports.
+    render_executive_summary(summary, headline_stats(synthesis, "issue_response"))
     render_kpi_row(synthesis.metric_series, question_terms=question_terms)
 
     columns = st.columns(3)

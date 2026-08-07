@@ -132,22 +132,48 @@ def render_page_header(question: str, sector: str, audience: str, purpose: str) 
     )
 
 
-def render_executive_summary(summary: str, risk_count: int, opportunity_count: int) -> None:
-    """Executive Summary card with a side stat column.
+# What the summary card's side column counts, per purpose. A 미래사업 report
+# showing "RISK SIGNALS 0건" leads with the one number the question never
+# asked about; PURPOSE_HEADLINE_STYLE declared this months ago and nothing
+# read it, so every purpose got the issue-response treatment.
+#
+# Every entry is a *count of validated statements*, never a synthesized
+# severity word - a count is evidence-backed, "Medium risk" would not be
+# (see tests/test_issue_response_view.py's fabrication guard).
+_HEADLINE_STATS: dict[str, tuple[tuple[str, str, str], ...]] = {
+    # (synthesis field, label, CSS accent)
+    "issue_response": (("risks", "Risk Signals", "risk"),
+                       ("opportunities", "Opportunity Signals", "opportunity")),
+    "root_cause": (("risks", "확인된 원인", "risk"),
+                   ("recommended_actions", "개선 과제", "opportunity")),
+    "future_business": (("opportunities", "기회 신호", "opportunity"),
+                        ("recommended_actions", "실행 과제", "risk")),
+    "current_status": (("metric_series", "확인된 지표", "opportunity"),
+                       ("risks", "주의 신호", "risk")),
+}
+_DEFAULT_HEADLINE_STATS = _HEADLINE_STATS["issue_response"]
 
-    Deliberately shows the *actual count* of validated risk/opportunity
-    statements rather than a Low/Medium/High severity word — a count is a
-    real, evidence-backed number; a synthesized severity label would not be
-    (see tests/test_issue_response_view.py's fabrication guard test).
-    """
+
+def headline_stats(synthesis: Any, purpose_id: str | None) -> list[tuple[str, int, str]]:
+    """(label, count, accent) for the summary card's side column."""
+    spec = _HEADLINE_STATS.get(purpose_id or "", _DEFAULT_HEADLINE_STATS)
+    return [
+        (label, len(getattr(synthesis, field, None) or []), accent)
+        for field, label, accent in spec
+    ]
+
+
+def render_executive_summary(summary: str, stats: list[tuple[str, int, str]]) -> None:
+    """Executive Summary card with a purpose-appropriate stat column."""
+    cells = "".join(
+        f'<div class="ts-stat {accent}"><small>{escape(label)}</small><b>{count}건</b></div>'
+        for label, count, accent in stats
+    )
     st.markdown(
         '<div class="ts-summary-grid">'
         '<section class="ts-summary"><h2>Executive Summary</h2>'
         f'<p>{escape(summary or "분석 가능한 근거가 부족합니다.")}</p></section>'
-        '<aside class="ts-stat-col">'
-        f'<div class="ts-stat risk"><small>Risk Signals</small><b>{risk_count}건</b></div>'
-        f'<div class="ts-stat opportunity"><small>Opportunity Signals</small><b>{opportunity_count}건</b></div>'
-        "</aside></div>",
+        f'<aside class="ts-stat-col">{cells}</aside></div>',
         unsafe_allow_html=True,
     )
 
