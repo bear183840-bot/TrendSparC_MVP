@@ -605,7 +605,11 @@ class GeneratedReportSection(BaseModel):
     # field but do not render claim IDs or quote linkage by default.
     grounded_claims: list[SynthesisClaim] = Field(default_factory=list)
     conclusions: list[SynthesisConclusion] = Field(default_factory=list)
-    confidence: Optional[str] = None
+    # Enum, not free text. This was `Optional[str]` and received
+    # ", ".join(confidence_labels), so a field whose only meaningful values
+    # are low/medium/high held 'high [doc_id=…], high [doc_id=…]' and every
+    # downstream comparison against "high" silently failed.
+    confidence: Optional[Literal["low", "medium", "high"]] = None
 
 
 class GeneratedReport(BaseModel):
@@ -626,6 +630,7 @@ class GeneratedReport(BaseModel):
     # so the dashboard's chart/KPI/timeline blocks - which read the synthesis,
     # not the report - can finally see them. Empty on the rule_based path.
     extracted_metric_series: list[MetricPoint] = Field(default_factory=list)
+    extracted_comparison_points: list[ComparisonPoint] = Field(default_factory=list)
 
 
 class DashboardBlock(BaseModel):

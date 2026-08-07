@@ -242,7 +242,26 @@ def test_comparison_points_to_table_drops_unshared_criterion_columns():
 # --- SWOT empty-state wording (problem 4) ---
 
 
-def test_render_swot_empty_state_names_which_quadrant_lacks_evidence():
-    markup = components.render_swot(strengths=[], weaknesses=[], opportunities=[], threats=[])
-    assert "관련 데이터 수집 필요 (강점 근거 미확인)" in markup
-    assert "관련 데이터 수집 필요 (약점 근거 미확인)" in markup
+def test_render_swot_declines_rather_than_apologising_for_empty_quadrants():
+    """A question about which ad channels suit which age bracket has no
+    weaknesses or threats to state. Drawing all four quadrants and filling the
+    empty ones with "관련 데이터 수집 필요" showed two apologies beside two
+    findings; the agreed principle is that a multi-quadrant block is only used
+    when the data genuinely fills it."""
+    assert components.render_swot(
+        strengths=[], weaknesses=[], opportunities=[], threats=[]
+    ) == ""
+    # One quadrant is not a matrix either.
+    assert components.render_swot(
+        strengths=["인프라 우위"], weaknesses=[], opportunities=[], threats=[]
+    ) == ""
+
+
+def test_render_swot_draws_only_the_quadrants_that_have_evidence():
+    markup = components.render_swot(
+        strengths=["인프라 우위"], weaknesses=[], opportunities=["AI 개인화"], threats=[]
+    )
+
+    assert "Strength" in markup and "Opportunity" in markup
+    assert "Weakness" not in markup and "Threat" not in markup
+    assert "관련 데이터 수집 필요" not in markup

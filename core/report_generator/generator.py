@@ -14,6 +14,7 @@ from common.content_quality_validator import (
     dedupe_structured_across_sections,
 )
 from common.contracts import (
+    ComparisonPoint,
     GeneratedReport,
     GeneratedReportSection,
     MetricPoint,
@@ -100,8 +101,30 @@ _REPORT_SCHEMA = {
                 "required": ["label", "period", "value", "unit", "source_sentence"],
             },
         },
+        # Comparisons stated in prose ("TV(84.9%)가 유튜브를 앞섰다") were never
+        # extracted at all: only the sector analyzer produced comparison_points,
+        # and only from documents it happened to read that way. Asking here
+        # costs nothing extra and covers every question, not the financial ones.
+        "comparison_points": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "additionalProperties": False,
+                "properties": {
+                    "entity": {"type": "string"},
+                    "criterion": {"type": "string"},
+                    "value": {"type": "string"},
+                    "level": {"type": ["string", "null"]},
+                    "source_sentence": {"type": "string"},
+                },
+                "required": ["entity", "criterion", "value", "level", "source_sentence"],
+            },
+        },
     },
-    "required": ["title", "executive_summary", "sections", "limitations", "metric_series"],
+    "required": [
+        "title", "executive_summary", "sections", "limitations",
+        "metric_series", "comparison_points",
+    ],
 }
 
 # Digits, with separators stripped, must reappear in the sentence the model
@@ -264,6 +287,72 @@ def _verified_ai_metric_points(
             )
         )
     return verified
+
+
+def _verified_ai_comparison_points(
+    raw_points: list[dict], synthesis: TrendSynthesis
+) -> list[ComparisonPoint]:
+    """AI-extracted comparisons, kept only where the source text supports them.
+
+    Same contract as the metric verifier: the model widens recall over prose
+    the sector analyzer never structured, but a claim it cannot point at in
+    the evidence is dropped. A criterion held by only one entity is dropped
+    too - one row is not a comparison, and it would render as a table with a
+    single line.
+    """
+    corpus = " ".join([*synthesis.evidence, *synthesis.key_points, *synthesis.highlights])
+    verified: list[ComparisonPoint] = []
+    for raw in raw_points:
+        entity = (raw.get("entity") or "").strip()
+        criterion = (raw.get("criterion") or "").strip()
+        value = (raw.get("value") or "").strip()
+        sentence = (raw.get("source_sentence") or "").strip()
+        if not (entity and criterion and value):
+            continue
+        if sentence and sentence not in corpus and entity not in corpus:
+            continue
+        level = raw.get("level")
+        verified.append(
+            ComparisonPoint(
+                entity=entity,
+                criterion=criterion,
+                value=value,
+                level=level if level in {"low", "medium", "high"} else None,
+            )
+        )
+    entities_per_criterion: dict[str, set[str]] = {}
+    for point in verified:
+        entities_per_criterion.setdefault(point.criterion, set()).add(point.entity)
+    return [
+        point for point in verified
+        if len(entities_per_criterion[point.criterion]) >= 2
+    ]
+
+
+_CONFIDENCE_ORDER = ("low", "medium", "high")
+
+
+def section_confidence(confidence_labels: list[str]) -> str | None:
+    """The most conservative confidence stated across the evidence.
+
+    `GeneratedReportSection.confidence` was a free `str` and got
+    ", ".join(confidence_labels) written into it, so a field whose only valid
+    values are low/medium/high ended up holding
+    'high [doc_id=…], high [doc_id=…]'. Downstream code comparing it to
+    "high" silently never matched. Take the lowest label present - a section
+    is only as certain as its weakest evidence - and return None when the
+    labels say nothing usable.
+    """
+    found = {
+        level
+        for label in confidence_labels or []
+        for level in _CONFIDENCE_ORDER
+        if (label or "").strip().lower().startswith(level)
+    }
+    for level in _CONFIDENCE_ORDER:
+        if level in found:
+            return level
+    return None
 
 
 def _diversity_limitations(synthesis: TrendSynthesis) -> list[str]:
@@ -508,7 +597,7 @@ def _fallback_report(
                 section_id=section_id,
                 title=section_title(section_id),
                 summary=" ".join(summary_values[:2]) or synthesis.synthesis_text or "분석 가능한 근거가 부족합니다.",
-                confidence=", ".join(_take(synthesis.confidence_labels, 2)) or None,
+                confidence=section_confidence(synthesis.confidence_labels),
                 **kwargs,
             )
         )
@@ -615,8 +704,14 @@ def generate_report(
                         "the question's language.\n"
                         "metric_series is a separate, mandatory job: read every sentence in "
                         "synthesis.evidence, synthesis.key_points and synthesis.highlights and structure "
-                        "EVERY figure you find there (revenue, operating profit, subscriber counts, growth "
-                        "rates, forecasts) as {label, period, value, unit, source_sentence}. Qualifiers such "
+                        "EVERY figure you find there as {label, period, value, unit, source_sentence}. "
+                        "A figure is any number carrying a unit - not only 매출/영업이익. Percentages "
+                        "(84.9%, 45.1%), counts (669만명, 3건), durations (4.2초), rates and forecasts all "
+                        "qualify, and a sentence like \"거실 TV(84.9%)에서 가장 활발하게 시청\" contains one. "
+                        "When a figure describes a subject rather than a date (an age bracket, a company, a "
+                        "survey group), put that subject in `period` - it is the axis the figure varies "
+                        "along. Do not skip a figure because it is inside parentheses or mid-sentence. "
+                        "Qualifiers such "
                         "as 누적, 잠정, 연결, 별도, or 전년 동기 대비 must never stop you from extracting the "
                         "value - record the qualifier and the point in time in `period` instead (e.g. "
                         "\"2024년 3분기 누적\", \"2026년 2분기(전망)\"). Always include the year in `period`; if a "
@@ -627,7 +722,18 @@ def generate_report(
                         "each figure from into `source_sentence` verbatim. "
                         "Exclude any figure that belongs to a different company than the one the question is "
                         "about - articles frequently report a sibling affiliate's results alongside this "
-                        "company's, and those numbers must not appear here. When in doubt, leave it out."
+                        "company's, and those numbers must not appear here. When in doubt, leave it out.\n"
+                        "comparison_points is the same job for comparisons stated in prose. Whenever a "
+                        "sentence sets two or more subjects against each other on a shared criterion, emit "
+                        "one entry per subject as {entity, criterion, value, level, source_sentence} - "
+                        "every subject the sentence names, never only the one in parentheses. `criterion` "
+                        "must be identical across the entries being compared, or they cannot be tabulated. "
+                        "Set `level` to low/medium/high only when the source itself ranks them; use null "
+                        "otherwise rather than inventing a rank.\n"
+                        "State what the evidence states, at the certainty the evidence states it. A source "
+                        "saying a partnership is being expanded (\"추진 중\", \"확대하고 있다\", \"seizing "
+                        "the opportunity to expand\") must not be written as an established fact "
+                        "(\"운영 중\", \"도입했다\"). Keep the tense and the hedging of the original."
                     ),
                 },
                 {"role": "user", "content": json.dumps(payload, ensure_ascii=False)},
@@ -644,6 +750,9 @@ def generate_report(
         parsed = json.loads(response.output_text)
         extracted_metrics = _verified_ai_metric_points(
             parsed.get("metric_series") or [], synthesis, foreign_entity_names_for(synthesis.sector_id)
+        )
+        extracted_comparisons = _verified_ai_comparison_points(
+            parsed.get("comparison_points") or [], synthesis
         )
         fallback = _fallback_report(synthesis, report_plan, audience_id)
         fallback_by_id = {section.section_id: section for section in fallback.sections}
@@ -684,6 +793,7 @@ def generate_report(
             sections=sections,
             limitations=limitations,
             extracted_metric_series=extracted_metrics,
+            extracted_comparison_points=extracted_comparisons,
         )
     except Exception as exc:
         return _fallback_report(

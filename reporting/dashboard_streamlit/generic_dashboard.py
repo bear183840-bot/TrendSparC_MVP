@@ -205,13 +205,13 @@ def _body_renderer(
     if block_type == "radar":
         return lambda: render_radar(synthesis.comparison_points)
     if block_type == "matrix":
-        return lambda: st.markdown(
-            render_swot(
-                strengths=strengths, weaknesses=weaknesses,
-                opportunities=opportunities, threats=risks,
-            ),
-            unsafe_allow_html=True,
+        # render_swot returns "" when fewer than two quadrants have evidence -
+        # a one-cell "matrix" is not a matrix.
+        markup = render_swot(
+            strengths=strengths, weaknesses=weaknesses,
+            opportunities=opportunities, threats=risks,
         )
+        return (lambda: st.markdown(markup, unsafe_allow_html=True)) if markup else None
     if block_type == "cause_map":
         return lambda: render_cause_map(
             risks,
@@ -261,13 +261,13 @@ def render_generic_dashboard(
     if under_evidenced(resolved):
         _render_under_evidenced_notice(resolved)
 
-    # Neighbouring slots legitimately draw on overlapping evidence, so the same
-    # fact often shows up reworded in more than one - keep it in whichever slot
-    # comes first and drop the restatement from the rest.
-    deduped_items = dedupe_across_blocks(
-        [list(dict.fromkeys(slot.items)) for slot in resolved]
-    )
-    for slot, items in zip(resolved, deduped_items):
+    # No second deduplication pass here. report_generator already gives each
+    # section its own material and drops verbatim restatements; running the
+    # same rule again over the rendered slots removed items a second time -
+    # "시장 변화" showed 1 of its 3 key points because two had been claimed by
+    # a neighbouring slot that was drawing from the same section.
+    for slot in resolved:
+        items = list(dict.fromkeys(slot.items))
         _render_slot(slot, items, result, synthesis, risks, opportunities, strengths, weaknesses)
 
     # Sections report_planner dropped for lack of evidence, shown with its

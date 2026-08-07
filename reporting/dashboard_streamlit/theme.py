@@ -302,6 +302,8 @@ def dashboard_css(dark: bool, accent_theme: str = "orange") -> str:
     .ts-duo-cell h4 {{ margin:0 0 .35rem; font-size:.92rem; color:var(--ts-ink); }}
     .ts-duo-cell ul {{ margin:0; padding-left:1.1rem; font-size:.82rem; }}
     .ts-swot {{ display:grid; grid-template-columns:1fr 1fr; gap:.55rem; }}
+    /* Two quadrants read better side by side than in a 2x2 with holes. */
+    .ts-swot.duo {{ grid-template-columns:1fr 1fr; }}
     .ts-swot-cell {{ min-height:104px; padding:.75rem .85rem; border-radius:16px; }}
     .ts-swot-cell.positive {{ background:color-mix(in srgb,var(--ts-teal) 10%,var(--ts-panel));
       border:1px solid color-mix(in srgb,var(--ts-teal) 30%,var(--ts-line)); }}

@@ -495,18 +495,36 @@ def render_metric_bar(points_for_one_label: list[Any]) -> None:
 
 
 def render_swot(strengths: list[str], weaknesses: list[str], opportunities: list[str], threats: list[str]) -> str:
-    def cell(label: str, values: list[str], empty: str, tone: str) -> str:
-        body = "".join(f"<p>• {escape(value)}</p>" for value in values) or f'<p class="ts-empty">{escape(empty)}</p>'
-        return f'<div class="ts-swot-cell {tone}"><h4>{escape(label)}</h4>{body}</div>'
+    """Only the quadrants that have evidence.
 
-    return (
-        '<div class="ts-swot">'
-        + cell("Strength", strengths, "관련 데이터 수집 필요 (강점 근거 미확인)", "positive")
-        + cell("Weakness", weaknesses, "관련 데이터 수집 필요 (약점 근거 미확인)", "negative")
-        + cell("Opportunity", opportunities, "관련 데이터 수집 필요 (기회 근거 미확인)", "positive")
-        + cell("Threat", threats, "관련 데이터 수집 필요 (위협 근거 미확인)", "negative")
+    Every quadrant used to be drawn, with "관련 데이터 수집 필요" filling the
+    empty ones - so a question about which ad channels suit which age bracket,
+    which has no weaknesses or threats to state, showed two apologies beside
+    two findings. An absent quadrant is a fact about the question, not a gap
+    to be papered over; the agreed principle is that a multi-quadrant block is
+    only used when the data genuinely fills it.
+
+    Returns "" when fewer than two quadrants have content, so the caller can
+    drop the block rather than render a one-cell "matrix".
+    """
+    quadrants = [
+        ("Strength", strengths, "positive"),
+        ("Weakness", weaknesses, "negative"),
+        ("Opportunity", opportunities, "positive"),
+        ("Threat", threats, "negative"),
+    ]
+    filled = [(label, values, tone) for label, values, tone in quadrants if values]
+    if len(filled) < 2:
+        return ""
+    cells = "".join(
+        f'<div class="ts-swot-cell {tone}"><h4>{escape(label)}</h4>'
+        + "".join(f"<p>• {escape(value)}</p>" for value in values)
         + "</div>"
+        for label, values, tone in filled
     )
+    # Two quadrants read better side by side than in a 2x2 with two holes.
+    layout_class = "ts-swot duo" if len(filled) == 2 else "ts-swot"
+    return f'<div class="{layout_class}">{cells}</div>'
 
 
 def render_action_list(rows: list[tuple[str, str, str | None]]) -> None:

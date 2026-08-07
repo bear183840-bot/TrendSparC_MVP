@@ -653,27 +653,67 @@ def _merge_extracted_metrics(result: PipelineResult) -> None:
     no API call - and the generated sections are left untouched.
     """
     report, synthesis = result.generated_report, result.synthesis
-    if not report or not synthesis or not report.extracted_metric_series:
+    if not report or not synthesis:
         return
-    existing = {
+    seen_metrics = {
         (point.label, point.period, point.value, point.unit) for point in synthesis.metric_series
     }
-    added = [
+    added_metrics = [
         point for point in report.extracted_metric_series
-        if (point.label, point.period, point.value, point.unit) not in existing
+        if (point.label, point.period, point.value, point.unit) not in seen_metrics
     ]
-    if not added:
+    seen_comparisons = {
+        (point.entity, point.criterion, point.value) for point in synthesis.comparison_points
+    }
+    added_comparisons = [
+        point for point in report.extracted_comparison_points
+        if (point.entity, point.criterion, point.value) not in seen_comparisons
+    ]
+    if not added_metrics and not added_comparisons:
         return
     print(
-        f"[report_generator] {len(added)} metric(s) recovered from evidence prose "
-        f"that the rule-based extractor missed",
+        f"[report_generator] recovered {len(added_metrics)} metric(s) and "
+        f"{len(added_comparisons)} comparison(s) from evidence prose that the "
+        f"rule-based extractors missed",
         file=sys.stderr,
     )
-    synthesis.metric_series = [*synthesis.metric_series, *added]
+    synthesis.metric_series = [*synthesis.metric_series, *added_metrics]
+    synthesis.comparison_points = [*synthesis.comparison_points, *added_comparisons]
     if result.report_plan is not None:
         result.report_plan = plan_report(
             synthesis, result.report_plan.audience_id, result.report_purpose
         )
+    # The sections were assembled before this extraction existed, so without
+    # this they stay empty while the synthesis holds the data - which is
+    # exactly what "전 섹션의 metric_points가 빈 배열" was. Fill the sections
+    # that own each kind, keeping the single-ownership rule.
+    result.generated_report = _apply_structured_to_sections(report, synthesis)
+
+
+_METRIC_OWNER_SECTIONS = ("key_metrics", "investment_signal", "impact", "current_situation",
+                          "market_status")
+_COMPARISON_OWNER_SECTIONS = ("root_cause", "market_status", "issue", "problem", "impact",
+                              "current_situation")
+
+
+def _apply_structured_to_sections(report: GeneratedReport, synthesis: TrendSynthesis) -> GeneratedReport:
+    """Give the newly extracted points to the first section that should own them.
+
+    Ownership order mirrors report_generator's: the section whose subject the
+    data is, not whichever comes first in the plan.
+    """
+    present = {section.section_id for section in report.sections}
+    metric_owner = next((s for s in _METRIC_OWNER_SECTIONS if s in present), None)
+    comparison_owner = next((s for s in _COMPARISON_OWNER_SECTIONS if s in present), None)
+    sections = []
+    for section in report.sections:
+        updates = {}
+        if section.section_id == metric_owner and not section.metric_points:
+            updates["metric_points"] = list(synthesis.metric_series)
+        if section.section_id == comparison_owner and not section.comparison_points:
+            updates["comparison_points"] = list(synthesis.comparison_points)
+        sections.append(section.model_copy(update=updates) if updates else section)
+    return report.model_copy(update={"sections": sections})
 
 
 def _run_report_stages(

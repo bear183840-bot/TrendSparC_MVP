@@ -153,3 +153,65 @@ def test_components_still_exposes_the_moved_predicates(name):
     from reporting.dashboard_streamlit import components
 
     assert getattr(components, name) is getattr(block_shapes, name)
+
+
+# --- a slot may only show what is genuinely its own ---------------------
+
+
+def test_no_slot_borrows_another_subjects_section():
+    """"필요 역량" rendered "디지털 광고 시장에서의 존재감을 확대하는 기회" -
+    investment_signal's key_point, under a heading about capability. A slot's
+    title and its content have to be about the same thing.
+
+    The general rule: a slot may not name a section that no planned section
+    list associates with its subject. `capability` has no such section at all,
+    so it draws from synthesis.strengths instead of borrowing one.
+    """
+    from reporting.dashboard_streamlit.purpose_slots import PURPOSE_SLOTS
+
+    capability = next(
+        slot for slot in PURPOSE_SLOTS["future_business"] if slot.slot_id == "capability"
+    )
+    assert capability.sections == ()
+    assert capability.fields == ("strengths",)
+
+
+def test_every_slot_has_some_source():
+    """A slot with neither sections nor fields can only ever say "정보 없음"."""
+    from reporting.dashboard_streamlit.purpose_slots import PURPOSE_SLOTS
+
+    for purpose_id, slots in PURPOSE_SLOTS.items():
+        for slot in slots:
+            structural = set(slot.candidates) - {"narrative_list"}
+            assert slot.sections or slot.fields or structural, (purpose_id, slot.slot_id)
+
+
+def test_section_confidence_is_an_enum_value_not_a_citation_string():
+    """It was Optional[str] receiving ", ".join(confidence_labels), so a field
+    whose only valid values are low/medium/high held
+    'high [doc_id=…], high [doc_id=…]'."""
+    from core.report_generator.generator import section_confidence
+
+    labels = ["high [doc_id=www.ajupress.com:a1]", "medium [doc_id=view.asiae.co.kr:b2]"]
+    # The weakest evidence sets the section's confidence.
+    assert section_confidence(labels) == "medium"
+    assert section_confidence(["high [doc_id=x]"]) == "high"
+    assert section_confidence([]) is None
+    assert section_confidence(["근거 부족"]) is None
+
+
+def test_generated_sections_only_ever_carry_a_valid_confidence():
+    from pathlib import Path
+
+    from core.report_generator.generator import generate_report
+    from core.report_planner.planner import plan_report
+    from core.request_pipeline.synthesis_fixture import load_synthesis_fixture
+
+    for path in sorted((_ROOT / "tests" / "fixtures").glob("synthesis_*.json")):
+        synthesis, question, audience_id, purpose = load_synthesis_fixture(path)
+        plan = plan_report(synthesis, audience_id, purpose)
+        report = generate_report(question, synthesis, plan, audience_id)
+        for section in report.sections:
+            assert section.confidence in {None, "low", "medium", "high"}, (
+                path.stem, section.section_id, section.confidence
+            )

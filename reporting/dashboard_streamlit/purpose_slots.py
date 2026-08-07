@@ -138,8 +138,14 @@ _FUTURE_BUSINESS: tuple[Slot, ...] = (
          ("chart", "bar", "timeline", "narrative_list"), ("trend", "market_status")),
     Slot("opportunity", "기회", "어디에 기회가 있는가",
          ("matrix", "bar", "narrative_list"), ("opportunity",)),
+    # No `sections`: there is no planned section about required capability, and
+    # borrowing investment_signal's key_points put "디지털 광고 시장에서의
+    # 존재감을 확대하는 기회" on screen under the heading "필요 역량" - a
+    # section id and its rendered content saying different things. A slot may
+    # only show what is genuinely its own; synthesis.strengths is what this
+    # question actually has to say about capability.
     Slot("capability", "필요 역량", "그 기회를 잡으려면 무엇이 있어야 하는가",
-         ("radar", "table", "narrative_list"), ("investment_signal", "opportunity"), ("strengths",)),
+         ("radar", "table", "narrative_list"), (), ("strengths",)),
     Slot("roadmap", "실행 단계", "어떤 순서로 움직이는가",
          ("timeline", "action_list", "narrative_list"), ("strategic_recommendation",)),
     Slot("risk", "위험", "무엇이 어긋날 수 있는가",
