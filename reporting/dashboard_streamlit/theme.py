@@ -177,6 +177,11 @@ def dashboard_css(dark: bool, accent_theme: str = "orange") -> str:
       color:var(--ts-ink); letter-spacing:-.02em; white-space:nowrap; }}
     .ts-kpi-delta {{ display:block; margin-top:.15rem; font-size:.72rem; font-weight:650;
       color:var(--ts-muted); white-space:nowrap; }}
+    /* Shape only - the figure and its delta carry the numbers. Deliberately
+       uncoloured by good/bad: whether a rise is welcome is metric-specific
+       (subscribers up is good, churn up is not) and the evidence never says
+       which, so the line is tinted by direction alone. */
+    .ts-kpi-spark {{ display:block; width:100%; height:26px; margin-top:.4rem; opacity:.75; }}
     /* Evidence & Sources - reference design 1a's outlined "Link" chip. */
     .ts-source-list {{ list-style:none; margin:0; padding:0; }}
     .ts-source-list li {{ display:flex; justify-content:space-between; align-items:center; gap:.6rem;

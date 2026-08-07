@@ -596,6 +596,30 @@ def render_action_list(rows: list[tuple[str, str, str | None]]) -> None:
 
 
 
+def _sparkline_svg(points: list[Any]) -> str:
+    """A bare shape of where this metric has been - no axes, no labels.
+
+    Only drawn for three or more points in time. Two points are already fully
+    described by the delta beside the figure, and a line between two dots
+    implies a path the evidence never described.
+    """
+    values = [point.value for point in points]
+    low, high = min(values), max(values)
+    span = (high - low) or 1
+    step = 100 / (len(values) - 1)
+    coords = " ".join(
+        f"{index * step:.1f},{28 - (value - low) / span * 24:.1f}"
+        for index, value in enumerate(values)
+    )
+    rising = values[-1] >= values[0]
+    stroke = "var(--ts-teal)" if rising else "var(--ts-accent)"
+    return (
+        f'<svg class="ts-kpi-spark" viewBox="0 0 100 30" preserveAspectRatio="none">'
+        f'<polyline points="{coords}" fill="none" stroke="{stroke}" stroke-width="2" '
+        f'vector-effect="non-scaling-stroke"/></svg>'
+    )
+
+
 def render_kpi_row(metric_points: list[Any], limit: int = 4, question_terms: list[str] | None = None) -> None:
     """Key KPI badge row - up to `limit` distinct metrics as stat cards.
 
@@ -620,15 +644,26 @@ def render_kpi_row(metric_points: list[Any], limit: int = 4, question_terms: lis
     ordered_labels = rank_by_relevance(list(by_label.keys()), question_terms or [])
     cards = []
     for label in ordered_labels[:limit]:
+        # Sort before calling anything "latest": grouping preserves input
+        # order, so points[-1] was whichever the analyzer happened to emit
+        # last, not the most recent period. Non-time axes (age brackets,
+        # companies) have no chronology, so they keep their given order and
+        # get no delta - a "change" between two age groups is meaningless.
         points = by_label[label]
+        is_chronological = all(is_time_period(point.period) for point in points)
+        if is_chronological:
+            points = sorted(points, key=lambda point: period_sort_key(point.period))
         latest = points[-1]
         value_text = f"{_format_number(latest.value)}{latest.unit}"
-        if len(points) >= 2:
+        if is_chronological and len(points) >= 2:
             delta = latest.value - points[0].value
             sign = "+" if delta >= 0 else ""
             caption_text = f"{sign}{_format_number(delta)}{latest.unit} ({escape(points[0].period)}→{escape(latest.period)})"
+        elif len(points) >= 2:
+            caption_text = f"{escape(latest.period)} 기준 · {len(points)}개 대상 비교"
         else:
             caption_text = f"{escape(latest.period)} 기준"
+        spark = _sparkline_svg(points) if is_chronological and len(points) >= 3 else ""
         # Label on the left, figure + its caption right-aligned as one unit -
         # the reference design's KPI row shape. The delta is deliberately left
         # in a neutral colour rather than red/green: whether a rise is good or
@@ -638,7 +673,7 @@ def render_kpi_row(metric_points: list[Any], limit: int = 4, question_terms: lis
         cards.append(
             f'<div class="ts-kpi-card"><small>{escape(label)}</small>'
             f'<div class="ts-kpi-figure"><b>{escape(value_text)}</b>'
-            f'<small class="ts-kpi-delta">{caption_text}</small></div></div>'
+            f'<small class="ts-kpi-delta">{caption_text}</small></div>{spark}</div>'
         )
     st.markdown(f'<div class="ts-kpi-row">{"".join(cards)}</div>', unsafe_allow_html=True)
 

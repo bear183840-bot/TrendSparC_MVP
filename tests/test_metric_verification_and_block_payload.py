@@ -186,3 +186,64 @@ def test_the_legacy_single_string_path_still_works():
 
     assert len(synthesis.risks) == 1
     assert len(synthesis.opportunities) == 1
+
+
+# --- KPI: "latest" must mean latest in time -----------------------------
+
+
+def test_kpi_uses_the_latest_period_not_the_last_one_emitted(monkeypatch):
+    """Grouping preserves input order, so points[-1] was whichever the
+    analyzer happened to emit last. An out-of-order series showed the wrong
+    figure as current and inverted the delta."""
+    from common.contracts import MetricPoint
+    from reporting.dashboard_streamlit import components
+
+    captured: list[str] = []
+    monkeypatch.setattr(components.st, "markdown", lambda body, **_: captured.append(body))
+
+    components.render_kpi_row([
+        MetricPoint(label="매출", period="2026년", value=300, unit="억원"),
+        MetricPoint(label="매출", period="2024년", value=100, unit="억원"),
+        MetricPoint(label="매출", period="2025년", value=200, unit="억원"),
+    ])
+    body = "".join(captured)
+
+    assert "300억원" in body
+    assert "+200억원 (2024년→2026년)" in body
+
+
+def test_a_non_time_axis_gets_no_delta(monkeypatch):
+    """A "change" between two age brackets is meaningless."""
+    from common.contracts import MetricPoint
+    from reporting.dashboard_streamlit import components
+
+    captured: list[str] = []
+    monkeypatch.setattr(components.st, "markdown", lambda body, **_: captured.append(body))
+
+    components.render_kpi_row([
+        MetricPoint(label="TV 도달률", period="20대", value=22, unit="%"),
+        MetricPoint(label="TV 도달률", period="50대 이상", value=68, unit="%"),
+    ])
+    body = "".join(captured)
+
+    assert "2개 대상 비교" in body
+    assert "+46" not in body
+
+
+def test_a_sparkline_needs_three_points_in_time(monkeypatch):
+    """Two points are already fully described by the delta, and a line between
+    two dots implies a path the evidence never described."""
+    from common.contracts import MetricPoint
+    from reporting.dashboard_streamlit import components
+
+    def render(points):
+        captured: list[str] = []
+        monkeypatch.setattr(components.st, "markdown", lambda body, **_: captured.append(body))
+        components.render_kpi_row(points)
+        return "".join(captured)
+
+    two = [MetricPoint(label="매출", period=f"202{i}년", value=100 * i, unit="억원") for i in (4, 5)]
+    three = two + [MetricPoint(label="매출", period="2026년", value=300, unit="억원")]
+
+    assert "ts-kpi-spark" not in render(two)
+    assert "ts-kpi-spark" in render(three)
