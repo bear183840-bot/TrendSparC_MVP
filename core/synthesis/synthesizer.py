@@ -123,11 +123,16 @@ def synthesize(
                 for claim in analysis.grounded_claims
             )
             analysis_key_points = _grounded_values(analysis, "key_point")
-            analysis_business_impact = _grounded_joined(analysis, "business_impact")
-            analysis_risk = _grounded_joined(analysis, "risk")
-            analysis_opportunity = _grounded_joined(analysis, "opportunity")
-            analysis_strength = _grounded_joined(analysis, "strength")
-            analysis_weakness = _grounded_joined(analysis, "weakness")
+            # One claim per item, not "; ".join(...). A document stating three
+            # distinct risks used to arrive downstream as a single risk - the
+            # claims survived in grounded_claims, but every field the report
+            # actually reads saw one entry, so a press release with a full
+            # results table contributed the same as one with a single remark.
+            analysis_business_impacts = _grounded_values(analysis, "business_impact")
+            analysis_risks = _grounded_values(analysis, "risk")
+            analysis_opportunities = _grounded_values(analysis, "opportunity")
+            analysis_strengths = _grounded_values(analysis, "strength")
+            analysis_weaknesses = _grounded_values(analysis, "weakness")
             analysis_actions = _grounded_values(analysis, "action")
             analysis_monitoring = _grounded_values(analysis, "monitoring")
             analysis_evidence = [claim.evidence_quote for claim in analysis.grounded_claims]
@@ -150,11 +155,13 @@ def synthesize(
             # Backward-compatible path for sector analyzers that have not yet
             # adopted grounded claims.
             analysis_key_points = analysis.key_points
-            analysis_business_impact = analysis.business_impact
-            analysis_risk = analysis.risk
-            analysis_opportunity = analysis.opportunity
-            analysis_strength = analysis.strength
-            analysis_weakness = analysis.weakness
+            # Legacy path: DocumentAnalysis carries one string per field, so
+            # there is only ever one item to pass on.
+            analysis_business_impacts = [analysis.business_impact] if analysis.business_impact else []
+            analysis_risks = [analysis.risk] if analysis.risk else []
+            analysis_opportunities = [analysis.opportunity] if analysis.opportunity else []
+            analysis_strengths = [analysis.strength] if analysis.strength else []
+            analysis_weaknesses = [analysis.weakness] if analysis.weakness else []
             analysis_actions = analysis.recommended_actions
             analysis_monitoring = analysis.monitoring_indicators
             analysis_evidence = analysis.evidence
@@ -162,24 +169,19 @@ def synthesize(
             analysis_comparisons = analysis.comparison_points
 
         _append_items(highlights, "Key Point", analysis_key_points, analysis.doc_id)
-        _append_text(highlights, "Business Impact", analysis_business_impact, analysis.doc_id)
-        _append_text(highlights, "Risk", analysis_risk, analysis.doc_id)
-        _append_text(highlights, "Opportunity", analysis_opportunity, analysis.doc_id)
-        _append_text(highlights, "Strength", analysis_strength, analysis.doc_id)
-        _append_text(highlights, "Weakness", analysis_weakness, analysis.doc_id)
+        _append_items(highlights, "Business Impact", analysis_business_impacts, analysis.doc_id)
+        _append_items(highlights, "Risk", analysis_risks, analysis.doc_id)
+        _append_items(highlights, "Opportunity", analysis_opportunities, analysis.doc_id)
+        _append_items(highlights, "Strength", analysis_strengths, analysis.doc_id)
+        _append_items(highlights, "Weakness", analysis_weaknesses, analysis.doc_id)
         _append_items(highlights, "Action", analysis_actions, analysis.doc_id)
         _append_items(highlights, "Monitoring", analysis_monitoring, analysis.doc_id)
         key_points.extend(_tag(value, analysis.doc_id) for value in analysis_key_points if value)
-        if analysis_business_impact:
-            business_impacts.append(_tag(analysis_business_impact, analysis.doc_id))
-        if analysis_risk:
-            risks.append(_tag(analysis_risk, analysis.doc_id))
-        if analysis_opportunity:
-            opportunities.append(_tag(analysis_opportunity, analysis.doc_id))
-        if analysis_strength:
-            strengths.append(_tag(analysis_strength, analysis.doc_id))
-        if analysis_weakness:
-            weaknesses.append(_tag(analysis_weakness, analysis.doc_id))
+        business_impacts.extend(_tag(v, analysis.doc_id) for v in analysis_business_impacts if v)
+        risks.extend(_tag(v, analysis.doc_id) for v in analysis_risks if v)
+        opportunities.extend(_tag(v, analysis.doc_id) for v in analysis_opportunities if v)
+        strengths.extend(_tag(v, analysis.doc_id) for v in analysis_strengths if v)
+        weaknesses.extend(_tag(v, analysis.doc_id) for v in analysis_weaknesses if v)
         verified_claim_ids = {claim.claim_id for claim in analysis.grounded_claims}
         for metric_index, point in enumerate(analysis.metric_points, 1):
             evidence_claim_id = (

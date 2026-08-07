@@ -137,3 +137,52 @@ def test_an_unknown_block_type_keeps_the_full_content():
 
     content = {"title": "t", "some_new_field": [1, 2]}
     assert _trim_content("brand_new_type", content) == content
+
+
+# --- one claim per item, not one joined string per document -------------
+
+
+def test_a_document_stating_three_risks_contributes_three_risks():
+    """They survived in grounded_claims, but every field the report actually
+    reads received "; ".join(...) - so a press release with a full results
+    table contributed exactly as much as one with a single remark."""
+    from common.contracts import DocumentAnalysis, GroundedClaim
+    from core.synthesis.synthesizer import synthesize
+
+    claims = [
+        GroundedClaim(claim_id=f"c{index}", claim_type=claim_type, claim=text,
+                      evidence_quote=text, confidence="high")
+        for index, (claim_type, text) in enumerate(
+            [("risk", "케이블TV 가입자 감소"), ("risk", "OTT 대체 심화"),
+             ("risk", "위성방송 감소"), ("opportunity", "IPTV 점유율 확대"),
+             ("strength", "3사 중 2위"), ("weakness", "SO 점유율 하락"),
+             ("business_impact", "ARPU 압박"), ("business_impact", "결합매출 하방")],
+            1,
+        )
+    ]
+    synthesis = synthesize(
+        "r", "sk_broadband",
+        [DocumentAnalysis(doc_id="d:1", source_id="s", grounded_claims=claims)],
+    )
+
+    assert len(synthesis.risks) == 3
+    assert len(synthesis.business_impacts) == 2
+    assert len(synthesis.opportunities) == 1
+    assert not any("; " in risk for risk in synthesis.risks)
+    # Each still carries its own provenance marker.
+    assert all("[doc_id=d:1]" in risk for risk in synthesis.risks)
+
+
+def test_the_legacy_single_string_path_still_works():
+    """Analyzers that have not adopted grounded claims carry one string per
+    field, so there is only ever one item to pass on."""
+    from common.contracts import DocumentAnalysis
+    from core.synthesis.synthesizer import synthesize
+
+    synthesis = synthesize(
+        "r", "sk_broadband",
+        [DocumentAnalysis(doc_id="d:1", source_id="s", risk="단일 리스크", opportunity="단일 기회")],
+    )
+
+    assert len(synthesis.risks) == 1
+    assert len(synthesis.opportunities) == 1
