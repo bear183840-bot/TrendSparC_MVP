@@ -342,6 +342,11 @@ class MetricPoint(BaseModel):
     value: float
     unit: Optional[str] = None
     subject: Optional[str] = None
+    # True only where the source itself labels the figure as not-yet-happened
+    # (전망/예상/목표/추정/가이던스). Charts must not draw a projection as
+    # observed history; until now the only signal was whether the *period*
+    # string happened to contain "(전망)", which is text formatting, not data.
+    is_forecast: bool = False
     # Stable synthesis-level identity and provenance. Analyzer-produced points
     # may leave these empty; the rule-based synthesizer fills them without
     # asking an LLM to invent or alter a number.
@@ -657,6 +662,12 @@ class ActionImpact(BaseModel):
     action: str
     expected_impact: str
     evidence_quote: str
+    # The magnitude, where the source states one ("가입자 30만명 순증").
+    # `expected_impact` is a sentence, so it can be read but not drawn; a bar
+    # needs a number. Both stay None when the source gave only prose - the
+    # sentence is still shown, it just gets no bar.
+    impact_value: Optional[float] = None
+    impact_unit: Optional[str] = None
 
 
 class GeneratedReport(BaseModel):

@@ -86,7 +86,7 @@ def test_lookup_matches_the_action_with_or_without_its_marker():
 
     lookup = action_impact_lookup(report)
 
-    assert lookup["AI 추천 서비스를 고도화한다"] == "이탈률 5%p 개선"
+    assert lookup["AI 추천 서비스를 고도화한다"].expected_impact == "이탈률 5%p 개선"
 
 
 def test_lookup_is_empty_when_the_report_has_no_links():
@@ -96,3 +96,43 @@ def test_lookup_is_empty_when_the_report_has_no_links():
     )
     assert action_impact_lookup(report) == {}
     assert action_impact_lookup(None) == {}
+
+
+# --- A stated size can be drawn; prose can only be read -----------------
+
+
+def test_a_size_absent_from_the_quoted_sentence_is_dropped():
+    """The model may point at a figure, never supply one - the same rule the
+    metric verifier applies."""
+    from core.report_generator.generator import _stated_impact_size
+
+    sentence = "AI 추천 고도화 시 이탈률이 5%p 개선될 것으로 분석됐다."
+
+    assert _stated_impact_size({"impact_value": 5, "impact_unit": "%p"}, sentence) == (5.0, "%p")
+    assert _stated_impact_size({"impact_value": 30, "impact_unit": "만명"}, sentence) == (None, None)
+    assert _stated_impact_size({"impact_value": None}, sentence) == (None, None)
+
+
+def test_impact_bars_scale_against_the_largest_stated_size(monkeypatch):
+    from common.contracts import ActionImpact
+    from reporting.dashboard_streamlit import components
+
+    captured: list[str] = []
+    monkeypatch.setattr(components.st, "markdown", lambda body, **_: captured.append(body))
+
+    def impact(text: str, value: float | None):
+        return ActionImpact(action="a", expected_impact=text, evidence_quote="q",
+                            impact_value=value, impact_unit="만명" if value else None)
+
+    components.render_action_list([
+        ("행동 A", impact("가입자 30만명 순증", 30), None),
+        ("행동 B", impact("가입자 15만명 순증", 15), None),
+        ("행동 C", impact("이용 경험이 개선된다", None), None),
+    ])
+    body = "".join(captured)
+
+    assert "width:100.0%" in body and "width:50.0%" in body
+    # The prose-only row keeps its sentence and gets no bar - "we don't know
+    # how big" must not render as "small".
+    assert body.count("ts-impact-bar") == 2
+    assert "이용 경험이 개선된다" in body

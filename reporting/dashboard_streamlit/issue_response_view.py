@@ -120,7 +120,7 @@ def render_issue_response_dashboard(result: Any, question: str, sector: str, aud
     action_rows = [
         (
             clean_citation(raw_action),
-            impacts.get(clean_citation(raw_action), ""),
+            impacts.get(clean_citation(raw_action)),
             _evidence_url(raw_action, result),
         )
         for raw_action in actions

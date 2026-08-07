@@ -231,7 +231,7 @@ def _body_renderer(
         # stay empty rather than borrowing a neighbouring finding.
         impacts = action_impact_lookup(result.generated_report)
         rows = [
-            (clean_citation(action), impacts.get(clean_citation(action), ""), evidence_url(action, result))
+            (clean_citation(action), impacts.get(clean_citation(action)), evidence_url(action, result))
             for action in actions
         ]
         return (lambda: render_action_list(rows)) if rows else None

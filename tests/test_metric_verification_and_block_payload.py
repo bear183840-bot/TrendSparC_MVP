@@ -367,3 +367,53 @@ def test_an_unlinked_series_gets_no_caption_rather_than_a_written_one():
     points = [MetricPoint(label="가입자", period="2025년", value=682, unit="만명")]
 
     assert metric_insight(points, [_claim("d1:c1", "무관한 문장")]) is None
+
+
+# --- A projection is not history ----------------------------------------
+
+
+def test_a_forecast_flag_is_only_honoured_when_the_source_marks_one():
+    from core.report_generator.generator import _is_stated_forecast
+
+    assert _is_stated_forecast(
+        {"is_forecast": True, "period": "2026년 2분기(전망)", "source_sentence": "2분기 매출 1조를 전망했다"}
+    )
+    # The model calling a plainly reported figure a forecast is not enough.
+    assert not _is_stated_forecast(
+        {"is_forecast": True, "period": "2025년 2분기", "source_sentence": "2분기 매출은 1조였다"}
+    )
+    assert not _is_stated_forecast({"is_forecast": False, "period": "2026년(전망)"})
+
+
+def test_a_kpi_headline_is_the_latest_observed_figure_not_the_projection(monkeypatch):
+    from common.contracts import MetricPoint
+    from reporting.dashboard_streamlit import components
+
+    captured: list[str] = []
+    monkeypatch.setattr(components.st, "markdown", lambda body, **_: captured.append(body))
+
+    components.render_kpi_row([
+        MetricPoint(label="매출", period="2024년", value=100, unit="억원"),
+        MetricPoint(label="매출", period="2025년", value=120, unit="억원"),
+        MetricPoint(label="매출", period="2026년", value=200, unit="억원", is_forecast=True),
+    ])
+    body = "".join(captured)
+
+    assert "120억원" in body
+    assert "200억원" not in body
+    assert "+20억원 (2024년→2025년)" in body
+
+
+def test_the_forecast_leg_of_a_chart_is_drawn_dashed():
+    from common.contracts import MetricPoint
+    from reporting.dashboard_streamlit.components import _metric_chart_svg
+
+    svg = _metric_chart_svg([
+        MetricPoint(label="매출", period="2023년", value=90, unit="억원"),
+        MetricPoint(label="매출", period="2024년", value=100, unit="억원"),
+        MetricPoint(label="매출", period="2025년", value=120, unit="억원"),
+        MetricPoint(label="매출", period="2026년", value=200, unit="억원", is_forecast=True),
+    ], "매출")
+
+    assert "stroke-dasharray" in svg
+    assert "전망(출처 제시)" in svg

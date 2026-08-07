@@ -440,7 +440,21 @@ def _metric_chart_svg(points: list[Any], title: str) -> str:
     for index, (label, label_points) in enumerate(by_label.items()):
         ordered = sorted(label_points, key=lambda point: period_sort_key(point.period))
         coords = [(x_of(point.period), y_of(point.value)) for point in ordered]
-        line = " ".join(f"{x:.1f},{y:.1f}" for x, y in coords)
+        # A projection is not history. The observed part of the series is a
+        # solid line; the segment that runs into a forecast point is dashed,
+        # so the reader can see where the evidence stops and the source's
+        # expectation begins instead of reading one continuous measurement.
+        first_forecast = next(
+            (index for index, point in enumerate(ordered) if getattr(point, "is_forecast", False)),
+            None,
+        )
+        if first_forecast is None:
+            solid_coords, forecast_coords = coords, []
+        else:
+            solid_coords = coords[:first_forecast]
+            forecast_coords = coords[max(first_forecast - 1, 0):]
+        line = " ".join(f"{x:.1f},{y:.1f}" for x, y in solid_coords)
+        forecast_line = " ".join(f"{x:.1f},{y:.1f}" for x, y in forecast_coords)
         dots = "".join(
             f'<circle cx="{x:.1f}" cy="{y:.1f}" r="{4.4 if position == len(coords) - 1 else 3.4}"></circle>'
             for position, (x, y) in enumerate(coords)
@@ -449,17 +463,23 @@ def _metric_chart_svg(points: list[Any], title: str) -> str:
         # fills would misread as a stacked chart rather than two independent
         # series sharing one axis.
         area = ""
-        if index == 0 and len(coords) > 1:
+        if index == 0 and len(solid_coords) > 1:
             area_path = (
-                f'M{coords[0][0]:.1f} {coords[0][1]:.1f}'
-                + "".join(f'L{x:.1f} {y:.1f}' for x, y in coords[1:])
-                + f'L{coords[-1][0]:.1f} {_CHART_BOTTOM}L{coords[0][0]:.1f} {_CHART_BOTTOM}Z'
+                f'M{solid_coords[0][0]:.1f} {solid_coords[0][1]:.1f}'
+                + "".join(f'L{x:.1f} {y:.1f}' for x, y in solid_coords[1:])
+                + f'L{solid_coords[-1][0]:.1f} {_CHART_BOTTOM}L{solid_coords[0][0]:.1f} {_CHART_BOTTOM}Z'
             )
             area = f'<path d="{area_path}" fill="url(#tsChartFill)"></path>'
         stroke = "var(--ts-accent)" if index == 0 else "var(--ts-teal)"
+        forecast_markup = (
+            f'<polyline points="{forecast_line}" fill="none" stroke="{stroke}" stroke-width="2.2" '
+            f'stroke-dasharray="5 4" stroke-linejoin="round" stroke-linecap="round" '
+            f'opacity="0.75"></polyline>'
+            if len(forecast_coords) > 1 else ""
+        )
         series_markup += (
             f'{area}<polyline points="{line}" fill="none" stroke="{stroke}" stroke-width="2.2" '
-            f'stroke-linejoin="round" stroke-linecap="round"></polyline>'
+            f'stroke-linejoin="round" stroke-linecap="round"></polyline>{forecast_markup}'
             f'<g fill="var(--ts-panel)" stroke="{stroke}" stroke-width="2">{dots}</g>'
         )
 
@@ -469,6 +489,8 @@ def _metric_chart_svg(points: list[Any], title: str) -> str:
         for index, label in enumerate(by_label)
     )
     unit_note = f'<span class="ts-chart-unit">단위: {escape(unit)}</span>' if unit else ""
+    if any(getattr(point, "is_forecast", False) for point in points):
+        legend += '<span class="ts-chart-key ts-chart-key-forecast"><i></i>전망(출처 제시)</span>'
     return (
         f'<div class="ts-chart"><div class="ts-chart-head"><b>{escape(title)}</b>{unit_note}</div>'
         f'<div class="ts-chart-legend">{legend}</div>'
@@ -568,14 +590,16 @@ def reference_year(synthesis: Any) -> int | None:
         return None
 
 
-def action_impact_lookup(report: Any) -> dict[str, str]:
-    """Cleaned action text -> the impact a source stated for it.
+def action_impact_lookup(report: Any) -> dict[str, Any]:
+    """Cleaned action text -> the whole `ActionImpact` a source stated for it.
 
     Keyed on the cleaned text because the same action reaches the renderer
-    with and without its `[doc_id=...]` marker depending on the path.
+    with and without its `[doc_id=...]` marker depending on the path. The
+    link object rather than just its sentence, because an impact that came
+    with a stated size can be drawn as well as read.
     """
     return {
-        clean_citation(link.action): link.expected_impact
+        clean_citation(link.action): link
         for link in (getattr(report, "action_impacts", None) or [])
     }
 
@@ -600,6 +624,11 @@ def render_action_list(rows: list[tuple[str, str, str | None]]) -> None:
     # omitted-sections note below the report doesn't already say.
     if not rows:
         return
+    stated_sizes = [
+        abs(size) for _, impact, _ in rows
+        if (size := getattr(impact, "impact_value", None)) is not None
+    ]
+    max_impact = max(stated_sizes) if stated_sizes else 0
     body_parts = []
     for index, (title, expected_impact, url) in enumerate(rows, 1):
         link = (
@@ -607,9 +636,23 @@ def render_action_list(rows: list[tuple[str, str, str | None]]) -> None:
             if url
             else "<span></span>"
         )
+        impact_text = getattr(expected_impact, "expected_impact", expected_impact) or ""
+        impact_value = getattr(expected_impact, "impact_value", None)
+        # A bar only where the source stated a size, and scaled against the
+        # largest size stated in this same list - never against a rank. Rows
+        # whose impact is prose keep the sentence and get no bar, which is the
+        # difference between "we don't know how big" and "it is small".
+        bar = ""
+        if impact_value is not None and max_impact:
+            unit = getattr(expected_impact, "impact_unit", None) or ""
+            bar = (
+                f'<span class="ts-impact-bar" title="{escape(_format_number(impact_value))}{escape(unit)}">'
+                f'<i style="width:{abs(impact_value) / max_impact * 100:.1f}%"></i>'
+                f'<b>{escape(_format_number(impact_value))}{escape(unit)}</b></span>'
+            )
         impact_cell = (
-            f'<span class="impact" title="{escape(expected_impact)}">{escape(expected_impact)}</span>'
-            if expected_impact
+            f'<span class="impact" title="{escape(impact_text)}">{escape(impact_text)}{bar}</span>'
+            if impact_text
             else '<span class="impact ts-empty">연결된 기대효과 없음</span>'
         )
         body_parts.append(
@@ -692,19 +735,27 @@ def render_kpi_row(metric_points: list[Any], limit: int = 4, question_terms: lis
         )
         if is_chronological:
             points = sorted(points, key=lambda point: period_sort_key(point.period))
-        latest = points[-1]
-        value_text = f"{_format_number(latest.value)}{latest.unit}"
-        if is_chronological and len(points) >= 2:
-            delta = latest.value - points[0].value
+        # The headline number is the latest figure the evidence *observed*. A
+        # series ending in a forecast would otherwise show a projection as the
+        # current value, and subtract from it to report a change that has not
+        # happened. The forecast still reaches the reader - it is drawn on the
+        # chart as a dashed segment and tagged here - it just isn't presented
+        # as fact.
+        observed = [point for point in points if not getattr(point, "is_forecast", False)]
+        latest = (observed or points)[-1]
+        forecast_tag = ' <span class="ts-kpi-forecast">전망</span>' if getattr(latest, "is_forecast", False) else ""
+        value_text = f"{_format_number(latest.value)}{latest.unit}{forecast_tag}"
+        if is_chronological and len(observed) >= 2:
+            delta = latest.value - observed[0].value
             sign = "+" if delta >= 0 else ""
-            caption_text = f"{sign}{_format_number(delta)}{latest.unit} ({escape(points[0].period)}→{escape(latest.period)})"
+            caption_text = f"{sign}{_format_number(delta)}{latest.unit} ({escape(observed[0].period)}→{escape(latest.period)})"
         elif len(points) >= 2:
             caption_text = f"{escape(latest.period)} 기준 · {len(points)}개 대상 비교"
         elif latest.subject:
             caption_text = f"{escape(latest.subject)} · {escape(latest.period)} 기준"
         else:
             caption_text = f"{escape(latest.period)} 기준"
-        spark = _sparkline_svg(points) if is_chronological and len(points) >= 3 else ""
+        spark = _sparkline_svg(observed) if is_chronological and len(observed) >= 3 else ""
         # Label on the left, figure + its caption right-aligned as one unit -
         # the reference design's KPI row shape. The delta is deliberately left
         # in a neutral colour rather than red/green: whether a rise is good or

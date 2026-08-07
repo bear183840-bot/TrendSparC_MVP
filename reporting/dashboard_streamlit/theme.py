@@ -391,6 +391,14 @@ def dashboard_css(dark: bool, accent_theme: str = "orange") -> str:
     .ts-bar-compare-row {{ display:grid; grid-template-columns:80px minmax(0,1fr) 90px; align-items:center;
       gap:.5rem; font-size:.76rem; margin:.25rem 0; }}
     .ts-bar-compare-row .period {{ color:var(--ts-muted); }}
+    .ts-chart-key-forecast i {{ background:none !important; height:0; border-top:2px dashed var(--ts-muted);
+        width:14px; border-radius:0; }}
+    .ts-kpi-forecast {{ font-size:0.62em; vertical-align:middle; padding:1px 5px; margin-left:4px;
+        border:1px solid var(--ts-border); border-radius:999px; color:var(--ts-muted); }}
+    .ts-impact-bar {{ display:flex; align-items:center; gap:6px; margin-top:4px; }}
+    .ts-impact-bar i {{ display:block; height:5px; border-radius:3px; background:var(--ts-accent);
+        min-width:4px; }}
+    .ts-impact-bar b {{ font-size:0.74rem; font-weight:600; color:var(--ts-muted); white-space:nowrap; }}
     .ts-metric-insight {{ margin:6px 2px 0; font-size:0.82rem; line-height:1.5;
         color:var(--ts-muted); }}
     .ts-metric-insight-tag {{ display:inline-block; margin-right:6px; padding:1px 6px;

@@ -98,9 +98,13 @@ _REPORT_SCHEMA = {
                     "period": {"type": "string"},
                     "value": {"type": "number"},
                     "unit": {"type": "string"},
+                    "is_forecast": {"type": "boolean"},
                     "source_sentence": {"type": "string"},
                 },
-                "required": ["label", "subject", "period", "value", "unit", "source_sentence"],
+                "required": [
+                    "label", "subject", "period", "value", "unit", "is_forecast",
+                    "source_sentence",
+                ],
             },
         },
         # Comparisons stated in prose ("TV(84.9%)가 유튜브를 앞섰다") were never
@@ -134,9 +138,14 @@ _REPORT_SCHEMA = {
                 "properties": {
                     "action": {"type": "string"},
                     "expected_impact": {"type": "string"},
+                    "impact_value": {"type": ["number", "null"]},
+                    "impact_unit": {"type": ["string", "null"]},
                     "source_sentence": {"type": "string"},
                 },
-                "required": ["action", "expected_impact", "source_sentence"],
+                "required": [
+                    "action", "expected_impact", "impact_value", "impact_unit",
+                    "source_sentence",
+                ],
             },
         },
     },
@@ -279,8 +288,10 @@ def _verified_ai_metric_points(
     to state one. A point survives only if the digits of its value appear in
     some evidence/key_point/highlight sentence, mirroring how
     _verified_metric_points works in the sector analyzers. Figures whose label
-    names a different SK affiliate are dropped too - metric_series has no
-    subject field, so everything in it reads as this company's own number.
+    names a different SK affiliate are dropped too: an affiliate name in the
+    `label` is a sign the model put the subject in the wrong field, and read
+    as-is the figure would pass for this company's own number. A competitor
+    named in `subject` is fine - that is what the field is for.
     """
     corpus = [*synthesis.evidence, *synthesis.key_points, *synthesis.highlights]
     corpus_digits: set[str] = set()
@@ -304,6 +315,7 @@ def _verified_ai_metric_points(
                 period=raw["period"].strip(),
                 value=float(raw["value"]),
                 unit=(raw.get("unit") or "").strip() or None,
+                is_forecast=_is_stated_forecast(raw),
             )
         )
     return verified
@@ -375,6 +387,39 @@ def section_confidence(confidence_labels: list[str]) -> str | None:
     return None
 
 
+# A figure is a forecast only if the evidence says so. The words below are
+# the ones Korean coverage actually uses to mark one; the model's own
+# `is_forecast` flag is confirmed against them rather than taken on trust,
+# so a historical figure cannot be relabelled as a projection.
+_FORECAST_MARKERS = ("전망", "예상", "목표", "추정", "계획", "가이던스", "예측", "forecast", "estimate")
+
+
+def _is_stated_forecast(raw: dict) -> bool:
+    if not raw.get("is_forecast"):
+        return False
+    context = f"{raw.get('period') or ''} {raw.get('source_sentence') or ''}"
+    return any(marker in context for marker in _FORECAST_MARKERS)
+
+
+def _stated_impact_size(raw: dict, sentence: str) -> tuple[float | None, str | None]:
+    """The magnitude of an impact, only when the quoted sentence contains it.
+
+    Same rule as every other number here: the model may point at a figure, it
+    may not supply one. A value whose digits are absent from the sentence it
+    claims to come from is dropped, and the prose impact is kept without a bar.
+    """
+    raw_value = raw.get("impact_value")
+    if raw_value is None:
+        return None, None
+    try:
+        value = float(raw_value)
+    except (TypeError, ValueError):
+        return None, None
+    if not (_digit_runs(str(raw_value)) & _digit_runs(sentence)):
+        return None, None
+    return value, (raw.get("impact_unit") or "").strip() or None
+
+
 def _verified_action_impacts(
     raw_impacts: list[dict], synthesis: TrendSynthesis
 ) -> list[ActionImpact]:
@@ -405,8 +450,12 @@ def _verified_action_impacts(
         if impact == action or impact in action or action in impact:
             continue
         seen.add(action)
+        value, unit = _stated_impact_size(raw, sentence)
         verified.append(
-            ActionImpact(action=known_actions[action], expected_impact=impact, evidence_quote=sentence)
+            ActionImpact(
+                action=known_actions[action], expected_impact=impact, evidence_quote=sentence,
+                impact_value=value, impact_unit=unit,
+            )
         )
     return verified
 
@@ -793,7 +842,10 @@ def generate_report(
                         "action_impacts links a recommended action to what the evidence says will "
                         "follow from it. Copy the action text verbatim from "
                         "synthesis.recommended_actions, state the outcome in `expected_impact`, and put "
-                        "the sentence that says so in `source_sentence`. Only include an action whose "
+                        "the sentence that says so in `source_sentence`. When that sentence states the "
+                        "size of the outcome, also fill `impact_value` and `impact_unit` with it "
+                        "(\"가입자 30만명 순증\" is 30 and \"만명\"); leave both null when it only "
+                        "describes the outcome in words - do not estimate a size. Only include an action whose "
                         "source actually states a consequence - most recommendations do not, and an "
                         "empty list is the correct answer then. Never infer an impact from the action "
                         "itself, never restate the action as its own impact, and never carry an outcome "
