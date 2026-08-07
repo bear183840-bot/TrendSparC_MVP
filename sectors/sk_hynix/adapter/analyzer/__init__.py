@@ -16,7 +16,10 @@ from pathlib import Path
 
 from openai import OpenAI
 
-from common.content_quality_validator import SWOT_COMPLETENESS_INSTRUCTION
+from common.content_quality_validator import (
+    COMPARISON_COMPLETENESS_INSTRUCTION,
+    SWOT_COMPLETENESS_INSTRUCTION,
+)
 from common.contracts import DocumentAnalysis, SourceDocument
 from common.errors import PipelineStageError
 from sources.openai_retry import call_with_retry
@@ -151,6 +154,7 @@ def _analyze_document(client: OpenAI, system_prompt: str, document: SourceDocume
         "질문과 관련된 사실을 조금이라도 포함하면(부분적 근거라도) relevant_to_question을 true로 판단하고, "
         "실제 주제가 질문과 무관한 경우(키워드만 겹치고 본문 내용은 다른 경우)에만 false로 판단하세요. "
         f"{SWOT_COMPLETENESS_INSTRUCTION} "
+        f"{COMPARISON_COMPLETENESS_INSTRUCTION} "
         "문서에 수치와 시점이 함께 명시되어 있으면(예: '2023년 매출 500억원') "
         "metric_points에 그대로 추출하고, 두 대상을 비교하는 서술이 있으면(예: 'A사가 B사보다 저렴하다') "
         "comparison_points에 추출하세요. 단, 문서에 명시되지 않은 값은 추정하거나 계산하지 마세요. "

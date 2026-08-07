@@ -226,6 +226,12 @@ class WebSearchContext(BaseModel):
     # company (e.g. "general").
     company_name: Optional[str] = None
     perspective: Optional[str] = None
+    # True when the question needs general industry knowledge before this
+    # company can be reasoned about ("연령층별 광고 매체 추천", "칩플레이션이
+    # 셋톱박스에 미치는 영향"). The harness then reserves at least one round
+    # for a company-free topic query - otherwise every round returns this
+    # company's own coverage and the underlying research is never found.
+    needs_generic_topic_round: bool = False
     report_purpose_id: Optional[str] = None
     information_needs: list[str] = Field(default_factory=list)
     suggested_terms: list[str] = Field(default_factory=list)

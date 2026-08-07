@@ -1,1 +1,1 @@
-﻿"""Reusable source collector helpers."""
+"""Reusable source collector helpers."""

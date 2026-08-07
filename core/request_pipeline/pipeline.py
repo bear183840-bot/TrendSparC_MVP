@@ -46,6 +46,7 @@ from common.contracts import (
     UserRequest,
     WebSearchContext,
 )
+from common.content_quality_validator import needs_generic_topic_search
 from common.errors import PipelineStageError, StageStatus, StageTrace
 from core.attachments.extractor import build_question_context, extract_attachments
 from core.collection_progress import bind_collection_events, reset_collection_events
@@ -73,7 +74,12 @@ _ADAPTER_ROLE_FUNCS = {
     "analyzer": "analyze",
 }
 _ADAPTER_ROLE_ORDER = ("collector", "processor", "validator", "analyzer")
-_DEFAULT_AUDIENCE_ID = "_default"
+# The audience used when a request names none. Exported (no leading underscore
+# alias below) because the fixture loader has to answer the same question and
+# had drifted to "practitioner", so a fixture without an explicit audience got
+# a different report shape than the identical live request would.
+DEFAULT_AUDIENCE_ID = "_default"
+_DEFAULT_AUDIENCE_ID = DEFAULT_AUDIENCE_ID
 
 
 def _enrich_document_analyses(
@@ -317,6 +323,9 @@ def _run_pipeline_stages(
                     or result.sector_route.matched_profile.display_name
                 ),
                 perspective=result.entities.perspective,
+                needs_generic_topic_round=needs_generic_topic_search(
+                    request.question, result.entities.perspective
+                ),
                 report_purpose_id=result.report_purpose.purpose_id,
                 information_needs=result.entities.information_needs,
                 suggested_terms=search_terms,

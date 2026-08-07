@@ -27,7 +27,10 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Callable
 
-from reporting.dashboard_streamlit import components
+# Data-shape predicates only - deliberately NOT the rendering module. Slot
+# resolution is a decision about evidence, so it must not depend on Streamlit
+# or on anything that imports it.
+from common import block_shapes
 
 # Share of a purpose's slots that may reach the last resort before the report
 # as a whole is called under-evidenced. Config, not a magic number - raise it
@@ -183,25 +186,25 @@ def _availability() -> dict[str, Callable[[Any, list[str]], bool]]:
     it a good idea here" - that judgement is the slot's candidate order.
     """
     return {
-        "chart": lambda synthesis, items: components.has_timeseries(synthesis.metric_series),
-        "bar": lambda synthesis, items: bool(components.bar_metric_groups(synthesis.metric_series)),
+        "chart": lambda synthesis, items: block_shapes.has_timeseries(synthesis.metric_series),
+        "bar": lambda synthesis, items: bool(block_shapes.bar_metric_groups(synthesis.metric_series)),
         "metric_comparison": lambda synthesis, items: bool(
-            components.metric_comparison_groups(synthesis.metric_series)
+            block_shapes.metric_comparison_groups(synthesis.metric_series)
         ),
         "kpi_grid": lambda synthesis, items: len(synthesis.metric_series) >= _MIN_KPI_GRID_POINTS,
         "kpi_single": lambda synthesis, items: len(synthesis.metric_series) >= 1,
-        "timeline": lambda synthesis, items: components.has_timeline(
+        "timeline": lambda synthesis, items: block_shapes.has_timeline(
             synthesis.evidence, synthesis.metric_series
         ),
-        "table": lambda synthesis, items: components.has_comparison(synthesis.comparison_points),
-        "radar": lambda synthesis, items: components.has_radar(synthesis.comparison_points),
+        "table": lambda synthesis, items: block_shapes.has_comparison(synthesis.comparison_points),
+        "radar": lambda synthesis, items: block_shapes.has_radar(synthesis.comparison_points),
         "matrix": lambda synthesis, items: sum(
             1 for field in (
                 synthesis.strengths, synthesis.weaknesses,
                 synthesis.opportunities, synthesis.risks,
             ) if field
         ) >= 2,
-        "cause_map": lambda synthesis, items: components.has_cause_map(
+        "cause_map": lambda synthesis, items: block_shapes.has_cause_map(
             synthesis.risks, synthesis.business_impacts, synthesis.recommended_actions
         ),
         "action_list": lambda synthesis, items: bool(synthesis.recommended_actions),

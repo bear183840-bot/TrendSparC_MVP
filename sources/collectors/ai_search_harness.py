@@ -40,6 +40,7 @@ from common.contracts import (
     WebSearchContext,
     WebSearchHarnessResult,
 )
+from common.content_quality_validator import strip_company_from_query
 from core.source_planner.query_strategy import build_source_search_terms
 from sources.collectors.document_media import detect_document_media_type
 from sources.collectors.firecrawl_web import response_markdown
@@ -57,8 +58,15 @@ _SYSTEM_PROMPT = (
     "company/organization this question is about — resolve any generic "
     "self-reference in the question (\"우리회사\", \"our company\", \"we\", "
     "\"the company\") to that name and include it (or an unambiguous synonym) "
-    "in every search query, this round and every later round. Never search "
-    "generically once company_name is given.\n"
+    "in every search query for a round tagged company_specific_round.\n"
+    "search_context.needs_generic_topic_round marks a question that cannot be "
+    "answered from this company's own coverage alone - it needs general "
+    "industry knowledge applied to the company (media-mix research by age "
+    "bracket, component price trends, industry cost structures). For a round "
+    "tagged generic_topic_round, search the SUBJECT ONLY and leave the company "
+    "name out entirely, so broad research that never names this company can "
+    "surface. Do not add the company name back into a generic_topic_round "
+    "query; the company context is gathered by the company_specific_round.\n"
     "Use the supplied as_of_date and the question's requested time range. "
     "For current-status questions prefer the newest reliable evidence, while "
     "keeping older material only when it is necessary historical context.\n"
@@ -160,6 +168,50 @@ def _initial_query(
     )
     query = " ".join(dict.fromkeys(term.strip() for term in terms if term and term.strip()))
     return query or None
+
+
+GENERIC_TOPIC_ROUND = "generic_topic_round"
+COMPANY_SPECIFIC_ROUND = "company_specific_round"
+
+
+def plan_round_kinds(search_context: WebSearchContext | None, max_rounds: int) -> list[str]:
+    """Which kind of query each round runs, decided up front.
+
+    Live-observed: for "브랜드 이미지 개선에 맞는 연령층별 광고 매체 및 모델
+    추천" every one of three rounds searched "SK브로드밴드 …", so the results
+    were all SK브로드밴드's own coverage and none of the age-bracket media
+    research a person would have found first. Leaving the mix to the model
+    meant it happened to never drop the company name; planning the kinds here
+    guarantees at least one of each whenever the question needs both.
+
+    Company-specific goes first: it anchors what the question is actually
+    about, and the generic round then widens rather than wanders.
+    """
+    if max_rounds <= 0:
+        return []
+    if search_context is None or not search_context.needs_generic_topic_round:
+        return [COMPANY_SPECIFIC_ROUND] * max_rounds
+    if not (search_context.company_name or "").strip():
+        # No company to strip - every round is already a topic search.
+        return [GENERIC_TOPIC_ROUND] * max_rounds
+    if max_rounds == 1:
+        return [COMPANY_SPECIFIC_ROUND]
+    kinds = [COMPANY_SPECIFIC_ROUND, GENERIC_TOPIC_ROUND]
+    # Remaining rounds alternate, so a third round widens the topic again
+    # rather than re-asking the company the same way.
+    while len(kinds) < max_rounds:
+        kinds.append(kinds[len(kinds) % 2])
+    return kinds[:max_rounds]
+
+
+def query_for_round_kind(query: str, kind: str, search_context: WebSearchContext | None) -> str:
+    """The query as-is, or with the company name removed for a generic round."""
+    if kind != GENERIC_TOPIC_ROUND or search_context is None:
+        return query
+    stripped = strip_company_from_query(query, search_context.company_name)
+    # Never return an empty query just because the company name was the whole
+    # of it - fall back to the original rather than searching for nothing.
+    return stripped or query
 
 
 def _fallback_next_query(
@@ -476,6 +528,7 @@ def _call_round(
     query: str,
     config: HarnessConfig,
     search_context: WebSearchContext | None = None,
+    round_kind: str = COMPANY_SPECIFIC_ROUND,
 ):
     tool = {
         "type": "web_search",
@@ -494,6 +547,9 @@ def _call_round(
     request_payload = {
         "search_context": context_payload,
         "current_round_query": query,
+        # Tagged so the model knows whether to keep the company name in this
+        # round's query or deliberately leave it out - see plan_round_kinds.
+        "round_kind": round_kind,
         "target_relevant_documents": _maximum_documents(config),
         "minimum_relevant_documents_for_target": config.min_scraped_docs_for_sufficient,
         "instructions": (
@@ -684,12 +740,22 @@ def _run_search_harness_result(
     covered_information_needs: list[str] = []
     missing_information_needs = list(search_context.information_needs) if search_context else []
     maximum_documents = _maximum_documents(config)
+    round_kinds = plan_round_kinds(search_context, config.max_rounds)
 
     for round_index in range(config.max_rounds):
+        round_kind = (
+            round_kinds[round_index] if round_index < len(round_kinds) else COMPANY_SPECIFIC_ROUND
+        )
+        query = query_for_round_kind(query, round_kind, search_context)
         tried_queries.append(query)
+        print(
+            f"[ai_search] round {round_index + 1}/{config.max_rounds} "
+            f"[{round_kind}] query={query!r}",
+            file=sys.stderr,
+        )
         try:
             response = _call_round(
-                openai_client, source, all_sources, query, config, search_context
+                openai_client, source, all_sources, query, config, search_context, round_kind
             )
         except Exception as exc:  # noqa: BLE001
             label = source.name if source is not None else "question"

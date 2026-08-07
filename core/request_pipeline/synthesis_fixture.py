@@ -18,12 +18,16 @@ from typing import Any
 
 from common.contracts import CorroboratedPoint, ReportPurposeClassification, TrendSynthesis
 from core.report_purpose.classifier import recommended_sections_for
+from core.request_pipeline.pipeline import DEFAULT_AUDIENCE_ID
 
 # Fields that describe the *run*, not the synthesis itself. Stripped before
 # TrendSynthesis validation so a fixture stays a single self-contained file.
 _RUN_FIELDS = ("question", "audience_id", "purpose_id")
 
-_DEFAULT_AUDIENCE_ID = "practitioner"
+# Same default the live pipeline uses - see DEFAULT_AUDIENCE_ID there. These
+# were "_default" and "practitioner" respectively, so a fixture that omitted
+# audience_id silently produced a different report than the live path would.
+_DEFAULT_AUDIENCE_ID = DEFAULT_AUDIENCE_ID
 _DEFAULT_PURPOSE_ID = "current_status"
 
 

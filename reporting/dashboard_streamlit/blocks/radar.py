@@ -29,7 +29,9 @@ from reporting.dashboard_streamlit.blocks.base import BlockDefinition
 from reporting.dashboard_streamlit.blocks.registry import register
 from reporting.dashboard_streamlit.components import clean_citation
 
-_LEVEL_RADIUS_FRACTION = {"low": 0.4, "medium": 0.7, "high": 1.0}
+# Shared with common/block_shapes.py so the predicate that decides a radar
+# is drawable and the code that draws it can never disagree on the scale.
+from common.block_shapes import LEVEL_RADIUS_FRACTION as _LEVEL_RADIUS_FRACTION
 _PALETTE = ("var(--ts-accent)", "var(--ts-teal)", "var(--ts-orange)")
 _MIN_AXES = 3
 _MAX_ENTITIES = 4

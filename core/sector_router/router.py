@@ -1,4 +1,4 @@
-﻿"""Dynamic sector registry + routing.
+"""Dynamic sector registry + routing.
 
 The set of known sectors is discovered by scanning ``sectors/*/profile.json``.
 Routing uses profile aliases/keywords, but avoids routing on one ambiguous

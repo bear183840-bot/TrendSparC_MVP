@@ -1,4 +1,4 @@
-﻿"""Build a ReportPlan from synthesis, audience, and report purpose.
+"""Build a ReportPlan from synthesis, audience, and report purpose.
 
 Report purpose is now an explicit contract produced by
 core/report_purpose/classifier.py. `primary_intent` is still carried for

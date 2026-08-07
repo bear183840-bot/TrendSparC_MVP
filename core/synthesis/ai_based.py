@@ -64,6 +64,13 @@ original question (not just "important in general").
 - Write a short (2-4 sentence) synthesis_text paragraph in Korean that directly \
 answers the original question using the remaining points — a "so what" overview \
 grounded in what was actually asked, not a generic bullet-point restatement.
+- Some evidence is general industry research that never names the company (media-mix \
+figures by age bracket, component price trends, industry cost structures), and some is \
+about the company itself. Do not simply list both. State explicitly what the general \
+finding IMPLIES FOR THIS COMPANY — which of its own circumstances the industry figure \
+bears on, and what follows from that pairing. A point that restates industry research \
+without connecting it to the company answers a question nobody asked. Where the two \
+genuinely cannot be linked from the evidence, say that rather than inventing the link.
 - Return a conclusions array. Each conclusion must be supported only by IDs from the \
 supplied verified_claims array. Put every supporting synthesis_claim_id in \
 supporting_claim_ids and assign a conservative confidence. Do not return a conclusion \

@@ -1,4 +1,4 @@
-﻿from sources.collectors.kofic_pdf import (
+from sources.collectors.kofic_pdf import (
     KOFIC_DOWNLOAD_ENDPOINT,
     KoficAttachment,
     download_pdf_bytes,

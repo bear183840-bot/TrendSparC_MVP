@@ -125,14 +125,76 @@ PRESCRIPTIVE_INTENT_SIGNALS: tuple[str, ...] = (
     "어떻게", "방안", "늘리려면", "늘릴", "개선하려면", "개선 방안", "전략", "높이려면",
 )
 
-# Single source of truth for the "actively look for all four SWOT fields"
-# instruction - previously each of the 6 sector analyzers phrased this
-# slightly differently (see sectors/*/adapter/analyzer/__init__.py).
+# Questions that need general, non-company knowledge before the company can be
+# reasoned about at all: "연령층별 광고 매체 추천" needs industry media-mix
+# research, "칩플레이션이 셋톱박스에 미치는 영향" needs semiconductor price
+# trends. Searching those with the company name bolted on returns the
+# company's own press coverage and none of the research.
+#
+# Kept lexical and sector-agnostic on purpose - these are properties of how a
+# question is phrased, not of any one sector's vocabulary.
+_APPLIED_KNOWLEDGE_SIGNALS: tuple[str, ...] = (
+    "추천", "방안", "전략", "일반적", "업계", "산업", "트렌드", "동향", "사례",
+    "베스트", "표준", "평균", "벤치마크", "비교", "효과", "패턴", "영향",
+)
+# Perspectives that already say the question is about the wider market rather
+# than this company's own reporting (EntityExtractionResult.perspective).
+_MARKET_PERSPECTIVES = {"market_landscape", "regulatory_policy"}
+
+
+def needs_generic_topic_search(question: str, perspective: str | None = None) -> bool:
+    """Whether at least one search round should drop the company name.
+
+    Live-observed on "브랜드 이미지 개선에 맞는 연령층별 광고 매체 및 모델
+    추천": all three rounds searched "SK브로드밴드 …", so every result was
+    SK브로드밴드's own coverage and none of the age-bracket media research a
+    person would have found first by searching the topic alone.
+    """
+    if perspective in _MARKET_PERSPECTIVES:
+        return True
+    text = question or ""
+    return any(signal in text for signal in _APPLIED_KNOWLEDGE_SIGNALS)
+
+
+def strip_company_from_query(query: str, company_name: str | None) -> str:
+    """The same query with the company's name removed, for a generic round."""
+    if not company_name:
+        return (query or "").strip()
+    cleaned = re.sub(re.escape(company_name), " ", query or "", flags=re.I)
+    return re.sub(r"\s{2,}", " ", cleaned).strip()
+
+
+# Single source of truth for the SWOT instruction - previously each of the 6
+# sector analyzers phrased this slightly differently (see
+# sectors/*/adapter/analyzer/__init__.py).
+#
+# The earlier wording ("반드시 채우세요", "매번 비는 경우가 없도록") read as a
+# quota and contradicted global_system_prompt.md principle 1, which forbids
+# filling a gap with a plausible guess. A question about which ad channels
+# suit which age bracket has no weaknesses to state, and the model was being
+# told both to leave it empty and not to. Search hard, then report what is
+# actually there - an empty quadrant is a finding, not a failure.
 SWOT_COMPLETENESS_INSTRUCTION = (
-    "risk/opportunity와 마찬가지로 strength(강점)와 weakness(약점)도 문서에 근거가 있으면 "
-    "반드시 채우세요 — 누락하지 말고 적극적으로 찾으세요. 특히 한쪽만(예: strength만) 계속"
-    "채워지고 반대쪽(weakness)이 매번 비는 경우가 없도록, 문서에 나온 한계·리스크·경쟁열위도 "
-    "weakness 후보로 적극적으로 검토하세요."
+    "strength(강점)·weakness(약점)·risk·opportunity는 문서를 끝까지 훑어 근거가 있는 것을 "
+    "빠짐없이 찾으세요. 특히 한쪽 방향(예: 강점)만 눈에 띄고 반대 방향을 놓치는 일이 없도록, "
+    "문서에 나온 한계·경쟁열위·제약도 같은 비중으로 검토하세요. "
+    "다만 이는 네 칸을 모두 채우라는 뜻이 아닙니다. 질문의 성격상 해당 항목이 존재하지 않거나"
+    "(예: 매체 추천처럼 위험을 논하는 질문이 아닌 경우) 문서에 근거가 없으면 그 항목은 비워 두세요. "
+    "빈 칸은 정직한 결과이며, 근거 없이 지어낸 항목은 전역 원칙 1(추측 금지) 위반입니다."
+)
+
+# The comparison instruction was much weaker than the metric one: metric_points
+# said "표에 있는 시점 수만큼 전부 추출하라" while comparison_points said only
+# "비교 서술이 있으면 추출하라". Live-observed on "TV는 31.7%를 기록해
+# 유튜브(25.6%)를 앞서며 1위" - only 25.6% was captured and the 1st-place
+# figure the sentence was actually about was dropped.
+COMPARISON_COMPLETENESS_INSTRUCTION = (
+    "비교 문장에 여러 대상이 등장하면 언급된 대상을 하나도 빠뜨리지 말고 전부 "
+    "comparison_points로 만드세요. 한 문장이 A와 B를 비교하면 A와 B 둘 다 별도 항목입니다. "
+    "특히 '1위', '가장 높은', '앞선다', '최대' 같은 표현이 붙은 대상은 그 문장의 핵심이므로 "
+    "절대 누락하지 마세요 — 뒤에 괄호로 딸려 나온 비교 대상만 뽑고 1위를 빠뜨리는 실수가 "
+    "가장 흔합니다. 표가 아니라 산문 속 비교(\"A는 31.7%로 B(25.6%)를 앞섰다\")도 동일하게 "
+    "적용됩니다."
 )
 
 

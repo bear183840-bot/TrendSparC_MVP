@@ -1,4 +1,4 @@
-﻿"""KOFIC PDF report collection helpers.
+"""KOFIC PDF report collection helpers.
 
 KOFIC report pages do not expose their PDF files as simple static links.
 The page calls ``fn_fileDownload(...)``, which then posts file parameters to

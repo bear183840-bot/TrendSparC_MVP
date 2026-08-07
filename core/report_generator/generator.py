@@ -17,35 +17,11 @@ from common.contracts import (
     TrendSynthesis,
 )
 from core.report_planner.planner import COMPARISON_SECTIONS
+from common.section_titles import section_title
 from core.sector_router.affiliates import foreign_entity_names_for
 
 _DOC_ID_RE = re.compile(r"\[doc_id=([^\]]+)\]")
 
-_SECTION_TITLES = {
-    "overview": "Executive Overview",
-    "key_points": "Key Points",
-    "current_situation": "Current Situation",
-    "market_status": "Market Status",
-    "near_term_outlook": "Near-term Outlook",
-    "issue": "Issue",
-    "impact": "Impact",
-    "response_actions": "Action",
-    "trend": "Trend",
-    "opportunity": "Opportunity",
-    "investment_signal": "Investment Signals",
-    "strategic_recommendation": "Strategic Recommendations",
-    "problem": "Problem",
-    "root_cause": "Root Cause",
-    "improvement_plan": "Improvement Plan",
-    "key_implication": "Key Implication",
-    "risk_and_opportunity": "Risk and Opportunity",
-    "recommended_action": "Recommended Action",
-    "key_metrics": "핵심 지표",
-    "timeline": "타임라인",
-    "decision_required": "결정 필요 사항",
-    "risk": "리스크",
-    "sources": "출처",
-}
 
 _ACTION_SECTIONS = {
     "response_actions", "improvement_plan", "strategic_recommendation",
@@ -417,7 +393,7 @@ def _fallback_report(
         sections.append(
             GeneratedReportSection(
                 section_id=section_id,
-                title=_SECTION_TITLES.get(section_id, section_id.replace("_", " ").title()),
+                title=section_title(section_id),
                 summary=" ".join(summary_values[:2]) or synthesis.synthesis_text or "분석 가능한 근거가 부족합니다.",
                 confidence=", ".join(_take(synthesis.confidence_labels, 2)) or None,
                 **kwargs,

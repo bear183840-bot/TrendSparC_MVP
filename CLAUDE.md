@@ -82,10 +82,25 @@ extracting the shared logic.
   — see `sectors/sk_hynix/prompts/system_prompt.md` / `sk_planet`'s
   equivalent for the pattern (analyzer already combines
   `global_system_prompt.md` + sector prompt this same way).
-- **`prompts/report_structures/{current_status,issue_response,future_business,root_cause}.md`
-  are empty placeholders.** `report_planner` wires `primary_intent` into
-  `ReportPlan.intent_emphasis` correctly, but there's no actual
-  per-intent differentiation content yet — team needs to design and fill these.
+- **Per-purpose prompt content now lives in
+  `prompts/report_purposes/{current_status,issue_response,future_business,root_cause}.md`**
+  (77–90 lines each), not in `prompts/report_structures/`, which
+  `_load_intent_emphasis()` keeps only as a legacy fallback. The chosen
+  file's full text is sent to the report writer as `purpose.instructions`
+  and the system prompt calls it authoritative — so a `Status: drafted …
+  아직 쓰지는 않음` header in one of them actively undercut the instruction
+  it was carrying. Removed 2026-08; `tests/test_prompt_invariants.py` now
+  fails if such a header comes back.
+- **Prompts are behaviour here, and nothing type-checks them.** Two live
+  contradictions found by reading rather than by any failing test: the SWOT
+  instruction told the analyzer to fill all four quadrants while
+  `global_system_prompt.md` principle 1 forbids filling a gap with a guess,
+  and `comparison_points` had no "extract every item" rule where
+  `metric_points` did (so "TV 31.7% vs 유튜브 25.6%" kept only the loser).
+  Both now live in `common/content_quality_validator.py` as shared constants
+  wired into every sector analyzer, with invariants pinned in
+  `tests/test_prompt_invariants.py`. Add a test there when adding a prompt
+  rule that another prompt could contradict.
 - **`core/entity/ai_based.py`'s organizations/technologies classification
   is unreliable.** Live-tested: gpt-4o-mini keeps putting named
   brands/products (e.g. "OK캐쉬백", "Syrup") into the generic `keywords`

@@ -1,8 +1,5 @@
 # Report Purpose — current_status / 현황 파악
 
-Status: drafted (팀 초안 반영 — `core/report_planner`가 아직 이 파일 내용을
-실제로 읽어서 쓰지는 않음, 연동 작업 필요)
-
 ## Role & Purpose
 
 당신은 TrendSparC 파이프라인의 **현황 파악(Current Status) 리포트

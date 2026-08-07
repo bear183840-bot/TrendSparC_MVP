@@ -12,7 +12,10 @@ from urllib.parse import urlparse
 
 from openai import OpenAI
 
-from common.content_quality_validator import SWOT_COMPLETENESS_INSTRUCTION
+from common.content_quality_validator import (
+    COMPARISON_COMPLETENESS_INSTRUCTION,
+    SWOT_COMPLETENESS_INSTRUCTION,
+)
 from common.contracts import DocumentAnalysis, SourceDocument
 from common.errors import PipelineStageError
 from sources.openai_retry import call_with_retry
@@ -632,6 +635,7 @@ def _analyze_document(
                 "질문에 직접 관련된 사실만 사용해 SK Broadband 전략기획 관점의 시장 변화, 영향, "
                 "Risk, Opportunity, Strength, Weakness, Action 신호를 추출하라. "
                 f"{SWOT_COMPLETENESS_INSTRUCTION} "
+                f"{COMPARISON_COMPLETENESS_INSTRUCTION} "
                 "문서에 수치와 시점이 함께 명시되어 있으면 metric_points로, 대상 간 비교 서술이 있으면 "
                 "comparison_points로 추출하되 명시되지 않은 값은 추정하거나 계산하지 말 것. 특히 재무제표나 "
                 "실적 표는 같은 항목이 3Q25/3Q24/2Q25처럼 여러 시점 컬럼으로 나란히 나오는 경우가 많으므로, "
