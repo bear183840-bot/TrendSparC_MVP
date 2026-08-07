@@ -527,6 +527,18 @@ def render_swot(strengths: list[str], weaknesses: list[str], opportunities: list
     return f'<div class="{layout_class}">{cells}</div>'
 
 
+def action_impact_lookup(report: Any) -> dict[str, str]:
+    """Cleaned action text -> the impact a source stated for it.
+
+    Keyed on the cleaned text because the same action reaches the renderer
+    with and without its `[doc_id=...]` marker depending on the path.
+    """
+    return {
+        clean_citation(link.action): link.expected_impact
+        for link in (getattr(report, "action_impacts", None) or [])
+    }
+
+
 def render_action_list(rows: list[tuple[str, str, str | None]]) -> None:
     """`rows` = (title, expected_impact, evidence_url) already resolved by the caller.
 

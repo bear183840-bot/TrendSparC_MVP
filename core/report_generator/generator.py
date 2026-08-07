@@ -14,6 +14,7 @@ from common.content_quality_validator import (
     dedupe_structured_across_sections,
 )
 from common.contracts import (
+    ActionImpact,
     ComparisonPoint,
     GeneratedReport,
     GeneratedReportSection,
@@ -120,10 +121,27 @@ _REPORT_SCHEMA = {
                 "required": ["entity", "criterion", "value", "level", "source_sentence"],
             },
         },
+        # An action's expected impact, only where a source states one. The
+        # column was blank because nothing linked the two; the previous filler
+        # paired the Nth action with the Nth business_impact, which read as a
+        # finding while carrying none.
+        "action_impacts": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "additionalProperties": False,
+                "properties": {
+                    "action": {"type": "string"},
+                    "expected_impact": {"type": "string"},
+                    "source_sentence": {"type": "string"},
+                },
+                "required": ["action", "expected_impact", "source_sentence"],
+            },
+        },
     },
     "required": [
         "title", "executive_summary", "sections", "limitations",
-        "metric_series", "comparison_points",
+        "metric_series", "comparison_points", "action_impacts",
     ],
 }
 
@@ -353,6 +371,42 @@ def section_confidence(confidence_labels: list[str]) -> str | None:
         if level in found:
             return level
     return None
+
+
+def _verified_action_impacts(
+    raw_impacts: list[dict], synthesis: TrendSynthesis
+) -> list[ActionImpact]:
+    """Action->outcome links the evidence genuinely states.
+
+    Three ways to be dropped, all of them the model over-reaching: the action
+    isn't one we actually recommended, the quoted sentence isn't in the
+    evidence, or the "impact" just restates the action. What survives is a
+    consequence a source wrote down.
+    """
+    corpus = " ".join([*synthesis.evidence, *synthesis.key_points, *synthesis.highlights])
+    known_actions = {
+        _DOC_ID_RE.sub("", action).strip(): action
+        for action in synthesis.recommended_actions
+    }
+    verified: list[ActionImpact] = []
+    seen: set[str] = set()
+    for raw in raw_impacts:
+        action = _DOC_ID_RE.sub("", raw.get("action") or "").strip()
+        impact = (raw.get("expected_impact") or "").strip()
+        sentence = (raw.get("source_sentence") or "").strip()
+        if not (action and impact and sentence) or action in seen:
+            continue
+        if action not in known_actions:
+            continue
+        if sentence not in corpus:
+            continue
+        if impact == action or impact in action or action in impact:
+            continue
+        seen.add(action)
+        verified.append(
+            ActionImpact(action=known_actions[action], expected_impact=impact, evidence_quote=sentence)
+        )
+    return verified
 
 
 def _diversity_limitations(synthesis: TrendSynthesis) -> list[str]:
@@ -730,6 +784,14 @@ def generate_report(
                         "must be identical across the entries being compared, or they cannot be tabulated. "
                         "Set `level` to low/medium/high only when the source itself ranks them; use null "
                         "otherwise rather than inventing a rank.\n"
+                        "action_impacts links a recommended action to what the evidence says will "
+                        "follow from it. Copy the action text verbatim from "
+                        "synthesis.recommended_actions, state the outcome in `expected_impact`, and put "
+                        "the sentence that says so in `source_sentence`. Only include an action whose "
+                        "source actually states a consequence - most recommendations do not, and an "
+                        "empty list is the correct answer then. Never infer an impact from the action "
+                        "itself, never restate the action as its own impact, and never carry an outcome "
+                        "over from a different action.\n"
                         "State what the evidence states, at the certainty the evidence states it. A source "
                         "saying a partnership is being expanded (\"추진 중\", \"확대하고 있다\", \"seizing "
                         "the opportunity to expand\") must not be written as an established fact "
@@ -754,6 +816,7 @@ def generate_report(
         extracted_comparisons = _verified_ai_comparison_points(
             parsed.get("comparison_points") or [], synthesis
         )
+        action_impacts = _verified_action_impacts(parsed.get("action_impacts") or [], synthesis)
         fallback = _fallback_report(synthesis, report_plan, audience_id)
         fallback_by_id = {section.section_id: section for section in fallback.sections}
         returned_by_id = {
@@ -794,6 +857,7 @@ def generate_report(
             limitations=limitations,
             extracted_metric_series=extracted_metrics,
             extracted_comparison_points=extracted_comparisons,
+            action_impacts=action_impacts,
         )
     except Exception as exc:
         return _fallback_report(

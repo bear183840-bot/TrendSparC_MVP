@@ -18,7 +18,9 @@ from reporting.dashboard_streamlit.components import (
     bar_metric_groups,
     clean_citation,
     comparison_points_to_table,
+    action_impact_lookup,
     dedupe_clean,
+    dedupe_raw,
     evidence_url,
     headline_stats,
     metric_comparison_groups,
@@ -219,12 +221,16 @@ def _body_renderer(
             dedupe_clean(synthesis.recommended_actions, 3),
         )
     if block_type == "action_list":
-        actions = dedupe_clean(synthesis.recommended_actions, 4)
-        return (
-            lambda: render_action_list(
-                [(clean_citation(action), "", evidence_url(action, result)) for action in actions]
-            )
-        ) if actions else None
+        actions = dedupe_raw(synthesis.recommended_actions, 4)
+        # Expected Impact is filled only where a source actually stated what
+        # the action would achieve (GeneratedReport.action_impacts); the rest
+        # stay empty rather than borrowing a neighbouring finding.
+        impacts = action_impact_lookup(result.generated_report)
+        rows = [
+            (clean_citation(action), impacts.get(clean_citation(action), ""), evidence_url(action, result))
+            for action in actions
+        ]
+        return (lambda: render_action_list(rows)) if rows else None
     # An unrecognised block_type draws nothing rather than an empty titled box.
     return None
 

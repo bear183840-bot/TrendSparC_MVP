@@ -619,6 +619,27 @@ class GeneratedReportSection(BaseModel):
     confidence: Optional[Literal["low", "medium", "high"]] = None
 
 
+class ActionImpact(BaseModel):
+    """What a source says follows from a recommended action.
+
+    The Expected Impact column was blank because nothing linked an action to
+    an outcome. It was previously filled by pairing the Nth action with the
+    Nth business_impact - two independent lists lined up by position, which
+    read as a finding while carrying none - and that was removed rather than
+    replaced.
+
+    This is the replacement, and it is only ever populated from a sentence
+    that states the consequence itself. `evidence_quote` is checked against
+    the collected evidence before the link is accepted, so an action whose
+    source never said what it would achieve keeps an empty cell - which is
+    the honest answer.
+    """
+
+    action: str
+    expected_impact: str
+    evidence_quote: str
+
+
 class GeneratedReport(BaseModel):
     request_id: str
     sector_id: str
@@ -638,6 +659,9 @@ class GeneratedReport(BaseModel):
     # not the report - can finally see them. Empty on the rule_based path.
     extracted_metric_series: list[MetricPoint] = Field(default_factory=list)
     extracted_comparison_points: list[ComparisonPoint] = Field(default_factory=list)
+    # Action -> outcome links the evidence actually states. Empty is normal:
+    # most sources recommend without quantifying what follows.
+    action_impacts: list[ActionImpact] = Field(default_factory=list)
 
 
 class DashboardBlock(BaseModel):

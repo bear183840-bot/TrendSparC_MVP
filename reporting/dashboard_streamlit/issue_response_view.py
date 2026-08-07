@@ -7,6 +7,7 @@ from typing import Any
 import streamlit as st
 
 from reporting.dashboard_streamlit.components import (
+    action_impact_lookup,
     headline_stats,
     bar_metric_groups,
     clean_citation,
@@ -111,8 +112,16 @@ def render_issue_response_dashboard(result: Any, question: str, sector: str, aud
     # be filled positionally (action N borrowed evidence N / business_impact N),
     # which produced a citation arrow pointing at an unrelated document and an
     # impact phrase with nothing tying it to the action.
+    # Expected Impact is filled only where a source actually stated what the
+    # action would achieve (GeneratedReport.action_impacts, verified against
+    # the evidence); the rest stay empty rather than borrowing a neighbour's.
+    impacts = action_impact_lookup(result.generated_report)
     action_rows = [
-        (clean_citation(raw_action), "", _evidence_url(raw_action, result))
+        (
+            clean_citation(raw_action),
+            impacts.get(clean_citation(raw_action), ""),
+            _evidence_url(raw_action, result),
+        )
         for raw_action in actions
     ]
     render_action_list(action_rows)
