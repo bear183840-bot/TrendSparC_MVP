@@ -11,7 +11,7 @@ import logging
 import re
 from typing import Any
 
-from common.content_quality_validator import dated_items
+from common.content_quality_validator import dated_items, is_time_period
 from common.contracts import AudienceAdaptation, DashboardBlock, DynamicLayout, ReportPlan
 
 _LOGGER = logging.getLogger("trendsparc.layout_generator")
@@ -108,11 +108,21 @@ def _candidate_content_types(content: dict) -> list[str]:
     candidates: list[str] = []
     metric_points = content.get("metric_points") or []
     periods_by_label: dict[Any, set] = {}
+    time_periods_by_label: dict[Any, set] = {}
     for point in metric_points:
         if isinstance(point, dict):
-            periods_by_label.setdefault(point.get("label"), set()).add(point.get("period"))
-    if any(len(periods) >= 2 for periods in periods_by_label.values()):
+            label, period = point.get("label"), point.get("period")
+            periods_by_label.setdefault(label, set()).add(period)
+            if is_time_period(period):
+                time_periods_by_label.setdefault(label, set()).add(period)
+    # A trend needs two points in *time*. The same metric measured against two
+    # age brackets ("20대" vs "50대 이상") is an item comparison, and calling it
+    # a chart claimed a movement over time that the data never described - the
+    # live slot resolver already called this one a bar, and the two disagreed.
+    if any(len(periods) >= 2 for periods in time_periods_by_label.values()):
         candidates.append("chart")
+    elif any(len(periods) >= 2 for periods in periods_by_label.values()):
+        candidates.append("bar")
     comparison_points = content.get("comparison_points") or []
     entities = {point.get("entity") for point in comparison_points if isinstance(point, dict)}
     if len(entities) >= 2:

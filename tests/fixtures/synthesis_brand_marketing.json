@@ -1,0 +1,95 @@
+{
+  "_note": "TrendSynthesis-level fixture for --synthesis-fixture. future_business purpose, but the question is really a short-term marketing plan - see purpose_id_note. Deliberately sparse in places: strengths is empty, only one risk and one weakness, and media cost figures were left out on purpose to exercise the slot fallback chain. metric_series uses `period` for an age bracket, not a time.",
+  "request_id": "req_synthetic_brand_marketing",
+  "sector_id": "sk_broadband",
+  "question": "SK브로드밴드 브랜드 이미지 개선에 맞는 연령층별 광고 매체 및 모델 추천",
+  "audience_id": "practitioner",
+  "purpose_id": "future_business",
+  "purpose_id_note": "기존 4개 목적(현황파악/이슈대응/미래사업/원인분석) 중 가장 가까운 future_business로 매핑함. '단기 마케팅 전략 및 기획'이라는 목적은 별도 카테고리 신설 여부를 검토할 필요가 있음.",
+  "highlights": [
+    "20대는 유튜브·틱톡 등 숏폼 플랫폼 이용 비중이 78%로 압도적이며, TV 광고 도달률은 22%에 불과하다. [doc_id=www.etnews.com:fdb9ff84ad062c04]",
+    "30~40대는 유튜브(61%)와 인스타그램(54%)을 동시에 이용하는 비중이 높아, 두 채널을 결합한 캠페인이 효과적이라는 분석이 있다. [doc_id=blog.bworld.co.kr:a198235c989ad273]",
+    "50대 이상은 TV 광고 도달률이 68%로 여전히 가장 높은 채널이며, 디지털 채널 이용은 상대적으로 낮다. [doc_id=biz.chosun.com:25729e70dd2a1d1f]",
+    "브랜드 이미지 개선을 위한 모델 선정 관련해서는, 20~30대 대상 설문에서 '신뢰감 있는 전문직 이미지'보다 '친근하고 실생활에 밀접한 이미지'의 모델 선호도가 높게 나타났다. [doc_id=www.newspim.com:f001e2f9c688aabf]"
+  ],
+  "synthesis_text": "연령대별로 주력 매체가 뚜렷하게 갈린다. 20대는 숏폼 플랫폼(유튜브·틱톡) 중심, 30~40대는 유튜브·인스타그램 결합, 50대 이상은 TV 중심이다. 모델 이미지는 전 연령대에서 '친근하고 실생활 밀접형'이 '신뢰감 있는 전문직형'보다 선호도가 높게 나타나, 채널은 연령별로 분산하되 모델 톤앤매너는 통일하는 전략이 유효해 보인다. 다만 매체별 집행 비용 데이터는 이번 검색에서 충분히 확보되지 못해 참고용 수준으로만 제시한다.",
+  "source_count": 5,
+  "unique_source_count": 4,
+  "source_ids": [
+    "www.etnews.com",
+    "blog.bworld.co.kr",
+    "biz.chosun.com",
+    "www.newspim.com"
+  ],
+  "key_points": [
+    "시장 변화: 20대는 숏폼 플랫폼 이용 비중이 압도적으로 높음 [doc_id=www.etnews.com:fdb9ff84ad062c04]",
+    "전략 영향: 30~40대는 유튜브+인스타그램 결합 캠페인이 효과적 [doc_id=blog.bworld.co.kr:a198235c989ad273]",
+    "Opportunity: 50대 이상은 TV 광고 도달률이 여전히 가장 높음 [doc_id=biz.chosun.com:25729e70dd2a1d1f]",
+    "Opportunity: '친근하고 실생활 밀접형' 모델 이미지 선호도가 전 연령대에서 높음 [doc_id=www.newspim.com:f001e2f9c688aabf]"
+  ],
+  "business_impacts": [
+    "연령대별 매체 전략을 분산하면 예산 대비 도달 효율을 높일 수 있으나, 매체별 정확한 집행 비용 데이터 부족으로 예산 배분 최적화에는 한계가 있음 [doc_id=www.etnews.com:fdb9ff84ad062c04]"
+  ],
+  "risks": [
+    "매체별 정확한 집행 비용 데이터 부족으로 예산 계획 수립 시 추가 조사 필요 [doc_id=www.etnews.com:fdb9ff84ad062c04]"
+  ],
+  "opportunities": [
+    "연령대별 맞춤 채널 전략으로 광고 도달 효율 개선 가능 [doc_id=www.etnews.com:fdb9ff84ad062c04]",
+    "전 연령대 공통 선호 모델 이미지(친근·실생활형)를 활용한 통일된 브랜드 톤 구축 [doc_id=www.newspim.com:f001e2f9c688aabf]"
+  ],
+  "strengths": [],
+  "weaknesses": [
+    "매체별 광고 집행 비용에 대한 신뢰할 만한 데이터 부족 [doc_id=www.etnews.com:fdb9ff84ad062c04]"
+  ],
+  "metric_series": [
+    {"label": "TV 광고 도달률", "period": "20대", "value": 22.0, "unit": "%"},
+    {"label": "TV 광고 도달률", "period": "50대 이상", "value": 68.0, "unit": "%"},
+    {"label": "숏폼 플랫폼 이용 비중", "period": "20대", "value": 78.0, "unit": "%"},
+    {"label": "유튜브 이용 비중", "period": "30~40대", "value": 61.0, "unit": "%"},
+    {"label": "인스타그램 이용 비중", "period": "30~40대", "value": 54.0, "unit": "%"}
+  ],
+  "comparison_points": [
+    {"entity": "20대", "criterion": "주력 매체", "value": "유튜브·틱톡(숏폼)", "level": "high"},
+    {"entity": "30~40대", "criterion": "주력 매체", "value": "유튜브+인스타그램", "level": "medium"},
+    {"entity": "50대 이상", "criterion": "주력 매체", "value": "TV", "level": "high"},
+    {"entity": "20대", "criterion": "선호 모델 이미지", "value": "친근·실생활 밀접형", "level": "high"},
+    {"entity": "30~40대", "criterion": "선호 모델 이미지", "value": "친근·실생활 밀접형", "level": "medium"},
+    {"entity": "50대 이상", "criterion": "선호 모델 이미지", "value": "신뢰감 있는 전문직형", "level": "medium"}
+  ],
+  "recommended_actions": [
+    "20대 타겟은 유튜브·틱톡 숏폼 콘텐츠 중심 캠페인 집행 [doc_id=www.etnews.com:fdb9ff84ad062c04]",
+    "30~40대 타겟은 유튜브+인스타그램 결합형 캠페인 기획 [doc_id=blog.bworld.co.kr:a198235c989ad273]",
+    "50대 이상 타겟은 기존 TV 광고 채널 비중 유지 [doc_id=biz.chosun.com:25729e70dd2a1d1f]",
+    "전 연령대 공통으로 '친근·실생활 밀접형' 이미지의 모델을 메인 모델로 선정 검토 [doc_id=www.newspim.com:f001e2f9c688aabf]"
+  ],
+  "monitoring_indicators": [
+    "연령대별 캠페인 도달률 및 반응률(CTR) 추이",
+    "매체별 광고 집행 비용 데이터 추가 확보 필요"
+  ],
+  "evidence": [
+    "20대는 유튜브·틱톡 등 숏폼 플랫폼 이용 비중이 78%로, TV 광고 도달률은 22%에 불과하다. [doc_id=www.etnews.com:fdb9ff84ad062c04]",
+    "30~40대는 유튜브(61%)와 인스타그램(54%)을 동시에 이용하는 비중이 높다. [doc_id=blog.bworld.co.kr:a198235c989ad273]",
+    "50대 이상은 TV 광고 도달률이 68%로 가장 높다. [doc_id=biz.chosun.com:25729e70dd2a1d1f]",
+    "20~30대 설문에서 '친근하고 실생활에 밀접한 이미지'의 모델 선호도가 높게 나타났다. [doc_id=www.newspim.com:f001e2f9c688aabf]"
+  ],
+  "confidence_labels": [
+    "high [doc_id=www.etnews.com:fdb9ff84ad062c04]",
+    "medium [doc_id=blog.bworld.co.kr:a198235c989ad273]",
+    "medium [doc_id=biz.chosun.com:25729e70dd2a1d1f]",
+    "low [doc_id=www.newspim.com:f001e2f9c688aabf]"
+  ],
+  "doc_source_map": {
+    "www.etnews.com:fdb9ff84ad062c04": "www.etnews.com",
+    "blog.bworld.co.kr:a198235c989ad273": "blog.bworld.co.kr",
+    "biz.chosun.com:25729e70dd2a1d1f": "biz.chosun.com",
+    "www.newspim.com:f001e2f9c688aabf": "www.newspim.com"
+  },
+  "corroborated_points": [
+    "연령대별 매체 이용 격차(20대 숏폼 vs 50대 TV)는 etnews와 biz.chosun 두 출처에서 공통 확인됨"
+  ],
+  "uncorroborated_points": [
+    "모델 이미지 선호도(친근·실생활형 vs 전문직형)는 newspim 단일 출처 기반이며 표본 설문 규모가 명시되지 않음",
+    "매체별 광고 집행 비용은 이번 검색에서 신뢰할 만한 수치를 확보하지 못해 comparison_points/metric_series에 포함하지 않음 — 이 부분은 의도적으로 데이터 없이 비워둠 (슬롯 대체 로직 테스트 목적)"
+  ],
+  "contradictions": []
+}

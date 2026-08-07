@@ -48,6 +48,9 @@ def dated_items(items: list[str]) -> list[str]:
 # those syllables.
 _TIME_PERIOD_RE = re.compile(
     r"(?:20\d{2}|'\d{2})\s*년|[1-4]\s*분기|[1-4]\s*Q|\d{1,2}\s*월|상반기|하반기"
+    # A bare four-digit year ("2019", "2023") is a period too. Bounded so it
+    # can't match inside a longer number or an age bracket like "20대".
+    r"|(?<!\d)(?:19|20)\d{2}(?!\d)"
     r"|(?:^|\s)(?:이전|이후|전|후)\s*$",
     re.I,
 )

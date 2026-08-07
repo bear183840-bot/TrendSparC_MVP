@@ -261,3 +261,54 @@ def test_app_churn_fixture_fills_every_root_cause_slot():
     assert by_id["cause"].block_type == "cause_map"
     assert by_id["improvement"].block_type == "action_list"
     assert not any(slot.is_last_resort for slot in resolved)
+
+
+# --- age brackets in `period` are a comparison, not a trend --------------
+
+
+def test_age_bracket_periods_are_not_read_as_a_trend():
+    """brand_marketing measures TV 도달률 against 20대 and 50대 이상.
+
+    Two points, but not two points in time - calling that a chart claims a
+    movement the data never described.
+    """
+    from common.content_quality_validator import is_time_period
+    from core.layout_generator.generator import _candidate_content_types
+
+    synthesis, _, _, _ = load_synthesis_fixture(_FIXTURES / "synthesis_brand_marketing.json")
+    assert not any(is_time_period(point.period) for point in synthesis.metric_series)
+
+    content = {
+        "metric_points": [point.model_dump() for point in synthesis.metric_series]
+    }
+    assert "chart" not in _candidate_content_types(content)
+    assert "bar" in _candidate_content_types(content)
+
+
+def test_bare_four_digit_years_still_count_as_a_trend():
+    from common.content_quality_validator import is_time_period
+    from core.layout_generator.generator import _candidate_content_types
+
+    assert is_time_period("2019") is True
+    assert is_time_period("20대") is False
+    assert is_time_period("30~40대") is False
+
+    content = {
+        "metric_points": [
+            {"label": "가입자", "period": "2019", "value": 519.0, "unit": "만 명"},
+            {"label": "가입자", "period": "2023", "value": 946.0, "unit": "만 명"},
+        ]
+    }
+    assert "chart" in _candidate_content_types(content)
+
+
+def test_brand_marketing_fills_every_future_business_slot():
+    by_id, resolved = _resolve("brand_marketing")
+
+    assert by_id["market_shift"].block_type == "bar"
+    assert by_id["capability"].block_type == "table"
+    # strengths is empty here, so the SWOT has 3 of 4 quadrants - still enough.
+    assert by_id["opportunity"].block_type == "matrix"
+    # matrix is claimed above, so 위험 falls to its own narrative bullets.
+    assert by_id["risk"].block_type == "narrative_list"
+    assert not any(slot.is_last_resort for slot in resolved)
