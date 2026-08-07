@@ -395,6 +395,22 @@ def dashboard_css(dark: bool, accent_theme: str = "orange") -> str:
         width:14px; border-radius:0; }}
     .ts-kpi-forecast {{ font-size:0.62em; vertical-align:middle; padding:1px 5px; margin-left:4px;
         border:1px solid var(--ts-border); border-radius:999px; color:var(--ts-muted); }}
+    .ts-timeline-step .ts-step-state {{ margin-left:6px; padding:0 6px; border-radius:999px;
+        font-size:0.66rem; font-weight:600; border:1px solid var(--ts-border);
+        color:var(--ts-muted); }}
+    .ts-timeline-step.done .ts-step-state {{ border-color:var(--ts-accent); color:var(--ts-accent); }}
+    .ts-timeline-step.active .ts-step-state {{ background:var(--ts-accent); border-color:var(--ts-accent);
+        color:#fff; }}
+    .ts-timeline-step.todo {{ opacity:0.72; }}
+    .ts-timeline-step.todo .ts-step-state {{ border-style:dashed; }}
+    .ts-donut-card {{ display:flex; align-items:center; gap:16px; flex-wrap:wrap; }}
+    /* The 25-unit dashoffset already starts the first slice at 12 o'clock
+       (circumference is 100 by construction), so no extra rotation. */
+    .ts-donut {{ width:118px; height:118px; }}
+    .ts-donut-seg {{ transform-origin:center; }}
+    .ts-donut-legend {{ display:flex; flex-direction:column; gap:4px; font-size:0.84rem; }}
+    .ts-donut-key {{ display:flex; align-items:center; gap:7px; }}
+    .ts-donut-key i {{ width:10px; height:10px; border-radius:3px; display:inline-block; }}
     .ts-factor-list {{ margin:0; padding-left:18px; }}
     .ts-factor-list li {{ margin:5px 0; display:flex; gap:6px; align-items:baseline;
         font-size:0.9rem; }}

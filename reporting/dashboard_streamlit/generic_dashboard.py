@@ -40,6 +40,7 @@ from reporting.dashboard_streamlit.components import (
     render_factor_list,
     render_importance_bars,
     render_recurring_terms,
+    render_share_split,
     render_metric_comparison,
     render_omitted_sections,
     render_radar,
@@ -211,7 +212,8 @@ def _body_renderer(
         return (lambda: render_kpi_row(synthesis.metric_series)) if synthesis.metric_series else None
     if block_type == "timeline":
         return lambda: render_timeline(
-            synthesis.evidence, synthesis.metric_series, reference_year(synthesis)
+            synthesis.evidence, synthesis.metric_series, reference_year(synthesis),
+            as_of_date=getattr(synthesis, "as_of_date", None),
         )
     if block_type == "table":
         headers, rows = comparison_points_to_table(synthesis.comparison_points)
@@ -228,6 +230,8 @@ def _body_renderer(
             opportunities=opportunities, threats=risks,
         )
         return (lambda: st.markdown(markup, unsafe_allow_html=True)) if markup else None
+    if block_type == "share_split":
+        return lambda: render_share_split(synthesis.metric_series)
     if block_type == "factor_list":
         # Every item, not the summary card's first four: a question asking
         # which factors is asking for the set.

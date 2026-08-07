@@ -99,11 +99,12 @@ _REPORT_SCHEMA = {
                     "value": {"type": "number"},
                     "unit": {"type": "string"},
                     "is_forecast": {"type": "boolean"},
+                    "share_of": {"type": ["string", "null"]},
                     "source_sentence": {"type": "string"},
                 },
                 "required": [
                     "label", "subject", "period", "value", "unit", "is_forecast",
-                    "source_sentence",
+                    "share_of", "source_sentence",
                 ],
             },
         },
@@ -316,6 +317,7 @@ def _verified_ai_metric_points(
                 value=float(raw["value"]),
                 unit=(raw.get("unit") or "").strip() or None,
                 is_forecast=_is_stated_forecast(raw),
+                share_of=(raw.get("share_of") or "").strip() or None,
             )
         )
     return verified

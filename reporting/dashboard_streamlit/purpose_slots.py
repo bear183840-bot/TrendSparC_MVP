@@ -60,6 +60,7 @@ DESIGN_LIBRARY_BLOCKS: dict[str, tuple[str, ...]] = {
     "KPI Card": ("kpi_grid", "kpi_single"),
     "Line / Area": ("chart",),
     "Bar": ("bar", "item_bar", "metric_comparison"),
+    "Share Split": ("share_split",),
     "Matrix": ("matrix",),
     "Timeline": ("timeline",),
     "Table": ("table",),
@@ -120,7 +121,7 @@ _CURRENT_STATUS: tuple[Slot, ...] = (
     # 시장 상황 then falls to its own chart/timeline. Both slots reading the
     # same metric_series is why order decides which one gets `bar`.
     Slot("ranking", "순위·비교", "항목들 사이에서 무엇이 앞서는가",
-         ("item_bar", "metric_comparison", "table", "narrative_list"),
+         ("share_split", "item_bar", "metric_comparison", "table", "narrative_list"),
          ("key_metrics", "market_status"), (), optional=True),
     Slot("market", "시장 상황", "시장이 어느 방향으로 움직이는가",
          ("chart", "bar", "item_bar", "timeline", "narrative_list"),
@@ -128,7 +129,7 @@ _CURRENT_STATUS: tuple[Slot, ...] = (
     Slot("metrics", "지표", "확인된 수치를 제시",
          ("kpi_grid", "chart", "kpi_single"), ("key_metrics",)),
     Slot("competitor", "경쟁사", "다른 주체와 견주면 어디쯤인가",
-         ("table", "radar", "narrative_list"), ("market_status",)),
+         ("table", "radar", "share_split", "narrative_list"), ("market_status",)),
     # 요인/페인포인트 questions ("가입 고려 요인", "인기 요인") answer with a
     # list, and a list is what the evidence actually holds - so this slot has
     # its own place rather than being squeezed into 시장 상황's prose
@@ -248,6 +249,9 @@ def _availability() -> dict[str, Callable[[Any, list[str]], bool]]:
         # direction can't claim the ranking bars and leave 순위 empty.
         "bar": lambda synthesis, items: bool(block_shapes.time_bar_groups(synthesis.metric_series)),
         "item_bar": lambda synthesis, items: bool(block_shapes.item_bar_groups(synthesis.metric_series)),
+        # Composition, not ranking - and only where the source framed the
+        # figures as parts of one named whole.
+        "share_split": lambda synthesis, items: block_shapes.has_share_split(synthesis.metric_series),
         "metric_comparison": lambda synthesis, items: bool(
             block_shapes.metric_comparison_groups(synthesis.metric_series)
         ),

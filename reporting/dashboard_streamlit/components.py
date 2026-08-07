@@ -50,8 +50,11 @@ from common.block_shapes import (  # noqa: F401
     has_timeseries,
     cause_tree,
     has_cause_tree,
+    SHARE_SUM_TOLERANCE,
     has_recurring_terms,
+    has_share_split,
     recurring_terms,
+    share_groups,
     has_importance_ranking,
     importance_ranked,
     metric_axis_labels,
@@ -59,6 +62,7 @@ from common.block_shapes import (  # noqa: F401
     metric_insight,
     radar_axes,
     timeline_entries,
+    timeline_entries_with_status,
     varies_by_subject,
 )
 from reporting.dashboard_streamlit.sk_badge import sk_badge_html
@@ -679,6 +683,56 @@ def render_action_list(rows: list[tuple[str, str, str | None]]) -> None:
 
 
 
+_DONUT_COLORS = ("var(--ts-accent)", "var(--ts-teal)", "var(--ts-muted)", "var(--ts-soft)")
+
+
+def render_share_split(metric_points: list[Any]) -> None:
+    """Composition of one stated whole, as a donut per whole.
+
+    Only drawn for figures the source framed as parts of a named population
+    and whose sum stays within 100 (`share_groups`). Where the named slices
+    fall short, the gap is left visibly unfilled and labelled as
+    unaccounted-for rather than closed with an invented "기타" - a source that
+    named the top three is not a source that said the rest is one thing.
+    """
+    groups = share_groups(metric_points)
+    if not groups:
+        return
+    for whole, slices in groups:
+        total = sum(point.value for point in slices)
+        offset = 0.0
+        segments = ""
+        for index, point in enumerate(slices):
+            color = _DONUT_COLORS[index % len(_DONUT_COLORS)]
+            segments += (
+                f'<circle class="ts-donut-seg" r="15.9155" cx="21" cy="21" fill="none" '
+                f'stroke="{color}" stroke-width="7" '
+                f'stroke-dasharray="{point.value:.1f} {100 - point.value:.1f}" '
+                f'stroke-dashoffset="{(25 - offset) % 100:.1f}"></circle>'
+            )
+            offset += point.value
+        legend = "".join(
+            f'<span class="ts-donut-key">'
+            f'<i style="background:{_DONUT_COLORS[index % len(_DONUT_COLORS)]}"></i>'
+            f'{escape(point.subject or point.label)} {_format_number(point.value)}%</span>'
+            for index, point in enumerate(slices)
+        )
+        remainder = 100 - total
+        note = (
+            f'<p class="ts-factor-note">근거가 밝힌 항목의 합은 {_format_number(total)}%이며, '
+            f'나머지 {_format_number(remainder)}%는 출처에 명시되지 않았습니다.</p>'
+            if remainder > SHARE_SUM_TOLERANCE else ""
+        )
+        st.markdown(
+            f'<div class="ts-donut-card"><b>{escape(whole)}</b>'
+            f'<svg viewBox="0 0 42 42" class="ts-donut">'
+            f'<circle r="15.9155" cx="21" cy="21" fill="none" stroke="var(--ts-soft)" '
+            f'stroke-width="7"></circle>{segments}</svg>'
+            f'<div class="ts-donut-legend">{legend}</div></div>{note}',
+            unsafe_allow_html=True,
+        )
+
+
 def render_factor_list(items: list[tuple[str, str | None]]) -> None:
     """A list of factors, as a list - `items` = (text, evidence_url).
 
@@ -1057,18 +1111,34 @@ def render_metric_comparison(period: str, points: list[Any]) -> None:
 
 
 
+_STATUS_LABELS = {"done": "완료", "active": "진행", "todo": "예정"}
+
+
 def render_timeline(
     evidence: list[str],
     metric_points: list[Any],
     reference_year: int | None = None,
     limit: int = 6,
+    as_of_date: str | None = None,
 ) -> None:
-    entries = timeline_entries(evidence, metric_points, reference_year)[:limit]
+    """Dated evidence in order, each row marked with where it stands.
+
+    The state comes from words the document wrote ("추진 중", "출시 예정",
+    "완료") and, only where it wrote none, from whether the period is before
+    or after this report's as-of date. A row with neither stays 진행 - a
+    dated statement with no completion word is something that was reported,
+    and calling it finished is the one reading nothing supports.
+    """
+    entries = timeline_entries_with_status(
+        evidence, metric_points, reference_year, as_of_date
+    )[:limit]
     if not entries:
         return
     steps = "".join(
-        f'<div class="ts-timeline-step"><b>{escape(period)}</b>{escape(text)}</div>'
-        for period, text in entries
+        f'<div class="ts-timeline-step {status}">'
+        f'<b>{escape(period)}<span class="ts-step-state">{_STATUS_LABELS[status]}</span></b>'
+        f'{escape(text)}</div>'
+        for period, text, status in entries
     )
     st.markdown(f'<div class="ts-timeline">{steps}</div>', unsafe_allow_html=True)
 

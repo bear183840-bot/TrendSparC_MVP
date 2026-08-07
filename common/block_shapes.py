@@ -161,6 +161,46 @@ def metric_insight(points: list[Any], grounded_claims: list[Any]) -> tuple[str, 
     return claim.claim, claim.source_url
 
 
+# A donut asserts that its slices are the whole. Percentages that add past
+# 100 are being measured over different bases (multi-select survey answers
+# usually are), and drawing those as one circle states something false.
+SHARE_SUM_TOLERANCE = 2.0
+SHARE_MIN_SLICES = 2
+
+
+def share_groups(metric_points: list[Any]) -> list[tuple[str, list[Any]]]:
+    """(whole, slices) for every set of figures that really partitions one whole.
+
+    Three conditions, all necessary: the source named the same whole for each
+    slice (`share_of`), the figures are percentages, and they do not add up to
+    more than 100. The last one is the arithmetic check that catches a model
+    labelling multi-select answers as shares - "이용자의 62%가 유튜브, 55%가
+    넷플릭스" is two overlapping groups, not two slices, and it fails the sum.
+
+    Slices that fall short of 100 are kept and the renderer shows the
+    remainder as unaccounted-for, since a source often names only the top
+    few. Inventing a "기타" slice to close the circle would be the fabrication
+    this whole check exists to prevent.
+    """
+    by_whole: dict[str, list[Any]] = {}
+    for point in metric_points:
+        whole = (getattr(point, "share_of", None) or "").strip()
+        if whole and (point.unit or "").strip() in {"%", "％"}:
+            by_whole.setdefault(whole, []).append(point)
+    groups = []
+    for whole, points in by_whole.items():
+        if len(points) < SHARE_MIN_SLICES:
+            continue
+        if sum(point.value for point in points) > 100 + SHARE_SUM_TOLERANCE:
+            continue
+        groups.append((whole, sorted(points, key=lambda point: point.value, reverse=True)))
+    return groups
+
+
+def has_share_split(metric_points: list[Any]) -> bool:
+    return bool(share_groups(metric_points))
+
+
 def has_comparison(comparison_points: list[Any]) -> bool:
     """True only when 2+ entities share a real common criterion - two
     entities that each only state a *different* metric (no overlap) don't
@@ -290,6 +330,66 @@ def timeline_entries(
             continue
         unique.append((period, text))
     return sorted(unique, key=lambda entry: period_sort_key(entry[0]))
+
+
+# What a source says about where something stands. These are literal words a
+# document either used or didn't, so reading them is not a judgement - but
+# they only ever *downgrade* certainty: a sentence with no marker is dated
+# but unlabelled, never assumed finished.
+_ACTIVE_MARKERS = ("진행 중", "진행중", "추진 중", "추진중", "확대하고 있다", "협의 중",
+                   "협의중", "시범", "베타", "준비 중", "준비중", "논의 중", "논의중")
+_PLANNED_MARKERS = ("예정", "계획", "전망", "목표", "추진할", "도입할", "검토 중", "검토중",
+                    "출시할", "예상")
+_DONE_MARKERS = ("완료", "출시했", "도입했", "체결했", "종료", "달성했", "마무리")
+
+
+def timeline_status(sentence: str, period: str, as_of_date: str | None = None) -> str:
+    """`done` / `active` / `todo` for one timeline row.
+
+    Derived, not invented. A marker the document actually wrote wins outright
+    ("진행 중" is active however its date reads), and only where the sentence
+    says nothing about status does the date decide - a period after the
+    report's own as-of date has not happened yet.
+
+    The default is `active`, not `done`. A dated sentence with no completion
+    word is a thing that was reported, and marking it finished would be the
+    one reading the evidence never supports; every other outcome here is
+    either stated or arithmetic.
+    """
+    text = sentence or ""
+    if any(marker in text for marker in _ACTIVE_MARKERS):
+        return "active"
+    if any(marker in text for marker in _PLANNED_MARKERS):
+        return "todo"
+    if any(marker in text for marker in _DONE_MARKERS):
+        return "done"
+    reference = None
+    try:
+        reference = int(str(as_of_date)[:4]) if as_of_date else None
+    except ValueError:
+        reference = None
+    if reference is not None:
+        year_match = re.search(r"20\d{2}", period or "")
+        if year_match:
+            year = int(year_match.group(0))
+            if year > reference:
+                return "todo"
+            if year < reference:
+                return "done"
+    return "active"
+
+
+def timeline_entries_with_status(
+    evidence: list[str],
+    metric_points: list[Any],
+    reference_year: int | None = None,
+    as_of_date: str | None = None,
+) -> list[tuple[str, str, str]]:
+    """`timeline_entries` plus each row's stated progress state."""
+    return [
+        (period, text, timeline_status(text, period, as_of_date))
+        for period, text in timeline_entries(evidence, metric_points, reference_year)
+    ]
 
 
 def has_timeline(

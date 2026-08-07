@@ -347,6 +347,14 @@ class MetricPoint(BaseModel):
     # observed history; until now the only signal was whether the *period*
     # string happened to contain "(전망)", which is text formatting, not data.
     is_forecast: bool = False
+    # The whole this figure is a share of ("스포츠 시청 이용자 전체"), where
+    # the source frames it that way. A donut claims its slices partition one
+    # population, and nothing in a plain percentage says whether it does -
+    # so without this field the only safe drawing of "넷플릭스 34%, 유튜브
+    # 21%" is bars, because the two could be measured over different bases
+    # and summing them would be meaningless. Set only from an explicit
+    # framing; the sum is checked before anything is drawn as a whole.
+    share_of: Optional[str] = None
     # Stable synthesis-level identity and provenance. Analyzer-produced points
     # may leave these empty; the rule-based synthesizer fills them without
     # asking an LLM to invent or alter a number.

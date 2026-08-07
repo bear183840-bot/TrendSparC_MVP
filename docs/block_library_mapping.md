@@ -37,9 +37,9 @@
 | 블록 | 없는 것 | 필요한 변경 |
 |---|---|---|
 | ~~2.3 `ForecastLineCard`~~ | ~~실적/전망 구분~~ | **완료.** `MetricPoint.is_forecast` 추가. 모델이 표시하되 근거의 전망 표현(전망/예상/목표/추정/계획/가이던스)이 실제로 있을 때만 인정한다. 관측 구간은 실선, 전망으로 넘어가는 구간은 점선 + 범례, KPI 헤드라인은 **관측된 최신값**을 쓴다 |
-| 2.4 `LandscapeSplit` 도넛 | "전체의 구성비"라는 표시 | 도넛은 합이 100%인 분할이어야 한다. 지금 `ComparisonPoint`에는 그 값들이 한 모집단의 분할인지 표시할 방법이 없어, 무관한 %를 합쳐 그릴 위험이 있다 |
+| ~~2.4 `LandscapeSplit` 도넛~~ | ~~"전체의 구성비"라는 표시~~ | **완료.** `MetricPoint.share_of`(그 값이 어느 전체의 일부인지)를 근거가 그렇게 서술한 경우에만 채운다. 그리기 전에 ① 같은 전체를 가리키는 항목이 2개 이상 ② 단위가 % ③ 합이 100 이하 — 셋을 모두 확인한다(중복응답 설문은 합이 100을 넘어 걸러진다). 합이 100에 못 미치면 남는 부분은 "출처에 명시되지 않음"으로 비워 두고 '기타'를 만들지 않는다 |
 | ~~3.1 `DriverBarList`~~ | ~~`value: number` (중요도)~~ | **완료.** `GroundedClaim.importance` + `importance_basis`. 이유 없는 점수는 통째로 폐기되고, 화면에는 "AI 판단" 배지와 이유 툴팁이 항상 붙는다. 막대는 상위 항목이 아니라 100 기준으로 스케일한다 |
-| 5.1/5.2 `Timeline*` | `status: done/active/todo` | 지금 타임라인은 "날짜 있는 근거"일 뿐 진행 상태 개념이 없다 |
+| ~~5.1/5.2 `Timeline*`~~ | ~~`status: done/active/todo`~~ | **완료. 계약 변경 없이 파생.** 문서가 실제로 쓴 표현("추진 중"/"출시 예정"/"완료했다")이 우선하고, 아무 말도 없을 때만 `as_of_date` 대비 시점으로 정한다. 둘 다 없으면 **진행**으로 남는다 — 날짜만으로 완료를 주장하지 않는다 |
 | 6.3 `CompetitorPanels` | 경쟁사별 process + importance + 도넛 | 위 세 가지의 합성. 각각이 갖춰져야 가능 |
 | ~~7.1/7.2 `RootCauseTree`~~ | ~~원인 간 부모-자식~~ | **완료.** `GroundedClaim.parent_claim_id` → `SynthesisClaim.parent_synthesis_claim_id`. 검증을 통과한 같은 문서의 claim만 부모가 될 수 있고, 자기 자신·순환은 끊는다. 2단까지만 그린다 |
 | ~~8.3 `ActionImpactList`~~ | ~~임팩트 **수치**(진행바용)~~ | **완료.** `ActionImpact.impact_value` / `impact_unit`. 인용 문장에 그 숫자가 실제로 있을 때만 인정하고, 문장만 있는 행은 막대 없이 문장만 남는다 |
@@ -64,10 +64,8 @@
 3. ~~**Step 2-1 관계 필드**~~ — 완료 (`parent_claim_id`, `importance`).
 4. ~~**3축 계약**~~ — 완료 (`MetricPoint.subject`).
 
-남은 것: `LandscapeSplit` 도넛(한 모집단의 분할이라는 표시), `Timeline`의
-done/active/todo 진행 상태, `CompetitorPanels`(위 둘의 합성). 셋 다 아직
-계약이 없고, 관계 필드처럼 "근거가 실제로 말한 경우에만" 규칙을 먼저 정해야
-한다.
+남은 것: `CompetitorPanels` 하나뿐이며, 이는 새 계약이 아니라 이미 만들어진
+도넛·중요도·원인 트리를 경쟁사별로 묶는 레이아웃 작업이다.
 
 관계 필드는 현재 **sk_broadband 어댑터에만** 구현돼 있다(계획대로). 다른 섹터는
 스키마에 같은 세 필드를 추가하고 `_verified_relations()`를 호출하면 그대로
