@@ -15,7 +15,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from audience.contracts import load_audience_profile
-from common.content_quality_validator import dated_items
+from common.content_quality_validator import dated_items, is_time_period
 from common.contracts import (
     ReportPlan,
     ReportPurposeClassification,
@@ -124,7 +124,9 @@ def _load_intent_emphasis(purpose_id: str) -> str | None:
 def _has_timeline_evidence(synthesis: TrendSynthesis) -> bool:
     periods_by_label: dict[str, set[str]] = {}
     for point in synthesis.metric_series:
-        if point.label and point.period:
+        # A metric measured against two *subjects* is a comparison, not a
+        # chronology - see content_quality_validator.is_time_period.
+        if point.label and is_time_period(point.period):
             periods_by_label.setdefault(point.label, set()).add(point.period)
     if any(len(periods) >= 2 for periods in periods_by_label.values()):
         return True

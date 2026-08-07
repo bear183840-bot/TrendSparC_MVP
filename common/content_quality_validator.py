@@ -38,6 +38,32 @@ def dated_items(items: list[str]) -> list[str]:
     return [item for item in items if item and _TIMELINE_DATE_RE.search(item)]
 
 
+# MetricPoint.period is free text and is not always a point in time. Analyzers
+# legitimately use it to name the subject a figure belongs to ("B tv+ 앱" vs
+# "경쟁 OTT 앱 평균", "이용자 설문"), which is a comparison, not a chronology.
+# Anything chronological has to check for a real time marker first.
+# A trailing 전/후 ("도입 전", "개편 이후") is a real temporal order even with
+# no date attached, and the before/after bar depends on it. It has to be
+# anchored at the end so it can't match a subject name that merely contains
+# those syllables.
+_TIME_PERIOD_RE = re.compile(
+    r"(?:20\d{2}|'\d{2})\s*년|[1-4]\s*분기|[1-4]\s*Q|\d{1,2}\s*월|상반기|하반기"
+    r"|(?:^|\s)(?:이전|이후|전|후)\s*$",
+    re.I,
+)
+
+
+def is_time_period(period: str | None) -> bool:
+    """Whether a MetricPoint.period names a point in time at all.
+
+    Live-observed: an app-churn analysis stored the compared subject in
+    `period`, and both report_planner and the timeline block read those as
+    two distinct dates - so a report with no chronology whatsoever was given
+    a Timeline section listing "B tv+ 앱" as if it were a moment.
+    """
+    return bool(_TIME_PERIOD_RE.search(period or ""))
+
+
 def has_renderable_content(*value_groups: Any) -> bool:
     """Whether a panel has anything real to show.
 

@@ -220,3 +220,44 @@ def test_narrative_list_may_repeat_because_each_slot_holds_different_text():
     assert len(narratives) > 1
     texts = [tuple(slot.items) for slot in narratives]
     assert len(set(texts)) > 1, "same text repeated under different slot titles"
+
+
+# --- period is free text, and is not always a time ----------------------
+
+
+def test_subject_valued_periods_do_not_create_a_timeline():
+    """app_churn stores the compared subject in `period` ("B tv+ 앱" vs
+    "경쟁 OTT 앱 평균"), and none of its evidence carries a date.
+
+    Both report_planner and the timeline block used to read those as two
+    distinct points in time, so a report with no chronology at all was given
+    a Timeline section listing "B tv+ 앱" as though it were a moment.
+    """
+    from common.content_quality_validator import is_time_period
+    from reporting.dashboard_streamlit import components
+
+    synthesis, _, _, _ = load_synthesis_fixture(
+        _FIXTURES / "synthesis_app_churn_root_cause.json"
+    )
+
+    assert not any(is_time_period(point.period) for point in synthesis.metric_series)
+    assert components.has_timeline(synthesis.evidence, synthesis.metric_series) is False
+
+
+def test_before_after_periods_still_count_as_a_sequence():
+    from common.content_quality_validator import is_time_period
+
+    assert is_time_period("도입 전") is True
+    assert is_time_period("개편 이후") is True
+    assert is_time_period("2026년 1분기") is True
+    assert is_time_period("B tv+ 앱") is False
+    assert is_time_period("경쟁 OTT 앱 평균") is False
+    assert is_time_period("이용자 설문") is False
+
+
+def test_app_churn_fixture_fills_every_root_cause_slot():
+    by_id, resolved = _resolve("app_churn_root_cause")
+
+    assert by_id["cause"].block_type == "cause_map"
+    assert by_id["improvement"].block_type == "action_list"
+    assert not any(slot.is_last_resort for slot in resolved)

@@ -1,0 +1,96 @@
+{
+  "_note": "TrendSynthesis-level fixture for --synthesis-fixture. Second root_cause case, deliberately different in shape from synthesis_root_cause.json: metric_series here uses `period` to hold the compared subject (\"B tv+ 앱\" vs \"경쟁 OTT 앱 평균\") rather than a point in time, and none of the evidence sentences carry a date.",
+  "request_id": "req_synthetic_app_churn_root_cause",
+  "sector_id": "sk_broadband",
+  "question": "B tv+ 모바일 앱의 이용자 이탈률이 유독 높은 이유는 무엇인가?",
+  "audience_id": "practitioner",
+  "purpose_id": "root_cause",
+  "highlights": [
+    "B tv+ 모바일 앱의 30일 이탈률은 42%로, 경쟁 OTT 앱 평균(28%) 대비 현저히 높다. [doc_id=www.etnews.com:7d3bbacb17ef4119]",
+    "1차 원인은 앱 로딩 속도로, 콘텐츠 재생까지 평균 4.2초가 소요되어 경쟁 앱(1.8초) 대비 2배 이상 느리다. [doc_id=blog.bworld.co.kr:a198235c989ad273]",
+    "2차 원인은 추천 알고리즘 정확도로, 이용자 설문에서 '추천 콘텐츠가 관심사와 맞지 않는다'는 응답이 61%에 달했다. [doc_id=blog.bworld.co.kr:25a0e5afbc879b5c]",
+    "3차 원인은 UI 복잡도로, 신규 이용자의 첫 실행 후 3분 내 이탈률이 35%에 달해 온보딩 과정의 난이도가 지적됐다. [doc_id=www.newspim.com:f001e2f9c688aabf]"
+  ],
+  "synthesis_text": "B tv+ 앱의 높은 이탈률은 '느린 로딩 속도 → 추천 알고리즘 불만족 → 복잡한 UI로 인한 온보딩 실패'가 순차적으로 겹친 결과다. 특히 로딩 속도는 사용자가 가장 먼저 마주치는 경험이라 이탈에 가장 직접적인 영향을 미치는 최상위 원인으로 판단된다.",
+  "source_count": 5,
+  "unique_source_count": 4,
+  "source_ids": [
+    "www.etnews.com",
+    "blog.bworld.co.kr",
+    "www.newspim.com",
+    "file.alphasquare.co.kr"
+  ],
+  "key_points": [
+    "시장 변화: B tv+ 앱 이탈률이 업계 평균보다 현저히 높음 [doc_id=www.etnews.com:7d3bbacb17ef4119]",
+    "전략 영향: 앱 로딩 속도 개선이 가장 시급한 개입 지점 [doc_id=blog.bworld.co.kr:a198235c989ad273]",
+    "Risk: 추천 알고리즘 불만족이 재방문율 저하로 이어짐 [doc_id=blog.bworld.co.kr:25a0e5afbc879b5c]",
+    "Opportunity: 온보딩 UI 단순화를 통한 신규 이용자 정착률 개선 여지 [doc_id=www.newspim.com:f001e2f9c688aabf]"
+  ],
+  "business_impacts": [
+    "높은 이탈률이 지속되면 앱 기반 신규 서비스(광고, 커머스 등) 확장 계획에도 부정적 영향 [doc_id=file.alphasquare.co.kr:67083446d465940b]"
+  ],
+  "risks": [
+    "이탈률 개선 없이는 신규 앱 기반 수익 모델 확장이 어려움 [doc_id=file.alphasquare.co.kr:67083446d465940b]",
+    "추천 알고리즘 불만족이 브랜드 신뢰도 저하로 이어질 가능성 [doc_id=blog.bworld.co.kr:25a0e5afbc879b5c]"
+  ],
+  "opportunities": [
+    "로딩 속도 개선만으로도 이탈률 상당 부분 방어 가능 [doc_id=blog.bworld.co.kr:a198235c989ad273]",
+    "온보딩 UI 단순화로 신규 이용자 정착률 개선 [doc_id=www.newspim.com:f001e2f9c688aabf]"
+  ],
+  "strengths": [
+    "콘텐츠 자체 다양성은 경쟁 앱 대비 열위가 아님 [doc_id=www.etnews.com:7d3bbacb17ef4119]"
+  ],
+  "weaknesses": [
+    "앱 로딩 속도가 경쟁 앱 대비 2배 이상 느림 [doc_id=blog.bworld.co.kr:a198235c989ad273]",
+    "추천 알고리즘 정확도에 대한 불만족 비율이 높음 [doc_id=blog.bworld.co.kr:25a0e5afbc879b5c]"
+  ],
+  "metric_series": [
+    {"label": "30일 이탈률", "period": "B tv+ 앱", "value": 42.0, "unit": "%"},
+    {"label": "30일 이탈률", "period": "경쟁 OTT 앱 평균", "value": 28.0, "unit": "%"},
+    {"label": "콘텐츠 재생 로딩 시간", "period": "B tv+ 앱", "value": 4.2, "unit": "초"},
+    {"label": "콘텐츠 재생 로딩 시간", "period": "경쟁 앱 평균", "value": 1.8, "unit": "초"},
+    {"label": "추천 불만족 응답 비율", "period": "이용자 설문", "value": 61.0, "unit": "%"},
+    {"label": "첫 실행 후 3분 내 이탈률", "period": "신규 이용자", "value": 35.0, "unit": "%"}
+  ],
+  "comparison_points": [
+    {"entity": "1차 원인: 로딩 속도", "criterion": "이탈 기여도", "value": "높음", "level": "high"},
+    {"entity": "2차 원인: 추천 알고리즘", "criterion": "이탈 기여도", "value": "중간", "level": "medium"},
+    {"entity": "3차 원인: UI 복잡도(온보딩)", "criterion": "이탈 기여도", "value": "중간", "level": "medium"}
+  ],
+  "recommended_actions": [
+    "앱 콘텐츠 재생 로딩 속도 개선을 최우선 과제로 추진 (근본 원인 사슬의 최상위 개입 지점) [doc_id=blog.bworld.co.kr:a198235c989ad273]",
+    "추천 알고리즘 정확도 개선을 위한 AI 모델 재학습 [doc_id=blog.bworld.co.kr:25a0e5afbc879b5c]",
+    "신규 이용자 온보딩 UI 단순화 및 튜토리얼 개선 [doc_id=www.newspim.com:f001e2f9c688aabf]"
+  ],
+  "monitoring_indicators": [
+    "월별 앱 30일 이탈률 추이",
+    "콘텐츠 재생 로딩 시간 개선 추이",
+    "추천 콘텐츠 클릭률(CTR) 변화"
+  ],
+  "evidence": [
+    "B tv+ 모바일 앱의 30일 이탈률은 42%로 경쟁 OTT 앱 평균 28% 대비 높다. [doc_id=www.etnews.com:7d3bbacb17ef4119]",
+    "콘텐츠 재생까지 평균 4.2초가 소요되어 경쟁 앱(1.8초) 대비 2배 이상 느리다. [doc_id=blog.bworld.co.kr:a198235c989ad273]",
+    "이용자 설문에서 추천 콘텐츠 불만족 응답이 61%에 달했다. [doc_id=blog.bworld.co.kr:25a0e5afbc879b5c]",
+    "신규 이용자의 첫 실행 후 3분 내 이탈률이 35%에 달한다. [doc_id=www.newspim.com:f001e2f9c688aabf]"
+  ],
+  "confidence_labels": [
+    "high [doc_id=www.etnews.com:7d3bbacb17ef4119]",
+    "high [doc_id=blog.bworld.co.kr:a198235c989ad273]",
+    "medium [doc_id=blog.bworld.co.kr:25a0e5afbc879b5c]",
+    "medium [doc_id=www.newspim.com:f001e2f9c688aabf]"
+  ],
+  "doc_source_map": {
+    "www.etnews.com:7d3bbacb17ef4119": "www.etnews.com",
+    "blog.bworld.co.kr:a198235c989ad273": "blog.bworld.co.kr",
+    "blog.bworld.co.kr:25a0e5afbc879b5c": "blog.bworld.co.kr",
+    "www.newspim.com:f001e2f9c688aabf": "www.newspim.com",
+    "file.alphasquare.co.kr:67083446d465940b": "file.alphasquare.co.kr"
+  },
+  "corroborated_points": [
+    "B tv+ 앱의 높은 이탈률과 느린 로딩 속도의 상관관계는 etnews와 bworld 두 출처에서 공통 확인됨"
+  ],
+  "uncorroborated_points": [
+    "온보딩 UI 복잡도가 3차 원인이라는 해석은 newspim 단일 출처 기반"
+  ],
+  "contradictions": []
+}

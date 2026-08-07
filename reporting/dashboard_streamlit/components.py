@@ -23,6 +23,7 @@ from common.content_quality_validator import (
     filter_shared_comparison_axis,
     group_metric_points_by_label,
     is_duplicate_statement,
+    is_time_period,
     period_sort_key,
     rank_by_relevance,
     select_chartable_series,
@@ -805,7 +806,10 @@ def timeline_entries(evidence: list[str], metric_points: list[Any]) -> list[tupl
     a timeline, which is all the old registry block produced."""
     entries: list[tuple[str, str]] = []
     for point in metric_points:
-        if point.period:
+        # `period` is free text and is not always a time. An app-churn
+        # analysis used it for the compared subject ("B tv+ 앱"), which put
+        # "B tv+ 앱 — 30일 이탈률 42%" on a timeline as though it were a date.
+        if is_time_period(point.period):
             entries.append((point.period, f"{point.label} {_format_number(point.value)}{point.unit or ''}"))
     for sentence in dated_items(evidence):
         period = _timeline_period(sentence)
