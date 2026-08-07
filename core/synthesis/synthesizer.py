@@ -75,6 +75,7 @@ def synthesize(
     evidence: list[str] = []
     confidence_labels: list[str] = []
     doc_source_map: dict[str, str] = {}
+    doc_url_map: dict[str, str] = {}
     grounded_claims: list[SynthesisClaim] = []
     sources: list[SynthesisSource] = []
     covered_information_needs: list[str] = []
@@ -83,6 +84,8 @@ def synthesize(
     for analysis in document_analyses:
         source_id = analysis.source_id or analysis.doc_id.split(":", 1)[0]
         doc_source_map[analysis.doc_id] = source_id
+        if analysis.source_url:
+            doc_url_map[analysis.doc_id] = analysis.source_url
         sources.append(
             SynthesisSource(
                 doc_id=analysis.doc_id,
@@ -288,6 +291,7 @@ def synthesize(
         evidence=evidence,
         confidence_labels=confidence_labels,
         doc_source_map=doc_source_map,
+        doc_url_map=doc_url_map,
         grounded_claims=grounded_claims,
         conclusions=conclusions,
         sources=sources,

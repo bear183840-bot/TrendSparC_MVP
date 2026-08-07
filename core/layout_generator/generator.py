@@ -198,7 +198,11 @@ def _block_title(section: str, content: dict) -> str:
     return content.get("title") or section.replace("_", " ").title()
 
 
-def _structure_evidence(evidence: list, doc_source_map: dict[str, str]) -> list[dict]:
+def _structure_evidence(
+    evidence: list,
+    doc_source_map: dict[str, str],
+    doc_url_map: dict[str, str] | None = None,
+) -> list[dict]:
     """Turn raw '[doc_id=...]'-tagged evidence strings into {"text", "source_id"}
     entries so the debug sources block exposes an actual source instead of raw
     markup - the live UI already resolves real source links elsewhere
@@ -213,6 +217,7 @@ def _structure_evidence(evidence: list, doc_source_map: dict[str, str]) -> list[
         structured.append({
             "text": _DOC_ID_RE.sub("", item).strip(),
             "source_id": doc_source_map.get(doc_id) if doc_id else None,
+            "source_url": (doc_url_map or {}).get(doc_id) if doc_id else None,
         })
     return structured
 
@@ -221,6 +226,7 @@ def generate_layout(
     report_plan: ReportPlan,
     adaptation: AudienceAdaptation,
     doc_source_map: dict[str, str] | None = None,
+    doc_url_map: dict[str, str] | None = None,
 ) -> DynamicLayout:
     section_order = list(report_plan.sections)
     if "executive_summary" in adaptation.adapted_sections:
@@ -230,7 +236,12 @@ def generate_layout(
     for index, section in enumerate(section_order):
         content = adaptation.adapted_sections.get(section, {})
         if section == "sources" and content.get("evidence"):
-            content = {**content, "evidence": _structure_evidence(content["evidence"], doc_source_map or {})}
+            content = {
+                **content,
+                "evidence": _structure_evidence(
+                    content["evidence"], doc_source_map or {}, doc_url_map or {}
+                ),
+            }
         blocks.append(
             DashboardBlock(
                 block_id=f"{index + 1:02d}_{section}",

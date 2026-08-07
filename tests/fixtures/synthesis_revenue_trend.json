@@ -1,5 +1,5 @@
 {
-  "_note": "TrendSynthesis-level fixture for --synthesis-fixture. current_status purpose, multi-year 매출/영업이익 metric_series. Feeds report_planner onward with no collector or analyzer call.",
+  "_note": "TrendSynthesis-level fixture for --synthesis-fixture. current_status purpose, multi-year 매출/영업이익 metric_series. Feeds report_planner onward with no collector or analyzer call. Carries doc_url_map so the source-link path is exercised end to end.",
   "request_id": "req_synthetic_revenue_trend",
   "sector_id": "sk_broadband",
   "question": "SK브로드밴드 매출과 영업이익 추이는 어떻게 되고 있고, 2026년 이후 전망은 어떤가요?",
@@ -46,19 +46,74 @@
     "IPTV 가입자 수 감소가 매출 성장에도 불구하고 지속되고 있음 [doc_id=v.daum.net:34a27329ef99af59]"
   ],
   "metric_series": [
-    {"label": "매출액", "period": "2024년", "value": 44120.0, "unit": "억원"},
-    {"label": "매출액", "period": "2025년", "value": 45406.0, "unit": "억원"},
-    {"label": "매출액", "period": "2026년(전망)", "value": 46900.0, "unit": "억원"},
-    {"label": "영업이익", "period": "2024년", "value": 3522.0, "unit": "억원"},
-    {"label": "영업이익", "period": "2025년", "value": 3741.0, "unit": "억원"},
-    {"label": "영업이익", "period": "2026년 1분기", "value": 951.0, "unit": "억원"},
-    {"label": "IPTV 가입자 수", "period": "2024년 하반기", "value": 676.9, "unit": "만명"},
-    {"label": "IPTV 가입자 수", "period": "2025년 하반기", "value": 669.1, "unit": "만명"}
+    {
+      "label": "매출액",
+      "period": "2024년",
+      "value": 44120.0,
+      "unit": "억원"
+    },
+    {
+      "label": "매출액",
+      "period": "2025년",
+      "value": 45406.0,
+      "unit": "억원"
+    },
+    {
+      "label": "매출액",
+      "period": "2026년(전망)",
+      "value": 46900.0,
+      "unit": "억원"
+    },
+    {
+      "label": "영업이익",
+      "period": "2024년",
+      "value": 3522.0,
+      "unit": "억원"
+    },
+    {
+      "label": "영업이익",
+      "period": "2025년",
+      "value": 3741.0,
+      "unit": "억원"
+    },
+    {
+      "label": "영업이익",
+      "period": "2026년 1분기",
+      "value": 951.0,
+      "unit": "억원"
+    },
+    {
+      "label": "IPTV 가입자 수",
+      "period": "2024년 하반기",
+      "value": 676.9,
+      "unit": "만명"
+    },
+    {
+      "label": "IPTV 가입자 수",
+      "period": "2025년 하반기",
+      "value": 669.1,
+      "unit": "만명"
+    }
   ],
   "comparison_points": [
-    {"entity": "매출액", "criterion": "2025년 대비 2026년 전망 증감", "value": "+3.3%", "level": "medium"},
-    {"entity": "영업이익", "criterion": "2024년 대비 2025년 증감", "value": "+6.2%", "level": "high"},
-    {"entity": "IPTV 가입자 수", "criterion": "2024년 대비 2025년 증감", "value": "-1.2%", "level": "low"}
+    {
+      "entity": "매출액",
+      "criterion": "2025년 대비 2026년 전망 증감",
+      "value": "+3.3%",
+      "level": "medium"
+    },
+    {
+      "entity": "영업이익",
+      "criterion": "2024년 대비 2025년 증감",
+      "value": "+6.2%",
+      "level": "high"
+    },
+    {
+      "entity": "IPTV 가입자 수",
+      "criterion": "2024년 대비 2025년 증감",
+      "value": "-1.2%",
+      "level": "low"
+    }
   ],
   "recommended_actions": [
     "데이터센터·B2B 매출 비중을 지속 확대해 가입자 매출 의존도를 낮추는 중장기 전략 수립 [doc_id=file.alphasquare.co.kr:67083446d465940b]",
@@ -96,5 +151,12 @@
   "uncorroborated_points": [
     "2026년 연간 매출 전망치 4조 6,900억원은 단일 출처 기반 추정치"
   ],
-  "contradictions": []
+  "contradictions": [],
+  "doc_url_map": {
+    "www.samsungpop.com:cb4a40e40fd3d360": "https://www.samsungpop.com/research/1",
+    "file.alphasquare.co.kr:67083446d465940b": "https://file.alphasquare.co.kr/report/2",
+    "biz.chosun.com:25729e70dd2a1d1f": "https://biz.chosun.com/article/3",
+    "v.daum.net:34a27329ef99af59": "https://v.daum.net/v/4",
+    "rdata.kbsec.com:cabf9bb92c23ff63": "https://rdata.kbsec.com/report/5"
+  }
 }

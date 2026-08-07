@@ -59,6 +59,7 @@ from core.report_purpose.classifier import classify_report_purpose
 from core.run_archive import archive_run
 from core.request_pipeline.direct_response import direct_response_for
 from core.sector_router.router import route_request, scan_sectors
+from sources.collectors.ai_search_harness import reset_query_yield_history
 from core.source_planner.planner import plan_sources, select_top_sources
 from core.synthesis.ai_based import refine_synthesis_ai
 from core.synthesis.synthesizer import synthesize
@@ -192,6 +193,9 @@ def _run_pipeline_stages(
     force_fail_stage: Optional[str] = None,
     progress_sink: Optional[list[SourceCollectionEvent]] = None,
 ) -> PipelineResult:
+    # One question's search history must not colour the next - the stability
+    # warning compares repeats of the same query within a single run.
+    reset_query_yield_history()
     result = PipelineResult(request_id=request.request_id)
     if progress_sink is not None:
         # Let a caller (e.g. the Streamlit UI, polling this list from another
@@ -792,7 +796,10 @@ def _run_report_stages(
     try:
         maybe_force_fail("layout_generator")
         result.layout = generate_layout(
-            result.report_plan, result.audience_adaptation, result.synthesis.doc_source_map
+            result.report_plan,
+            result.audience_adaptation,
+            result.synthesis.doc_source_map,
+            result.synthesis.doc_url_map,
         )
         result.trace.append(StageTrace(stage="layout_generator", status=StageStatus.OK))
     except PipelineStageError as exc:

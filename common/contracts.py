@@ -535,6 +535,13 @@ class TrendSynthesis(BaseModel):
     # bookkeeping, no LLM) so the AI refinement pass can verify how many
     # *independent* sources back a claim without re-deriving this mapping.
     doc_source_map: dict[str, str] = Field(default_factory=dict)
+    # doc_id -> the document's own URL. Kept beside doc_source_map because a
+    # source_id is often just a domain for AI-harness finds, which matches no
+    # registered source and so resolved to no link at all - every row of the
+    # Evidence & Sources panel read "링크 없음" while the article URL sat
+    # unused on the analysis. Any renderer turning a [doc_id=...] tag back
+    # into a citation should use this.
+    doc_url_map: dict[str, str] = Field(default_factory=dict)
     # Stable handoff for downstream report planning/generation. Unlike the
     # legacy tagged strings above, these preserve the verified quote and full
     # document/source provenance without requiring string parsing.

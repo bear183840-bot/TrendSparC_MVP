@@ -174,6 +174,47 @@ GENERIC_TOPIC_ROUND = "generic_topic_round"
 COMPANY_SPECIFIC_ROUND = "company_specific_round"
 
 
+# Queries already run in this process, with how many grounded candidates each
+# returned. Live-observed: one query returned 0 candidates and the *identical*
+# query string on the recollection pass returned 5, which makes a report's
+# contents depend on which attempt the user happened to see. Nothing recorded
+# that, so it could not be told from a genuine "no such evidence exists".
+_QUERY_YIELD_HISTORY: dict[str, list[int]] = {}
+# Below this, two runs of the same query are treated as materially different
+# rather than ordinary search jitter.
+_UNSTABLE_YIELD_RATIO = 0.5
+
+
+def record_query_yield(query: str, candidate_count: int) -> str | None:
+    """Remember what this query returned; warn when it stops being repeatable.
+
+    Returns the warning text (also printed) or None. Kept in-process rather
+    than persisted: the case that matters is the same query being retried
+    within one question, which is exactly when a 0-vs-5 split is invisible.
+    """
+    history = _QUERY_YIELD_HISTORY.setdefault(query, [])
+    history.append(candidate_count)
+    if len(history) < 2:
+        return None
+    best, worst = max(history), min(history)
+    if best == 0:
+        return None
+    if worst == 0 or worst / best < _UNSTABLE_YIELD_RATIO:
+        warning = (
+            f"[ai_search] UNSTABLE: identical query returned {history} candidates "
+            f"across {len(history)} attempts - the same question can produce "
+            f"different reports depending on which attempt is used. query={query!r}"
+        )
+        print(warning, file=sys.stderr)
+        return warning
+    return None
+
+
+def reset_query_yield_history() -> None:
+    """Per-run reset, so one question's history never colours the next."""
+    _QUERY_YIELD_HISTORY.clear()
+
+
 def plan_round_kinds(search_context: WebSearchContext | None, max_rounds: int) -> list[str]:
     """Which kind of query each round runs, decided up front.
 
@@ -764,6 +805,12 @@ def _run_search_harness_result(
         rounds_completed += 1
 
         candidates = _grounded_candidates(response)
+        record_query_yield(query, len(candidates))
+        print(
+            f"[ai_search]   round {round_index + 1} returned {len(candidates)} grounded "
+            f"candidate(s)",
+            file=sys.stderr,
+        )
         new_candidates = [candidate for candidate in candidates if candidate.url not in attempted_urls]
         # Hard guard for registry-blocked domains: the system prompt already
         # asks the model to avoid them, but a model instruction is not an
@@ -891,9 +938,17 @@ def _run_search_harness_result(
         ):
             break
 
+        repeated = [q for q in next_queries if q in tried_queries]
+        if repeated:
+            print(
+                f"[ai_search]   {len(repeated)} proposed follow-up quer(ies) were already "
+                f"tried and are being skipped: {repeated}",
+                file=sys.stderr,
+            )
         pending_queries = [q for q in next_queries if q not in tried_queries] or pending_queries
         if pending_queries:
             query = pending_queries.pop(0)
+            print(f"[ai_search]   next query (from model): {query!r}", file=sys.stderr)
         else:
             fallback_query = _fallback_next_query(source, question_keywords, tried_queries)
             if fallback_query is None:

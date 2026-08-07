@@ -623,18 +623,35 @@ def render_kpi_row(metric_points: list[Any], limit: int = 4, question_terms: lis
 
 
 def render_source_list(result: Any) -> str:
-    """Evidence & Sources panel - registered sources actually cited in this
-    result's document analyses, each linking to the source's registered URL."""
+    """Evidence & Sources panel, linking to the document actually cited.
+
+    This used to look each analysis's `source_id` up in the registered source
+    plan by name and use that source's homepage. Documents found by the AI
+    search harness carry a bare domain ("www.ajupress.com") as source_id,
+    which matches no registered source name, so every row fell through to
+    "링크 없음" - while `analysis.source_url`, the real article URL, sat
+    unused on the same object. Prefer that; fall back to the registered
+    source's URL only when the analysis has none.
+    """
     sources = source_lookup(result)
-    used_ids = list(dict.fromkeys(
-        analysis.source_id for analysis in (result.document_analyses or []) if analysis.source_id
-    ))
     rows = []
-    for source_id in used_ids:
-        source = sources.get(source_id)
-        label = source.name if source else source_id
-        url = source.url if source else None
-        link = f'<a href="{escape(url)}" target="_blank">Link ↗</a>' if url else '<span class="ts-empty">링크 없음</span>'
+    seen: set[str] = set()
+    for analysis in result.document_analyses or []:
+        source_id = analysis.source_id
+        if not source_id or source_id in seen:
+            continue
+        seen.add(source_id)
+        registered = sources.get(source_id)
+        label = registered.name if registered else source_id
+        url = analysis.source_url or (registered.url if registered else None)
+        title = clean_citation(getattr(analysis, "source_title", None) or "")
+        if title and title != label:
+            label = f"{label} · {title}"
+        link = (
+            f'<a href="{escape(url)}" target="_blank">Link ↗</a>'
+            if url
+            else '<span class="ts-empty">링크 없음</span>'
+        )
         rows.append(f'<li><span>{escape(label)}</span>{link}</li>')
     if not rows:
         return '<p class="ts-empty">등록된 출처가 없습니다.</p>'
