@@ -46,9 +46,12 @@ from common.block_shapes import (  # noqa: F401
     has_radar,
     has_timeline,
     has_timeseries,
+    metric_axis_labels,
     metric_comparison_groups,
+    metric_insight,
     radar_axes,
     timeline_entries,
+    varies_by_subject,
 )
 from reporting.dashboard_streamlit.sk_badge import sk_badge_html
 
@@ -331,7 +334,29 @@ def comparison_points_to_table(comparison_points: list[Any]) -> tuple[list[str],
 
 
 
-def render_metric_chart(metric_points: list[Any], title: str = "Market Trend") -> None:
+def render_metric_insight(points: list[Any], grounded_claims: list[Any] | None) -> None:
+    """The evidence sentence a plotted series was read out of, under the chart.
+
+    Deliberately not a generated interpretation: the text is a verified claim
+    already carried by the metric, so an unlinked series simply gets nothing.
+    """
+    insight = metric_insight(points, grounded_claims or [])
+    if not insight:
+        return
+    text, url = insight
+    link = f' <a href="{escape(url)}" target="_blank">출처</a>' if url else ""
+    st.markdown(
+        f'<div class="ts-metric-insight"><span class="ts-metric-insight-tag">근거</span>'
+        f'{escape(clean_citation(text))}{link}</div>',
+        unsafe_allow_html=True,
+    )
+
+
+def render_metric_chart(
+    metric_points: list[Any],
+    title: str = "Market Trend",
+    grounded_claims: list[Any] | None = None,
+) -> None:
     """Native Streamlit line chart for real, evidence-backed *time series*
     metrics only (3+ distinct periods for a label - see
     `classify_metric_shape`). Only call this when `select_chartable_series()`
@@ -353,6 +378,7 @@ def render_metric_chart(metric_points: list[Any], title: str = "Market Trend") -
     if not chartable_points:
         return
     st.markdown(_metric_chart_svg(chartable_points, title), unsafe_allow_html=True)
+    render_metric_insight(chartable_points, grounded_claims)
 
 
 # Chart geometry, in the SVG's own viewBox units (it scales to the container).
@@ -458,7 +484,10 @@ def _metric_chart_svg(points: list[Any], title: str) -> str:
     )
 
 
-def render_metric_bar(points_for_one_label: list[Any]) -> None:
+def render_metric_bar(
+    points_for_one_label: list[Any],
+    grounded_claims: list[Any] | None = None,
+) -> None:
     """Bars for one label, either before/after over time or across subjects.
 
     Two points in time don't make a trend worth a line chart, but the real,
@@ -474,7 +503,9 @@ def render_metric_bar(points_for_one_label: list[Any]) -> None:
         return
     # Time bars read chronologically; subject bars have no inherent order, so
     # they read largest-first, which is what a comparison is asking.
-    if all(is_time_period(point.period) for point in points_for_one_label):
+    if varies_by_subject(points_for_one_label):
+        ordered = sorted(points_for_one_label, key=lambda p: abs(p.value), reverse=True)
+    elif all(is_time_period(point.period) for point in points_for_one_label):
         ordered = sorted(points_for_one_label, key=lambda p: period_sort_key(p.period))
     else:
         ordered = sorted(points_for_one_label, key=lambda p: abs(p.value), reverse=True)
@@ -482,16 +513,17 @@ def render_metric_bar(points_for_one_label: list[Any]) -> None:
     unit = ordered[0].unit or ""
     max_value = max(abs(p.value) for p in ordered) or 1
     rows = "".join(
-        f'<div class="ts-bar-compare-row"><span class="period">{escape(p.period)}</span>'
+        f'<div class="ts-bar-compare-row"><span class="period">{escape(axis_label)}</span>'
         f'<div class="ts-bar-compare-track"><div class="ts-bar-compare-fill" '
         f'style="--pct:{abs(p.value) / max_value * 100:.1f}%"></div></div>'
         f'<span class="value">{escape(_format_number(p.value))}{escape(unit)}</span></div>'
-        for p in ordered
+        for p, axis_label in zip(ordered, metric_axis_labels(ordered))
     )
     st.markdown(
         f'<div class="ts-bar-compare"><b>{escape(label)}</b>{rows}</div>',
         unsafe_allow_html=True,
     )
+    render_metric_insight(ordered, grounded_claims)
 
 
 def render_swot(strengths: list[str], weaknesses: list[str], opportunities: list[str], threats: list[str]) -> str:
@@ -650,7 +682,14 @@ def render_kpi_row(metric_points: list[Any], limit: int = 4, question_terms: lis
         # companies) have no chronology, so they keep their given order and
         # get no delta - a "change" between two age groups is meaningless.
         points = by_label[label]
-        is_chronological = all(is_time_period(point.period) for point in points)
+        # A metric measured for several subjects is never chronological, even
+        # when every one of its periods is a real date - "KT 2024 vs SKB 2024"
+        # sorted by period would call one of them "latest" and print a delta
+        # between two different companies.
+        is_chronological = (
+            not varies_by_subject(points)
+            and all(is_time_period(point.period) for point in points)
+        )
         if is_chronological:
             points = sorted(points, key=lambda point: period_sort_key(point.period))
         latest = points[-1]
@@ -661,6 +700,8 @@ def render_kpi_row(metric_points: list[Any], limit: int = 4, question_terms: lis
             caption_text = f"{sign}{_format_number(delta)}{latest.unit} ({escape(points[0].period)}→{escape(latest.period)})"
         elif len(points) >= 2:
             caption_text = f"{escape(latest.period)} 기준 · {len(points)}개 대상 비교"
+        elif latest.subject:
+            caption_text = f"{escape(latest.subject)} · {escape(latest.period)} 기준"
         else:
             caption_text = f"{escape(latest.period)} 기준"
         spark = _sparkline_svg(points) if is_chronological and len(points) >= 3 else ""

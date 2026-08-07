@@ -78,10 +78,11 @@ def render_issue_response_dashboard(result: Any, question: str, sector: str, aud
             bar_groups = bar_metric_groups(synthesis.metric_series)
             shown_anything = False
             if has_timeseries(synthesis.metric_series):
-                render_metric_chart(synthesis.metric_series)
+                render_metric_chart(synthesis.metric_series,
+                                    grounded_claims=synthesis.grounded_claims)
                 shown_anything = True
             for group in bar_groups:
-                render_metric_bar(group)
+                render_metric_bar(group, synthesis.grounded_claims)
                 shown_anything = True
             if not shown_anything:
                 st.markdown(

@@ -321,13 +321,27 @@ class WebSearchHarnessResult(BaseModel):
 
 
 class MetricPoint(BaseModel):
-    """One evidence-stated number tied to a time period (e.g. subscriber count in a given
-    year). Never estimated or interpolated — only populated when a document states it."""
+    """One evidence-stated number, on up to three axes.
+
+    `label` is what was measured, `subject` is who or what it was measured
+    for, and `period` is when. Never estimated or interpolated — only
+    populated when a document states it.
+
+    `subject` exists because two axes were not enough. "연령대 × 매체 ×
+    reach" and "회사 × 지표 × 값" are ordinary questions, and with only
+    label and period the entity had to be smuggled into `period` - which is
+    why "SK브로드밴드" and "20대" kept turning up where a date belonged, and
+    why `is_time_period()` had to be written to defend every chronological
+    decision against them. Leave `subject` unset when a figure is simply the
+    subject of the whole report; that is the common case and the two-axis
+    behaviour is unchanged.
+    """
 
     label: str
     period: str
     value: float
     unit: Optional[str] = None
+    subject: Optional[str] = None
     # Stable synthesis-level identity and provenance. Analyzer-produced points
     # may leave these empty; the rule-based synthesizer fills them without
     # asking an LLM to invent or alter a number.

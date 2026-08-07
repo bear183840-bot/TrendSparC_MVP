@@ -247,3 +247,123 @@ def test_a_sparkline_needs_three_points_in_time(monkeypatch):
 
     assert "ts-kpi-spark" not in render(two)
     assert "ts-kpi-spark" in render(three)
+
+
+# --- The subject axis: who a figure was measured for --------------------
+
+
+def test_one_metric_across_companies_is_a_comparison_not_a_trend():
+    """Three companies' subscriber counts, all dated the same real quarter,
+    used to classify as a trend because only `period` distinguished them and
+    the entity had to be smuggled in there. With `subject` carrying the
+    entity, the periods are identical and the shape is decided by the axis
+    that actually varies."""
+    from common.contracts import MetricPoint
+    from common.content_quality_validator import classify_metric_shape
+
+    points = [
+        MetricPoint(label="IPTV 가입자 수", subject=name, period="2025년 2분기", value=value, unit="만명")
+        for name, value in (("KT", 912), ("SK브로드밴드", 682), ("LG유플러스", 551))
+    ]
+
+    assert classify_metric_shape(points) == "comparison"
+
+
+def test_a_real_trend_is_still_a_trend_when_one_subject_is_named():
+    """One company over three quarters must not become a comparison just
+    because `subject` is filled in."""
+    from common.contracts import MetricPoint
+    from common.content_quality_validator import classify_metric_shape
+
+    points = [
+        MetricPoint(label="IPTV 가입자 수", subject="SK브로드밴드", period=f"2025년 {q}분기", value=v, unit="만명")
+        for q, v in ((1, 680), (2, 682), (3, 690))
+    ]
+
+    assert classify_metric_shape(points) == "line"
+
+
+def test_subject_bars_are_labelled_by_subject_not_by_a_repeated_period():
+    from common.block_shapes import metric_axis_labels
+    from common.contracts import MetricPoint
+
+    points = [
+        MetricPoint(label="IPTV 가입자 수", subject=name, period="2025년 2분기", value=value, unit="만명")
+        for name, value in (("KT", 912), ("SK브로드밴드", 682))
+    ]
+
+    assert metric_axis_labels(points) == ["KT", "SK브로드밴드"]
+
+
+def test_labels_name_both_axes_when_both_vary():
+    """Otherwise two rows for the same company in different quarters collide
+    into one indistinguishable label."""
+    from common.block_shapes import metric_axis_labels
+    from common.contracts import MetricPoint
+
+    points = [
+        MetricPoint(label="가입자", subject="KT", period="2024년", value=900, unit="만명"),
+        MetricPoint(label="가입자", subject="KT", period="2025년", value=912, unit="만명"),
+        MetricPoint(label="가입자", subject="SKB", period="2025년", value=682, unit="만명"),
+    ]
+
+    assert metric_axis_labels(points) == ["KT (2024년)", "KT (2025년)", "SKB (2025년)"]
+
+
+def test_a_kpi_reports_no_delta_between_two_different_companies(monkeypatch):
+    """Both periods are real dates, so the chronological branch would have
+    fired and printed a "+230만명 change" that is really the gap between two
+    competitors."""
+    from common.contracts import MetricPoint
+    from reporting.dashboard_streamlit import components
+
+    captured: list[str] = []
+    monkeypatch.setattr(components.st, "markdown", lambda body, **_: captured.append(body))
+
+    components.render_kpi_row([
+        MetricPoint(label="가입자", subject="SK브로드밴드", period="2025년", value=682, unit="만명"),
+        MetricPoint(label="가입자", subject="KT", period="2025년", value=912, unit="만명"),
+    ])
+    body = "".join(captured)
+
+    assert "2개 대상 비교" in body
+    assert "+230" not in body
+
+
+# --- The claim behind a chart -------------------------------------------
+
+
+def _claim(claim_id: str, text: str):
+    from common.contracts import SynthesisClaim
+
+    return SynthesisClaim(
+        synthesis_claim_id=claim_id, claim_id="c1", claim_type="metric", claim=text,
+        evidence_quote=text, confidence="high", doc_id="d1", source_id="s1",
+        source_url="https://example.com/a",
+    )
+
+
+def test_a_chart_carries_the_claim_its_figures_came_from(monkeypatch):
+    from common.contracts import MetricPoint
+    from reporting.dashboard_streamlit import components
+
+    captured: list[str] = []
+    monkeypatch.setattr(components.st, "markdown", lambda body, **_: captured.append(body))
+
+    points = [
+        MetricPoint(label="가입자", period=f"202{y}년", value=v, unit="만명",
+                    evidence_synthesis_claim_id="d1:c1")
+        for y, v in ((3, 700), (4, 690), (5, 682))
+    ]
+    components.render_metric_chart(points, grounded_claims=[_claim("d1:c1", "가입자 감소가 3년째 이어졌다")])
+
+    assert "가입자 감소가 3년째 이어졌다" in "".join(captured)
+
+
+def test_an_unlinked_series_gets_no_caption_rather_than_a_written_one():
+    from common.block_shapes import metric_insight
+    from common.contracts import MetricPoint
+
+    points = [MetricPoint(label="가입자", period="2025년", value=682, unit="만명")]
+
+    assert metric_insight(points, [_claim("d1:c1", "무관한 문장")]) is None

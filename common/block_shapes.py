@@ -92,6 +92,57 @@ def bar_metric_groups(metric_points: list[Any]) -> list[list[Any]]:
     ]
 
 
+def varies_by_subject(points_for_one_label: list[Any]) -> bool:
+    """True when one metric was measured for two or more different subjects -
+    the axis the figures vary along is *who*, not *when*."""
+    return len({point.subject for point in points_for_one_label if getattr(point, "subject", None)}) >= 2
+
+
+def metric_axis_labels(points_for_one_label: list[Any]) -> list[str]:
+    """The row label for each point, on whichever axis actually varies.
+
+    A subject-varying group carries the same period on every row, so labelling
+    those rows by period would print the same string three times; a
+    time-varying group has no subject to show. Where both vary (one metric,
+    several companies, several quarters) the label has to name both or two
+    rows collide.
+    """
+    if not varies_by_subject(points_for_one_label):
+        return [point.period for point in points_for_one_label]
+    periods = {point.period for point in points_for_one_label}
+    return [
+        f"{point.subject or point.period} ({point.period})"
+        if len(periods) >= 2 and point.subject and point.period
+        else (point.subject or point.period)
+        for point in points_for_one_label
+    ]
+
+
+def metric_insight(points: list[Any], grounded_claims: list[Any]) -> tuple[str, str | None] | None:
+    """The one claim that explains a plotted series, as (text, source_url).
+
+    The reference design puts a sentence of interpretation under every chart.
+    The link needed for it already exists — `MetricPoint.evidence_synthesis_claim_id`
+    points at the `SynthesisClaim` the figure was read out of — it had simply
+    never been followed. Reading it is the whole implementation: nothing here
+    writes an interpretation, so a series whose points carry no claim link
+    gets no caption rather than a generated one.
+
+    Where several plotted points link to different claims, the most-referenced
+    one wins; it is the claim the series as a whole is about.
+    """
+    by_id = {claim.synthesis_claim_id: claim for claim in grounded_claims}
+    referenced = [
+        point.evidence_synthesis_claim_id for point in points
+        if getattr(point, "evidence_synthesis_claim_id", None) in by_id
+    ]
+    if not referenced:
+        return None
+    best = max(set(referenced), key=referenced.count)
+    claim = by_id[best]
+    return claim.claim, claim.source_url
+
+
 def has_comparison(comparison_points: list[Any]) -> bool:
     """True only when 2+ entities share a real common criterion - two
     entities that each only state a *different* metric (no overlap) don't

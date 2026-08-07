@@ -279,6 +279,11 @@ def classify_metric_shape(points_for_one_label: list[Any]) -> MetricShape:
     and drawn as a chart running SK브로드밴드 → KT → LG유플러스, which asserts
     a progression between companies that means nothing.
     """
+    # An explicit `subject` axis settles it without guessing: the same metric
+    # measured for several subjects is a comparison however its periods read.
+    subjects = {point.subject for point in points_for_one_label if getattr(point, "subject", None)}
+    if len(subjects) >= 2:
+        return "comparison"
     periods = {point.period for point in points_for_one_label}
     if len(periods) <= 1:
         return "kpi"

@@ -94,12 +94,13 @@ _REPORT_SCHEMA = {
                 "additionalProperties": False,
                 "properties": {
                     "label": {"type": "string"},
+                    "subject": {"type": ["string", "null"]},
                     "period": {"type": "string"},
                     "value": {"type": "number"},
                     "unit": {"type": "string"},
                     "source_sentence": {"type": "string"},
                 },
-                "required": ["label", "period", "value", "unit", "source_sentence"],
+                "required": ["label", "subject", "period", "value", "unit", "source_sentence"],
             },
         },
         # Comparisons stated in prose ("TV(84.9%)가 유튜브를 앞섰다") were never
@@ -299,6 +300,7 @@ def _verified_ai_metric_points(
         verified.append(
             MetricPoint(
                 label=normalize_metric_label(label) or label,
+                subject=(raw.get("subject") or "").strip() or None,
                 period=raw["period"].strip(),
                 value=float(raw["value"]),
                 unit=(raw.get("unit") or "").strip() or None,
@@ -762,9 +764,13 @@ def generate_report(
                         "A figure is any number carrying a unit - not only 매출/영업이익. Percentages "
                         "(84.9%, 45.1%), counts (669만명, 3건), durations (4.2초), rates and forecasts all "
                         "qualify, and a sentence like \"거실 TV(84.9%)에서 가장 활발하게 시청\" contains one. "
-                        "When a figure describes a subject rather than a date (an age bracket, a company, a "
-                        "survey group), put that subject in `period` - it is the axis the figure varies "
-                        "along. Do not skip a figure because it is inside parentheses or mid-sentence. "
+                        "Three axes: `label` is what was measured, `subject` is who or what it was "
+                        "measured for, `period` is when. Put an age bracket, a company, a survey group or "
+                        "any other entity in `subject` - never in `period`, which is for dates only. Leave "
+                        "`subject` null when the figure is simply about the company the question is about. "
+                        "\"20대의 TV 도달률 22%\" is label=TV 도달률, subject=20대; "
+                        "\"KT 912만명\" is label=IPTV 가입자 수, subject=KT. "
+                        "Do not skip a figure because it is inside parentheses or mid-sentence. "
                         "Qualifiers such "
                         "as 누적, 잠정, 연결, 별도, or 전년 동기 대비 must never stop you from extracting the "
                         "value - record the qualifier and the point in time in `period` instead (e.g. "

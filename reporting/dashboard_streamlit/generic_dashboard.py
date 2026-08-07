@@ -187,10 +187,11 @@ def _body_renderer(
     """A zero-arg callable that draws this block, or None if it would draw
     nothing. Returning None is what keeps an empty card off the page."""
     if block_type == "chart":
-        return lambda: render_metric_chart(synthesis.metric_series, title="확인된 수치 추이")
+        return lambda: render_metric_chart(synthesis.metric_series, title="확인된 수치 추이",
+                                        grounded_claims=synthesis.grounded_claims)
     if block_type == "bar":
         groups = bar_metric_groups(synthesis.metric_series)
-        return (lambda: [render_metric_bar(group) for group in groups]) if groups else None
+        return (lambda: [render_metric_bar(group, synthesis.grounded_claims) for group in groups]) if groups else None
     if block_type == "metric_comparison":
         groups = metric_comparison_groups(synthesis.metric_series)
         return (
