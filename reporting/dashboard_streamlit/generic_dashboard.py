@@ -25,6 +25,7 @@ from reporting.dashboard_streamlit.components import (
     headline_stats,
     metric_comparison_groups,
     prefer_audience_content,
+    reference_year,
     render_action_list,
     render_comparison_table,
     render_executive_summary,
@@ -198,7 +199,9 @@ def _body_renderer(
     if block_type in {"kpi_grid", "kpi_single"}:
         return (lambda: render_kpi_row(synthesis.metric_series)) if synthesis.metric_series else None
     if block_type == "timeline":
-        return lambda: render_timeline(synthesis.evidence, synthesis.metric_series)
+        return lambda: render_timeline(
+            synthesis.evidence, synthesis.metric_series, reference_year(synthesis)
+        )
     if block_type == "table":
         headers, rows = comparison_points_to_table(synthesis.comparison_points)
         return (

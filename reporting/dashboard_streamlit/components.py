@@ -527,6 +527,15 @@ def render_swot(strengths: list[str], weaknesses: list[str], opportunities: list
     return f'<div class="{layout_class}">{cells}</div>'
 
 
+def reference_year(synthesis: Any) -> int | None:
+    """The year relative dates in this run's evidence are relative to."""
+    as_of = getattr(synthesis, "as_of_date", None)
+    try:
+        return int(str(as_of)[:4]) if as_of else None
+    except ValueError:
+        return None
+
+
 def action_impact_lookup(report: Any) -> dict[str, str]:
     """Cleaned action text -> the impact a source stated for it.
 
@@ -797,8 +806,13 @@ def render_metric_comparison(period: str, points: list[Any]) -> None:
 
 
 
-def render_timeline(evidence: list[str], metric_points: list[Any], limit: int = 6) -> None:
-    entries = timeline_entries(evidence, metric_points)[:limit]
+def render_timeline(
+    evidence: list[str],
+    metric_points: list[Any],
+    reference_year: int | None = None,
+    limit: int = 6,
+) -> None:
+    entries = timeline_entries(evidence, metric_points, reference_year)[:limit]
     if not entries:
         return
     steps = "".join(

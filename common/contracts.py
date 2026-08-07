@@ -542,6 +542,11 @@ class TrendSynthesis(BaseModel):
     # unused on the analysis. Any renderer turning a [doc_id=...] tag back
     # into a citation should use this.
     doc_url_map: dict[str, str] = Field(default_factory=dict)
+    # When this report was produced (ISO date). Korean sources date figures
+    # relative to their own publication - "지난해 하반기", "올 상반기" - and
+    # without a reference year those either go unlabelled or, worse, pick up a
+    # literal year from a different clause in the same sentence.
+    as_of_date: Optional[str] = None
     # Stable handoff for downstream report planning/generation. Unlike the
     # legacy tagged strings above, these preserve the verified quote and full
     # document/source provenance without requiring string parsing.

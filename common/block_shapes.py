@@ -17,7 +17,10 @@ import re
 from typing import Any
 
 from common.content_quality_validator import (
+    _RELATIVE_YEAR_OFFSETS,
     classify_metric_shape,
+    has_relative_period,
+    resolve_relative_period,
     dated_items,
     filter_shared_comparison_axis,
     group_metric_points_by_label,
@@ -144,7 +147,7 @@ def has_metric_comparison(metric_points: list[Any]) -> bool:
     return bool(metric_comparison_groups(metric_points))
 
 
-def _timeline_period(sentence: str) -> str | None:
+def _timeline_period(sentence: str, reference_year: int | None = None) -> str | None:
     """The period label for a timeline row, or None if the year is unknown.
 
     A quarter with no year ("2분기 매출액을 1조1522억원으로 예상") is only
@@ -154,6 +157,20 @@ def _timeline_period(sentence: str) -> str | None:
     missing row.
     """
     full = _FULL_PERIOD_RE.search(sentence or "")
+    # Whichever dating expression comes first is the one dating this
+    # sentence's figure. "지난해 하반기 … 2024년 상반기를 시작으로" is dated by
+    # the relative one; "2026년 2분기 … 전년 동기 대비" by the explicit one, and
+    # treating its trailing "전년" as the subject's date lost the row entirely.
+    if has_relative_period(sentence):
+        relative_at = min(
+            (sentence.find(marker) for marker, _ in _RELATIVE_YEAR_OFFSETS if marker in sentence),
+            default=len(sentence),
+        )
+        if full is None or relative_at < full.start():
+            # Resolve it when the document's year is known; refuse to label at
+            # all when it isn't - a wrong date on a timeline is worse than a
+            # missing row.
+            return resolve_relative_period(sentence, reference_year)
     if full:
         label = re.sub(r"\s+", " ", full.group(0)).strip()
         if label.startswith("'"):
@@ -167,7 +184,11 @@ def _timeline_period(sentence: str) -> str | None:
     return None
 
 
-def timeline_entries(evidence: list[str], metric_points: list[Any]) -> list[tuple[str, str]]:
+def timeline_entries(
+    evidence: list[str],
+    metric_points: list[Any],
+    reference_year: int | None = None,
+) -> list[tuple[str, str]]:
     """(period, text) pairs in chronological order, from evidence sentences
     that actually carry a date and from metric points that state a period.
     Undated prose is left out - a numbered list of undated statements is not
@@ -180,7 +201,7 @@ def timeline_entries(evidence: list[str], metric_points: list[Any]) -> list[tupl
         if is_time_period(point.period):
             entries.append((point.period, f"{point.label} {_format_number(point.value)}{point.unit or ''}"))
     for sentence in dated_items(evidence):
-        period = _timeline_period(sentence)
+        period = _timeline_period(sentence, reference_year)
         # A bare "2분기" with no year anywhere in the sentence can't be placed
         # on an axis, and guessing the year would be fabrication - so the
         # entry is skipped rather than shown out of order. This is why the
@@ -202,8 +223,10 @@ def timeline_entries(evidence: list[str], metric_points: list[Any]) -> list[tupl
     return sorted(unique, key=lambda entry: period_sort_key(entry[0]))
 
 
-def has_timeline(evidence: list[str], metric_points: list[Any]) -> bool:
-    return bool(timeline_entries(evidence, metric_points))
+def has_timeline(
+    evidence: list[str], metric_points: list[Any], reference_year: int | None = None
+) -> bool:
+    return bool(timeline_entries(evidence, metric_points, reference_year))
 
 
 def has_cause_map(risks: list[str], impacts: list[str], actions: list[str]) -> bool:

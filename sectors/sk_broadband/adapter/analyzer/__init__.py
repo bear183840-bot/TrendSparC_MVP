@@ -495,9 +495,25 @@ def _repair_failed_claim_quotes(
 
 
 def _number_is_in_content(value: float, content: str) -> bool:
+    """Whether this exact figure appears in the text.
+
+    The candidate set used to be {str(value), f"{value:g}"}. `%g` switches to
+    scientific notation at 7 significant digits, so 36,226,100 was looked for
+    as "3.62261e+07" and `str()` gave "36226100.0" - neither is in any
+    document. Every figure of a million or more was therefore silently
+    discarded, which is why subscriber counts never became metric_points while
+    smaller revenue figures did.
+    """
     compact = content.replace(",", "")
     candidates = {str(value), f"{value:g}"}
-    return any(re.search(rf"(?<![\d.]){re.escape(candidate)}(?![\d.])", compact) for candidate in candidates)
+    if value == int(value):
+        candidates.add(str(int(value)))
+    else:
+        candidates.add(f"{value:f}".rstrip("0").rstrip("."))
+    return any(
+        re.search(rf"(?<![\d.]){re.escape(candidate)}(?![\d.])", compact)
+        for candidate in candidates
+    )
 
 
 def _verified_metric_points(

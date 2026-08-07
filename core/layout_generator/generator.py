@@ -194,6 +194,38 @@ def _block_type(section: str, content: dict, preferred_types: list[str] | None =
     return "auto"
 
 
+# What each block type actually reads. A DashboardBlock used to carry the
+# whole GeneratedReportSection dump, so an action list shipped empty
+# metric_points/comparison_points/strengths/weaknesses and a KPI block shipped
+# empty actions - twelve keys on every block, most of them [] - and a reader
+# of the contract could not tell which fields a block type even uses.
+#
+# Anything not listed falls back to the full content, so a new block type is
+# never silently starved; add it here when you add the type.
+_ALWAYS_KEPT = ("section_id", "title", "summary", "confidence")
+_BLOCK_CONTENT_FIELDS: dict[str, tuple[str, ...]] = {
+    "text": ("key_points", "evidence", "grounded_claims", "conclusions"),
+    "metrics": ("metric_points", "evidence", "monitoring_indicators"),
+    "chart": ("metric_points", "evidence"),
+    "bar": ("metric_points", "evidence"),
+    "table": ("comparison_points", "evidence"),
+    "matrix": ("strengths", "weaknesses", "opportunities", "risks"),
+    "timeline": ("key_points", "evidence"),
+    "list": ("actions", "monitoring_indicators", "evidence"),
+    "graph": ("risks", "key_points", "evidence"),
+    "evidence": ("evidence", "source_count", "unique_source_count", "limitations"),
+}
+
+
+def _trim_content(block_type: str, content: dict) -> dict:
+    """Keep only the fields this block type reads, plus what identifies it."""
+    fields = _BLOCK_CONTENT_FIELDS.get(block_type)
+    if fields is None:
+        return content
+    keep = {*_ALWAYS_KEPT, *fields}
+    return {key: value for key, value in content.items() if key in keep}
+
+
 def _block_title(section: str, content: dict) -> str:
     return content.get("title") or section.replace("_", " ").title()
 
@@ -242,13 +274,14 @@ def generate_layout(
                     content["evidence"], doc_source_map or {}, doc_url_map or {}
                 ),
             }
+        block_type = _block_type(section, content, preferred_types)
         blocks.append(
             DashboardBlock(
                 block_id=f"{index + 1:02d}_{section}",
                 section=section,
                 title=_block_title(section, content),
-                block_type=_block_type(section, content, preferred_types),
-                content=content,
+                block_type=block_type,
+                content=_trim_content(block_type, content),
             )
         )
 

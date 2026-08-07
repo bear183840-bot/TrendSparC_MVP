@@ -56,6 +56,52 @@ _TIME_PERIOD_RE = re.compile(
 )
 
 
+# Korean copy usually dates a figure relative to when it was written -
+# "지난해 하반기", "올 상반기", "전년 동기". Live-observed on a 2026-05
+# article: "지난해 하반기 … 3615만70명 … 2024년 상반기를 시작으로 감소세"
+# was labelled 2024년, because the only literal year in the sentence sat in a
+# different clause. The figure was 2025 하반기.
+_RELATIVE_YEAR_OFFSETS: tuple[tuple[str, int], ...] = (
+    ("지지난해", -2), ("재작년", -2),
+    ("지난해", -1), ("작년", -1), ("전년", -1),
+    ("올해", 0), ("올 ", 0), ("금년", 0),
+    ("내년", 1), ("차년", 1),
+)
+_HALF_RE = re.compile(r"(상반기|하반기)")
+
+
+def resolve_relative_period(sentence: str, reference_year: int | None) -> str | None:
+    """Turn "지난해 하반기" into "2025년 하반기", given the document's year.
+
+    Returns None when the sentence carries no relative expression, or when
+    there is no reference year to resolve it against - guessing which year a
+    reader meant is exactly the mislabelling this exists to prevent.
+    """
+    text = sentence or ""
+    for marker, offset in _RELATIVE_YEAR_OFFSETS:
+        index = text.find(marker)
+        if index < 0:
+            continue
+        if reference_year is None:
+            return None
+        year = reference_year + offset
+        # Only a qualifier that follows the marker belongs to it: in
+        # "지난해 하반기 … 상반기보다", the second 상반기 is the comparison.
+        tail = text[index : index + len(marker) + 12]
+        half = _HALF_RE.search(tail)
+        quarter = re.search(r"([1-4])\s*분기", tail)
+        if half:
+            return f"{year}년 {half.group(1)}"
+        if quarter:
+            return f"{year}년 {quarter.group(1)}분기"
+        return f"{year}년"
+    return None
+
+
+def has_relative_period(sentence: str) -> bool:
+    return any(marker in (sentence or "") for marker, _ in _RELATIVE_YEAR_OFFSETS)
+
+
 def is_time_period(period: str | None) -> bool:
     """Whether a MetricPoint.period names a point in time at all.
 

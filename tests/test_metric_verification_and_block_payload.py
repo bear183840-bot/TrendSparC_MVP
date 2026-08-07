@@ -1,0 +1,139 @@
+"""Why a document full of figures produced no metric_points.
+
+Diagnosed from a live run on the 방송미디어통신위원회 press release: the
+evidence carried 36,226,100 / 21,414,521 / 59.11%, every section's
+metric_points was [], and the sector analyzer - not synthesis - was discarding
+them.
+"""
+
+from __future__ import annotations
+
+import pytest
+
+from sectors.sk_broadband.adapter.analyzer import (
+    _number_is_in_content,
+    _verified_metric_points,
+)
+
+_QUOTE = "올 상반기 유료방송 가입자 수는 36,226,100으로 작년 하반기 대비 138,546이 줄어"
+_CLAIMS = [{"claim_id": "c1", "claim_type": "metric", "evidence_quote": _QUOTE}]
+
+
+@pytest.mark.parametrize(
+    "value, text",
+    [
+        (36226100.0, "가입자 수는 36,226,100으로"),
+        (21414521.0, "IPTV 가입자 수는 21,414,521명"),
+        (9123463.0, "KT가 912만3463명"[:0] + "KT는 9,123,463명"),
+        (45406.0, "매출액은 45,406억원"),
+        (84.9, "거실 TV(84.9%)에서"),
+        (951.0, "영업이익 951억원"),
+    ],
+)
+def test_a_figure_present_in_the_text_is_recognised(value, text):
+    """`%g` switches to scientific notation at 7 significant digits, so
+    36,226,100 was searched for as "3.62261e+07" and `str()` gave
+    "36226100.0" - neither appears in any document. Every figure of a million
+    or more was silently discarded, which is why subscriber counts never
+    became metric_points while smaller revenue figures did."""
+    assert _number_is_in_content(value, text) is True
+
+
+def test_a_figure_absent_from_the_text_is_still_rejected():
+    """The relaxation must not weaken the fabrication guard."""
+    assert _number_is_in_content(36226100.0, "가입자 수는 35,000,000으로") is False
+    assert _number_is_in_content(84.9, "점유율은 59.11%") is False
+
+
+def test_a_figure_is_not_matched_inside_a_longer_number():
+    assert _number_is_in_content(2141.0, "21,414,521명") is False
+
+
+def test_a_million_scale_metric_survives_verification_end_to_end():
+    point = {
+        "label": "유료방송 가입자 수",
+        "period": "올 상반기",
+        "value": 36226100,
+        "unit": "",
+        "evidence_claim_id": "c1",
+    }
+
+    verified = _verified_metric_points({"metric_points": [point]}, _QUOTE, _CLAIMS)
+
+    assert len(verified) == 1
+    assert verified[0]["value"] == 36226100
+    assert verified[0]["evidence_quote"] == _QUOTE
+
+
+def test_a_metric_whose_number_is_not_in_its_quote_is_still_dropped():
+    point = {
+        "label": "유료방송 가입자 수",
+        "period": "올 상반기",
+        "value": 99999999,
+        "unit": "",
+        "evidence_claim_id": "c1",
+    }
+    assert _verified_metric_points({"metric_points": [point]}, _QUOTE, _CLAIMS) == []
+
+
+# --- block payloads carry only what the block type reads ----------------
+
+
+def _layout_for(section: str, content: dict):
+    from common.contracts import AudienceAdaptation, ReportPlan
+    from core.layout_generator.generator import generate_layout
+
+    plan = ReportPlan(
+        request_id="r", audience_id="_default", primary_intent="current_status",
+        sections=[section], format="dashboard",
+    )
+    adaptation = AudienceAdaptation(
+        request_id="r", audience_id="_default", adapted_sections={section: content}
+    )
+    return generate_layout(plan, adaptation).blocks[0]
+
+
+def test_an_action_block_does_not_ship_empty_metric_fields():
+    """Every block used to carry the whole section dump - twelve keys, most of
+    them [] - so a reader of the contract could not tell which fields a block
+    type even uses."""
+    block = _layout_for(
+        "recommended_action",
+        {"title": "Actions", "actions": ["대응한다"], "metric_points": [], "strengths": []},
+    )
+
+    assert block.block_type == "list"
+    assert "actions" in block.content
+    assert "metric_points" not in block.content
+    assert "strengths" not in block.content
+
+
+def test_a_table_block_keeps_its_comparison_points():
+    block = _layout_for(
+        "market_status",
+        {
+            "title": "Competitors",
+            "comparison_points": [
+                {"entity": "KT", "criterion": "가입자", "value": "912만"},
+                {"entity": "SKB", "criterion": "가입자", "value": "669만"},
+            ],
+            "actions": [],
+        },
+    )
+
+    assert block.block_type == "table"
+    assert "comparison_points" in block.content
+    assert "actions" not in block.content
+
+
+def test_every_block_keeps_what_identifies_it():
+    block = _layout_for("recommended_action", {"title": "Actions", "actions": ["대응한다"]})
+    assert {"title"} <= set(block.content)
+
+
+def test_an_unknown_block_type_keeps_the_full_content():
+    """A new block type is never silently starved of its data."""
+    from core.layout_generator.generator import _trim_content
+
+    content = {"title": "t", "some_new_field": [1, 2]}
+    assert _trim_content("brand_new_type", content) == content

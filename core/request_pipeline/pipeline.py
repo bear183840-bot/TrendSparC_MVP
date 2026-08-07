@@ -636,6 +636,7 @@ def _run_pipeline_stages(
     try:
         _maybe_force_fail("synthesis")
         rule_based_synthesis = synthesize(request.request_id, sector_id, result.document_analyses)
+        rule_based_synthesis.as_of_date = request.created_at.date().isoformat()
         result.synthesis = refine_synthesis_ai(rule_based_synthesis, question_with_context)
         result.trace.append(StageTrace(stage="synthesis", status=StageStatus.OK))
     except PipelineStageError as exc:

@@ -185,6 +185,15 @@ PURPOSE_HEADLINE_STYLE: dict[str, str] = {
 _MIN_KPI_GRID_POINTS = 2
 
 
+def _reference_year(synthesis: Any) -> int | None:
+    """Year that "지난해"/"올 상반기" in this run's evidence resolve against."""
+    as_of = getattr(synthesis, "as_of_date", None)
+    try:
+        return int(str(as_of)[:4]) if as_of else None
+    except ValueError:
+        return None
+
+
 def _availability() -> dict[str, Callable[[Any, list[str]], bool]]:
     """block_type -> does the data support drawing it.
 
@@ -200,7 +209,9 @@ def _availability() -> dict[str, Callable[[Any, list[str]], bool]]:
         "kpi_grid": lambda synthesis, items: len(synthesis.metric_series) >= _MIN_KPI_GRID_POINTS,
         "kpi_single": lambda synthesis, items: len(synthesis.metric_series) >= 1,
         "timeline": lambda synthesis, items: block_shapes.has_timeline(
-            synthesis.evidence, synthesis.metric_series
+            synthesis.evidence,
+            synthesis.metric_series,
+            _reference_year(synthesis),
         ),
         "table": lambda synthesis, items: block_shapes.has_comparison(synthesis.comparison_points),
         "radar": lambda synthesis, items: block_shapes.has_radar(synthesis.comparison_points),
