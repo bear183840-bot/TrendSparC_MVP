@@ -115,11 +115,14 @@ def _candidate_content_types(content: dict) -> list[str]:
             periods_by_label.setdefault(label, set()).add(period)
             if is_time_period(period):
                 time_periods_by_label.setdefault(label, set()).add(period)
-    # A trend needs two points in *time*. The same metric measured against two
-    # age brackets ("20대" vs "50대 이상") is an item comparison, and calling it
-    # a chart claimed a movement over time that the data never described - the
-    # live slot resolver already called this one a bar, and the two disagreed.
-    if any(len(periods) >= 2 for periods in time_periods_by_label.values()):
+    # Same thresholds the live path uses (content_quality_validator
+    # .classify_metric_shape): 3+ points in time is a line, exactly 2 is a
+    # before/after bar, and 2+ points that are *not* times are an item
+    # comparison - also a bar. The same metric measured against two age
+    # brackets ("20대" vs "50대 이상") is not a movement over time, and this
+    # module used to call both of those cases "chart" while the dashboard
+    # called them "bar", so the two disagreed about identical data.
+    if any(len(periods) >= 3 for periods in time_periods_by_label.values()):
         candidates.append("chart")
     elif any(len(periods) >= 2 for periods in periods_by_label.values()):
         candidates.append("bar")

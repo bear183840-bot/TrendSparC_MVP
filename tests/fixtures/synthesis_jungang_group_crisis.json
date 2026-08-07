@@ -1,0 +1,97 @@
+{
+  "_note": "TrendSynthesis-level fixture for --synthesis-fixture. issue_response / executive. Third case where `period` is not a time: here it holds the three IPTV carriers, so one label has THREE non-time points - the shape that a naive 3+-points rule would draw as a trend line running SK브로드밴드 → KT → LG유플러스. comparison_points also mix two unrelated axes (carrier exposure, and 단기 리스크 items) to exercise the shared-axis filter.",
+  "request_id": "req_synthetic_jungang_group_crisis",
+  "sector_id": "sk_broadband",
+  "question": "중앙그룹 회생 사태에 따른 IPTV사의 대응 방안",
+  "audience_id": "executive",
+  "purpose_id": "issue_response",
+  "highlights": [
+    "중앙그룹이 법원에 회생절차를 신청하면서, 계열 방송채널사용사업자(PP)로부터 콘텐츠를 공급받는 IPTV 3사 모두 채널 편성 차질 우려가 제기됐다. [doc_id=www.newspim.com:f001e2f9c688aabf]",
+    "SK브로드밴드 B tv의 경우 중앙그룹 계열 채널이 전체 유료채널 편성의 약 9%를 차지하고 있어, 상대적으로 경쟁사 대비 노출도가 낮은 편이다. [doc_id=file.alphasquare.co.kr:67083446d465940b]",
+    "회생절차가 장기화될 경우 콘텐츠 사용료 정산 지연, 신규 프로그램 공급 중단 등의 리스크가 현실화될 수 있다는 전망이 나온다. [doc_id=biz.chosun.com:25729e70dd2a1d1f]",
+    "업계에서는 대체 채널 확보와 자체 제작 콘텐츠 비중 확대를 단기 대응 방안으로 검토하고 있다. [doc_id=www.etnews.com:fdb9ff84ad062c04]"
+  ],
+  "synthesis_text": "중앙그룹의 회생절차 신청은 IPTV 3사 공통의 콘텐츠 수급 리스크이나, SK브로드밴드는 계열 채널 편성 비중이 상대적으로 낮아(9%) 즉각적인 충격은 제한적일 것으로 보인다. 다만 회생절차 장기화 시 정산 지연·공급 중단 리스크가 있어, 대체 채널 확보와 자체 제작 비중 확대를 통한 선제적 대응이 필요하다.",
+  "source_count": 6,
+  "unique_source_count": 5,
+  "source_ids": [
+    "www.newspim.com",
+    "file.alphasquare.co.kr",
+    "biz.chosun.com",
+    "www.etnews.com",
+    "v.daum.net"
+  ],
+  "key_points": [
+    "시장 변화: 중앙그룹 회생절차 신청으로 IPTV 업계 콘텐츠 수급 우려 확산 [doc_id=www.newspim.com:f001e2f9c688aabf]",
+    "전략 영향: SK브로드밴드는 계열 채널 편성 비중이 경쟁사 대비 낮아 상대적으로 노출도 제한적 [doc_id=file.alphasquare.co.kr:67083446d465940b]",
+    "Risk: 회생절차 장기화 시 콘텐츠 사용료 정산 지연 및 신규 공급 중단 가능성 [doc_id=biz.chosun.com:25729e70dd2a1d1f]",
+    "Opportunity: 대체 채널 확보 및 자체 제작 비중 확대를 통한 리스크 분산 [doc_id=www.etnews.com:fdb9ff84ad062c04]"
+  ],
+  "business_impacts": [
+    "회생절차 장기화 시 편성 공백이 발생하면 가입자 콘텐츠 만족도 저하 및 이탈 유발 가능성 [doc_id=biz.chosun.com:25729e70dd2a1d1f]"
+  ],
+  "risks": [
+    "콘텐츠 사용료 정산 지연에 따른 회계상 손실 인식 가능성 [doc_id=biz.chosun.com:25729e70dd2a1d1f]",
+    "회생절차 장기화 시 신규 프로그램 공급 중단으로 편성 공백 발생 [doc_id=biz.chosun.com:25729e70dd2a1d1f]",
+    "동일 사태가 경쟁사에도 영향을 미쳐 업계 전반의 콘텐츠 수급 불안정성 확대 [doc_id=www.newspim.com:f001e2f9c688aabf]"
+  ],
+  "opportunities": [
+    "상대적으로 낮은 노출도를 활용해 경쟁사 대비 안정적 이미지 구축 가능 [doc_id=file.alphasquare.co.kr:67083446d465940b]",
+    "이번 사태를 계기로 자체 제작 콘텐츠 비중을 확대해 외부 리스크 의존도 축소 [doc_id=www.etnews.com:fdb9ff84ad062c04]"
+  ],
+  "strengths": [
+    "계열 채널 편성 비중이 경쟁사 대비 낮아 직접적 충격이 제한적 [doc_id=file.alphasquare.co.kr:67083446d465940b]"
+  ],
+  "weaknesses": [
+    "완전히 노출도가 0은 아니라 일부 채널 편성 공백 리스크는 존재 [doc_id=file.alphasquare.co.kr:67083446d465940b]"
+  ],
+  "metric_series": [
+    {"label": "중앙그룹 계열 채널 편성 비중", "period": "SK브로드밴드", "value": 9.0, "unit": "%"},
+    {"label": "중앙그룹 계열 채널 편성 비중", "period": "KT", "value": 14.0, "unit": "%"},
+    {"label": "중앙그룹 계열 채널 편성 비중", "period": "LG유플러스", "value": 12.0, "unit": "%"}
+  ],
+  "comparison_points": [
+    {"entity": "SK브로드밴드", "criterion": "중앙그룹 채널 노출도", "value": "9% (낮음)", "level": "low"},
+    {"entity": "KT", "criterion": "중앙그룹 채널 노출도", "value": "14% (높음)", "level": "high"},
+    {"entity": "LG유플러스", "criterion": "중앙그룹 채널 노출도", "value": "12% (중간)", "level": "medium"},
+    {"entity": "단기 리스크", "criterion": "콘텐츠 사용료 정산 지연", "value": "발생 가능", "level": "medium"},
+    {"entity": "단기 리스크", "criterion": "신규 프로그램 공급 중단", "value": "회생절차 장기화 시 가능", "level": "medium"}
+  ],
+  "recommended_actions": [
+    "중앙그룹 계열 채널 대체 가능한 콘텐츠 공급사 사전 물색 및 협상 착수 [doc_id=www.etnews.com:fdb9ff84ad062c04]",
+    "자체 제작 콘텐츠(오리지널) 비중 확대를 통한 외부 공급 리스크 분산 [doc_id=www.etnews.com:fdb9ff84ad062c04]",
+    "회생절차 진행 상황을 주 단위로 모니터링하고 정산 지연 시 대응 매뉴얼 사전 마련 [doc_id=biz.chosun.com:25729e70dd2a1d1f]",
+    "경쟁사 대비 낮은 노출도를 활용한 '안정적 콘텐츠 수급' 메시지의 홍보 활용 검토 [doc_id=file.alphasquare.co.kr:67083446d465940b]"
+  ],
+  "monitoring_indicators": [
+    "중앙그룹 회생절차 법원 심리 진행 상황",
+    "계열 채널 편성 공백 발생 여부",
+    "경쟁사(KT, LG유플러스) 대응 동향"
+  ],
+  "evidence": [
+    "중앙그룹이 법원에 회생절차를 신청하면서 IPTV 3사의 채널 편성 차질 우려가 제기됐다. [doc_id=www.newspim.com:f001e2f9c688aabf]",
+    "SK브로드밴드 B tv의 중앙그룹 계열 채널 편성 비중은 약 9%로 KT(14%), LG유플러스(12%) 대비 낮다. [doc_id=file.alphasquare.co.kr:67083446d465940b]",
+    "회생절차 장기화 시 콘텐츠 사용료 정산 지연과 신규 공급 중단 리스크가 우려된다. [doc_id=biz.chosun.com:25729e70dd2a1d1f]",
+    "업계는 대체 채널 확보와 자체 제작 비중 확대를 단기 대응 방안으로 검토하고 있다. [doc_id=www.etnews.com:fdb9ff84ad062c04]"
+  ],
+  "confidence_labels": [
+    "high [doc_id=www.newspim.com:f001e2f9c688aabf]",
+    "medium [doc_id=file.alphasquare.co.kr:67083446d465940b]",
+    "medium [doc_id=biz.chosun.com:25729e70dd2a1d1f]",
+    "medium [doc_id=www.etnews.com:fdb9ff84ad062c04]"
+  ],
+  "doc_source_map": {
+    "www.newspim.com:f001e2f9c688aabf": "www.newspim.com",
+    "file.alphasquare.co.kr:67083446d465940b": "file.alphasquare.co.kr",
+    "biz.chosun.com:25729e70dd2a1d1f": "biz.chosun.com",
+    "www.etnews.com:fdb9ff84ad062c04": "www.etnews.com",
+    "v.daum.net:34a27329ef99af59": "v.daum.net"
+  },
+  "corroborated_points": [
+    "중앙그룹 회생절차로 인한 IPTV 업계 콘텐츠 수급 우려는 newspim과 v.daum.net 두 출처에서 공통 확인됨"
+  ],
+  "uncorroborated_points": [
+    "IPTV 3사별 중앙그룹 채널 편성 비중(9%/14%/12%) 수치는 alphasquare 단일 출처 기반 추정치"
+  ],
+  "contradictions": []
+}

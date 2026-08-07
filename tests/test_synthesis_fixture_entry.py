@@ -79,7 +79,7 @@ def test_collection_stages_are_skipped_not_silently_absent():
         (
             _ROOT_CAUSE,
             {"problem", "root_cause", "impact", "improvement_plan"},
-            {"matrix", "table", "chart", "list"},
+            {"matrix", "table", "bar", "list"},
         ),
     ],
 )

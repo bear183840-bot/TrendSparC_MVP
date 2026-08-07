@@ -297,6 +297,7 @@ def test_bare_four_digit_years_still_count_as_a_trend():
         "metric_points": [
             {"label": "가입자", "period": "2019", "value": 519.0, "unit": "만 명"},
             {"label": "가입자", "period": "2023", "value": 946.0, "unit": "만 명"},
+            {"label": "가입자", "period": "2025", "value": 990.0, "unit": "만 명"},
         ]
     }
     assert "chart" in _candidate_content_types(content)
@@ -311,4 +312,69 @@ def test_brand_marketing_fills_every_future_business_slot():
     assert by_id["opportunity"].block_type == "matrix"
     # matrix is claimed above, so 위험 falls to its own narrative bullets.
     assert by_id["risk"].block_type == "narrative_list"
+    assert not any(slot.is_last_resort for slot in resolved)
+
+
+# --- one metric across several subjects is a bar, never a line ----------
+
+
+def test_three_carriers_are_not_drawn_as_a_trend_line():
+    """jungang_group_crisis measures one metric against SK브로드밴드, KT and
+    LG유플러스 - three points, none of them a point in time.
+
+    A line asserts a progression between its points, so drawing it here
+    claimed that SK브로드밴드 leads to KT leads to LG유플러스.
+    """
+    from common.content_quality_validator import classify_metric_shape
+    from reporting.dashboard_streamlit import components
+
+    synthesis, _, _, _ = load_synthesis_fixture(
+        _FIXTURES / "synthesis_jungang_group_crisis.json"
+    )
+
+    assert classify_metric_shape(synthesis.metric_series) == "comparison"
+    assert components.has_timeseries(synthesis.metric_series) is False
+    # Still drawn - as bars, not dropped to prose.
+    assert [group[0].label for group in components.bar_metric_groups(synthesis.metric_series)] == [
+        "중앙그룹 계열 채널 편성 비중"
+    ]
+
+
+def test_subject_bars_read_largest_first(monkeypatch):
+    """Subjects have no inherent order, so value order is the informative one.
+    Periods that are real times keep their chronological order instead."""
+    from reporting.dashboard_streamlit import components
+
+    captured: list[str] = []
+    monkeypatch.setattr(components.st, "markdown", lambda body, **_: captured.append(body))
+
+    synthesis, _, _, _ = load_synthesis_fixture(
+        _FIXTURES / "synthesis_jungang_group_crisis.json"
+    )
+    components.render_metric_bar(synthesis.metric_series)
+    body = "".join(captured)
+
+    assert body.index("KT") < body.index("LG유플러스") < body.index("SK브로드밴드")
+
+
+def test_unrelated_comparison_axes_do_not_share_a_table():
+    """The fixture mixes carrier exposure with 단기 리스크 items, which share
+    no criterion - a table of both would pair unrelated cells."""
+    from reporting.dashboard_streamlit import components
+
+    synthesis, _, _, _ = load_synthesis_fixture(
+        _FIXTURES / "synthesis_jungang_group_crisis.json"
+    )
+    headers, rows = components.comparison_points_to_table(synthesis.comparison_points)
+
+    assert headers == ["중앙그룹 채널 노출도"]
+    assert [row[0] for row in rows] == ["SK브로드밴드", "KT", "LG유플러스"]
+
+
+def test_jungang_fixture_fills_every_issue_response_slot():
+    by_id, resolved = _resolve("jungang_group_crisis")
+
+    assert by_id["impact"].block_type == "bar"
+    assert by_id["options"].block_type == "table"
+    assert by_id["recommendation"].block_type == "action_list"
     assert not any(slot.is_last_resort for slot in resolved)

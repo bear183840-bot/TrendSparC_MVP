@@ -20,7 +20,7 @@ from typing import Any, Literal
 
 from common.contracts import MetricPoint
 
-MetricShape = Literal["kpi", "bar", "line"]
+MetricShape = Literal["kpi", "bar", "line", "comparison"]
 
 _YEAR_RE = re.compile(r"(20\d{2}|\d{2})")
 _QUARTER_RE = re.compile(r"([1-4])\s*(?:Q|분기)", re.I)
@@ -157,14 +157,25 @@ def rank_by_relevance(items: list[str], question_terms: list[str]) -> list[str]:
 
 
 def classify_metric_shape(points_for_one_label: list[Any]) -> MetricShape:
-    """How many *distinct* periods one label's points span decides how it
-    should be visualized: a single point is a plain KPI figure, two points
-    is a before/after comparison (a bar, not a line - two dots don't make a
-    trend), three or more is a genuine time series worth a line chart.
+    """How one label's points should be visualized.
+
+    Distinct period count decides the shape, but only once the periods are
+    known to be points in *time*: a single point is a plain KPI figure, two
+    are a before/after bar (two dots don't make a trend), three or more are a
+    genuine time series worth a line.
+
+    When the periods are not times - an analyzer legitimately uses `period`
+    for the subject a figure belongs to ("SK브로드밴드" / "KT" / "LG유플러스",
+    "20대" / "50대 이상") - the label is a `comparison` instead. Live-observed:
+    one metric measured across the three IPTV carriers was classified "line"
+    and drawn as a chart running SK브로드밴드 → KT → LG유플러스, which asserts
+    a progression between companies that means nothing.
     """
     periods = {point.period for point in points_for_one_label}
     if len(periods) <= 1:
         return "kpi"
+    if not all(is_time_period(period) for period in periods):
+        return "comparison"
     if len(periods) == 2:
         return "bar"
     return "line"

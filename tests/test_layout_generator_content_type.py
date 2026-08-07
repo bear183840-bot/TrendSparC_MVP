@@ -13,9 +13,17 @@ matter which sector's data flows through).
 from common.contracts import AudienceAdaptation, ReportPlan, ReportPurposeClassification
 from core.layout_generator.generator import generate_layout
 
+# Two points in time -> a before/after bar. Three or more -> a line chart.
+# Same thresholds as content_quality_validator.classify_metric_shape, so this
+# module and the dashboard never disagree about identical data.
 _METRIC_POINTS_TWO_PERIODS = [
     {"label": "IPTV 가입자", "period": "2019", "value": 519.0, "unit": "만 명"},
     {"label": "IPTV 가입자", "period": "2023", "value": 946.0, "unit": "만 명"},
+]
+
+_METRIC_POINTS_THREE_PERIODS = [
+    *_METRIC_POINTS_TWO_PERIODS,
+    {"label": "IPTV 가입자", "period": "2025", "value": 990.0, "unit": "만 명"},
 ]
 
 _COMPARISON_POINTS_TWO_ENTITIES = [
@@ -62,10 +70,19 @@ def test_internal_provenance_survives_layout_without_affecting_block_type():
     assert layout.blocks[0].content["grounded_claims"] == provenance
 
 
-def test_two_period_metric_series_renders_as_chart_even_when_static_table_says_otherwise():
+def test_two_period_metric_series_renders_as_a_bar_even_when_static_table_says_otherwise():
     # "opportunity" is statically mapped to "matrix" - proves real content wins over that fallback.
     plan = _plan("_default", ["opportunity"])
     adaptation = _adaptation("_default", {"opportunity": {"title": "Trend", "metric_points": _METRIC_POINTS_TWO_PERIODS}})
+
+    layout = generate_layout(plan, adaptation)
+
+    assert layout.blocks[0].block_type == "bar"
+
+
+def test_three_period_metric_series_renders_as_a_line_chart():
+    plan = _plan("_default", ["opportunity"])
+    adaptation = _adaptation("_default", {"opportunity": {"title": "Trend", "metric_points": _METRIC_POINTS_THREE_PERIODS}})
 
     layout = generate_layout(plan, adaptation)
 
@@ -178,7 +195,7 @@ def test_no_structured_data_falls_back_to_the_existing_static_table():
 
 _COMPOSITE_CONTENT = {
     "title": "Composite",
-    "metric_points": _METRIC_POINTS_TWO_PERIODS,
+    "metric_points": _METRIC_POINTS_THREE_PERIODS,
     "comparison_points": _COMPARISON_POINTS_TWO_ENTITIES,
 }
 
@@ -237,7 +254,7 @@ def test_content_type_decision_is_identical_across_sectors():
     currently-registered sector's typical section content."""
     for sector_hint in ("sk_hynix", "sk_broadband", "sk_planet", "sk_telecom", "sk_innovation"):
         plan = _plan("_default", ["overview"])
-        adaptation = _adaptation("_default", {"overview": {"title": sector_hint, "metric_points": _METRIC_POINTS_TWO_PERIODS}})
+        adaptation = _adaptation("_default", {"overview": {"title": sector_hint, "metric_points": _METRIC_POINTS_THREE_PERIODS}})
 
         layout = generate_layout(plan, adaptation)
 

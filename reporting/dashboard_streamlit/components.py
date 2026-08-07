@@ -305,10 +305,20 @@ def has_bar_metrics(metric_points: list[Any]) -> bool:
 
 
 def bar_metric_groups(metric_points: list[Any]) -> list[list[Any]]:
-    """Every label's points where `classify_metric_shape` == "bar", one
-    list per label, ready to pass individually to `render_metric_bar`."""
+    """Every label worth drawing as bars, one list per label.
+
+    Covers both bar shapes: a before/after pair over two points in time, and
+    one metric measured across several *subjects* ("SK브로드밴드" / "KT" /
+    "LG유플러스"), which is an item comparison. The second used to be
+    misclassified as a line and drawn as a trend running between companies;
+    excluding it outright would have been the opposite mistake, dropping a
+    real three-way comparison to prose bullets.
+    """
     by_label = group_metric_points_by_label(metric_points)
-    return [points for points in by_label.values() if classify_metric_shape(points) == "bar"]
+    return [
+        points for points in by_label.values()
+        if classify_metric_shape(points) in {"bar", "comparison"}
+    ]
 
 
 def has_comparison(comparison_points: list[Any]) -> bool:
@@ -447,17 +457,25 @@ def _metric_chart_svg(points: list[Any], title: str) -> str:
 
 
 def render_metric_bar(points_for_one_label: list[Any]) -> None:
-    """Before/after comparison bar for a label with exactly 2 distinct
-    periods (`classify_metric_shape` == "bar") - two points don't make a
-    trend worth a line chart, but the real, evidence-stated change between
-    them is still worth showing as a simple two-bar comparison. Only ever
-    called with one label's points at a time (the caller loops per label),
-    since two different labels are two different units/scales and don't
-    belong on the same bar pair.
+    """Bars for one label, either before/after over time or across subjects.
+
+    Two points in time don't make a trend worth a line chart, but the real,
+    evidence-stated change between them is worth a two-bar comparison. The
+    same markup serves one metric measured across several subjects
+    ("SK브로드밴드" / "KT" / "LG유플러스"), which is an item comparison.
+
+    Only ever called with one label's points at a time (the caller loops per
+    label), since two different labels are two different units/scales and
+    don't belong on the same bar pair.
     """
     if len(points_for_one_label) < 2:
         return
-    ordered = sorted(points_for_one_label, key=lambda p: period_sort_key(p.period))
+    # Time bars read chronologically; subject bars have no inherent order, so
+    # they read largest-first, which is what a comparison is asking.
+    if all(is_time_period(point.period) for point in points_for_one_label):
+        ordered = sorted(points_for_one_label, key=lambda p: period_sort_key(p.period))
+    else:
+        ordered = sorted(points_for_one_label, key=lambda p: abs(p.value), reverse=True)
     label = ordered[0].label
     unit = ordered[0].unit or ""
     max_value = max(abs(p.value) for p in ordered) or 1
