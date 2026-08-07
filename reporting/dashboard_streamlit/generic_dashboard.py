@@ -8,6 +8,12 @@ from typing import Any
 import streamlit as st
 
 from common.content_quality_validator import dedupe_across_blocks
+# Importing the package is what registers every block, including the live
+# ones - the registry is only "the one table" if nothing can reach the
+# dashboard without it being populated.
+import reporting.dashboard_streamlit.blocks  # noqa: F401
+from reporting.dashboard_streamlit.blocks.base import SlotContext
+from reporting.dashboard_streamlit.blocks.registry import slot_renderer
 from reporting.dashboard_streamlit.purpose_slots import (
     LAST_RESORT,
     ResolvedSlot,
@@ -193,75 +199,27 @@ def _body_renderer(
     items: list[str] | None = None,
 ):
     """A zero-arg callable that draws this block, or None if it would draw
-    nothing. Returning None is what keeps an empty card off the page."""
-    if block_type == "chart":
-        return lambda: render_metric_chart(synthesis.metric_series, title="확인된 수치 추이",
-                                        grounded_claims=synthesis.grounded_claims)
-    if block_type in {"bar", "item_bar"}:
-        groups = (
-            time_bar_groups(synthesis.metric_series) if block_type == "bar"
-            else item_bar_groups(synthesis.metric_series)
-        )
-        return (lambda: [render_metric_bar(group, synthesis.grounded_claims) for group in groups]) if groups else None
-    if block_type == "metric_comparison":
-        groups = metric_comparison_groups(synthesis.metric_series)
-        return (
-            lambda: [render_metric_comparison(period, points) for period, points in groups]
-        ) if groups else None
-    if block_type in {"kpi_grid", "kpi_single"}:
-        return (lambda: render_kpi_row(synthesis.metric_series)) if synthesis.metric_series else None
-    if block_type == "timeline":
-        return lambda: render_timeline(
-            synthesis.evidence, synthesis.metric_series, reference_year(synthesis),
-            as_of_date=getattr(synthesis, "as_of_date", None),
-        )
-    if block_type == "table":
-        headers, rows = comparison_points_to_table(synthesis.comparison_points)
-        return (
-            lambda: st.markdown(render_comparison_table(headers, rows), unsafe_allow_html=True)
-        ) if rows else None
-    if block_type == "radar":
-        return lambda: render_radar(synthesis.comparison_points)
-    if block_type == "matrix":
-        # render_swot returns "" when fewer than two quadrants have evidence -
-        # a one-cell "matrix" is not a matrix.
-        markup = render_swot(
-            strengths=strengths, weaknesses=weaknesses,
-            opportunities=opportunities, threats=risks,
-        )
-        return (lambda: st.markdown(markup, unsafe_allow_html=True)) if markup else None
-    if block_type == "share_split":
-        return lambda: render_share_split(synthesis.metric_series)
-    if block_type == "factor_list":
-        # Every item, not the summary card's first four: a question asking
-        # which factors is asking for the set.
-        rows = [(value, evidence_url(value, result)) for value in (items or [])[:8]]
-        return (lambda: render_factor_list(rows)) if rows else None
-    if block_type == "recurring_terms":
-        return lambda: render_recurring_terms(synthesis.grounded_claims)
-    if block_type == "cause_tree":
-        return lambda: render_cause_tree(synthesis.grounded_claims)
-    if block_type == "driver_bars":
-        return lambda: render_importance_bars(synthesis.grounded_claims)
-    if block_type == "cause_map":
-        return lambda: render_cause_map(
-            risks,
-            dedupe_clean(synthesis.business_impacts, 3),
-            dedupe_clean(synthesis.recommended_actions, 3),
-        )
-    if block_type == "action_list":
-        actions = dedupe_raw(synthesis.recommended_actions, 4)
-        # Expected Impact is filled only where a source actually stated what
-        # the action would achieve (GeneratedReport.action_impacts); the rest
-        # stay empty rather than borrowing a neighbouring finding.
-        impacts = action_impact_lookup(result.generated_report)
-        rows = [
-            (clean_citation(action), impacts.get(clean_citation(action)), evidence_url(action, result))
-            for action in actions
-        ]
-        return (lambda: render_action_list(rows)) if rows else None
-    # An unrecognised block_type draws nothing rather than an empty titled box.
-    return None
+    nothing. Returning None is what keeps an empty card off the page.
+
+    The mapping itself lives in `blocks/slot_blocks.py`, not here. This used
+    to be a long if-chain that duplicated the block registry next door: the
+    same block type could be drawn one way through the registry and another
+    way through this function, and adding a block meant editing both. Now an
+    unregistered block type simply draws nothing, which is also what happens
+    to one whose data doesn't support it.
+    """
+    render = slot_renderer(block_type)
+    if render is None:
+        return None
+    return render(SlotContext(
+        result=result,
+        synthesis=synthesis,
+        items=list(items or []),
+        risks=risks,
+        opportunities=opportunities,
+        strengths=strengths,
+        weaknesses=weaknesses,
+    ))
 
 
 def render_generic_dashboard(

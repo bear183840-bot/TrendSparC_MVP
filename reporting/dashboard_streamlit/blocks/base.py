@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
+from typing import Any
 
 from pydantic import BaseModel
 
@@ -13,8 +14,40 @@ BlockRenderFn = Callable[[DashboardBlock], None]
 
 
 @dataclass(frozen=True)
+class SlotContext:
+    """Everything a live dashboard block is allowed to read.
+
+    The live dashboard resolves a slot against the *synthesis*, not against a
+    trimmed `DashboardBlock`, so its renderers need a wider input than
+    `BlockRenderFn` gives. Passing one frozen context instead of eight
+    positional arguments is what let the live dispatch move into the registry
+    without every block growing a different signature.
+    """
+
+    result: Any
+    synthesis: Any
+    items: list[str]
+    risks: list[str]
+    opportunities: list[str]
+    strengths: list[str]
+    weaknesses: list[str]
+
+
+# Returns a zero-arg callable that draws the block, or None when the data
+# would draw nothing. None is what keeps an empty titled card off the page,
+# so it is part of the contract, not an error path.
+SlotRenderFn = Callable[[SlotContext], Callable[[], None] | None]
+
+
+@dataclass(frozen=True)
 class BlockDefinition:
     block_type: str
     schema: type[BaseModel]
     render: BlockRenderFn
     description: str
+    # The live dashboard's renderer for this same block type. Optional
+    # because the two paths were built separately: `render` draws a
+    # layout-generated `DashboardBlock`, `slot_render` draws a slot the
+    # purpose skeleton resolved. A block may have either or both, and
+    # registering one never erases the other.
+    slot_render: SlotRenderFn | None = None

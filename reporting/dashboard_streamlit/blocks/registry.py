@@ -10,6 +10,8 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+from dataclasses import replace
+
 from reporting.dashboard_streamlit.blocks.base import BlockDefinition
 
 _LOGGER = logging.getLogger("trendsparc.blocks")
@@ -23,7 +25,32 @@ SUGGESTED_BLOCK_TYPES: list[dict[str, Any]] = []
 
 
 def register(definition: BlockDefinition) -> None:
+    """Add a block, or fill in a half a block type was still missing.
+
+    The two rendering paths register separately - `render` from the
+    layout-block modules, `slot_render` from the live dashboard's table - and
+    both name the same block types. A plain overwrite would mean whichever
+    module imported last silently deleted the other's renderer.
+
+    So a second registration only *fills gaps*: it can supply a renderer the
+    block type didn't have, and it can never replace one it did. Whichever
+    module owns a field keeps owning it regardless of import order, which is
+    the property that makes the merge safe to reason about.
+    """
+    existing = BLOCK_REGISTRY.get(definition.block_type)
+    if existing is not None:
+        definition = replace(
+            existing,
+            render=existing.render or definition.render,
+            slot_render=existing.slot_render or definition.slot_render,
+        )
     BLOCK_REGISTRY[definition.block_type] = definition
+
+
+def slot_renderer(block_type: str):
+    """The live dashboard's renderer for this block type, or None."""
+    definition = BLOCK_REGISTRY.get(block_type)
+    return definition.slot_render if definition else None
 
 
 def get(block_type: str) -> BlockDefinition | None:

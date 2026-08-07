@@ -20,6 +20,11 @@ Checklist for a new block file:
   3. Call `registry.register(BlockDefinition(block_type=..., schema=...,
      render=..., description=...))` at module level.
   4. Import the new module below so it actually registers on package import.
+
+A block the *live dashboard* draws is registered the same way but through
+`slot_render` instead of `render`, in `slot_blocks.py` - see that file for
+why the two entry points stay separate. Registering one never erases the
+other, so a block type can appear in both.
 """
 
 from __future__ import annotations
@@ -34,6 +39,7 @@ from reporting.dashboard_streamlit.blocks import (  # noqa: F401
     matrix,
     misc,
     radar,
+    slot_blocks,
     table,
     timeline,
 )
