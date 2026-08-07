@@ -18,6 +18,8 @@ from reporting.dashboard_streamlit.components import (
     prefer_audience_content,
     prefer_audience_content_raw,
     render_action_list,
+    render_cause_tree,
+    render_importance_bars,
     render_comparison_table,
     render_executive_summary,
     render_footer_note,
@@ -125,6 +127,12 @@ def render_issue_response_dashboard(result: Any, question: str, sector: str, aud
         )
         for raw_action in actions
     ]
+    # Drawn only when the analyzer verified a causal chain / scored the
+    # claims; both are no-ops otherwise, so a report without them looks
+    # exactly as it did before rather than showing an empty frame.
+    render_cause_tree(synthesis.grounded_claims)
+    render_importance_bars(synthesis.grounded_claims)
+
     render_action_list(action_rows)
 
     with st.expander("Evidence & Sources"):

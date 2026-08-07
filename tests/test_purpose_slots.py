@@ -55,7 +55,7 @@ def test_every_purpose_has_the_agreed_slot_order():
         "market_shift", "opportunity", "capability", "roadmap", "risk",
     ]
     assert [slot.slot_id for slot in PURPOSE_SLOTS["root_cause"]] == [
-        "problem", "cause", "improvement",
+        "problem", "cause", "drivers", "improvement",
     ]
 
 

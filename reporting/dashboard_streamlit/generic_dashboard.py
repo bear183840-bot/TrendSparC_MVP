@@ -34,6 +34,8 @@ from reporting.dashboard_streamlit.components import (
     render_metric_bar,
     render_metric_chart,
     render_cause_map,
+    render_cause_tree,
+    render_importance_bars,
     render_metric_comparison,
     render_omitted_sections,
     render_radar,
@@ -218,6 +220,10 @@ def _body_renderer(
             opportunities=opportunities, threats=risks,
         )
         return (lambda: st.markdown(markup, unsafe_allow_html=True)) if markup else None
+    if block_type == "cause_tree":
+        return lambda: render_cause_tree(synthesis.grounded_claims)
+    if block_type == "driver_bars":
+        return lambda: render_importance_bars(synthesis.grounded_claims)
     if block_type == "cause_map":
         return lambda: render_cause_map(
             risks,

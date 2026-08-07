@@ -71,8 +71,27 @@ _ANALYSIS_SCHEMA = {
                     "evidence_location": {"type": ["string", "null"], "description": "확인 가능한 경우 문단·절·표 위치, 아니면 null."},
                     "as_of_date": {"type": ["string", "null"], "description": "주장의 기준 시점이 명시된 경우 원문 표현, 아니면 null."},
                     "confidence": {"type": "string", "enum": ["low", "medium", "high"]},
+                    "parent_claim_id": {
+                        "type": ["string", "null"],
+                        "description": (
+                            "이 주장이 '무엇 때문에 일어났는지'를 설명하는 상위 주장의 claim_id. "
+                            "문서가 인과관계를 실제로 서술한 경우에만 지정하고, 추측하지 말 것. "
+                            "같은 문서 안의 다른 claim_id여야 하며, 순환 참조 금지. 아니면 null."
+                        ),
+                    },
+                    "importance": {
+                        "type": ["integer", "null"],
+                        "description": (
+                            "질문에 답하는 데 이 주장이 얼마나 중요한지 0~100. 문서에 없는 판단이므로 "
+                            "화면에 'AI 판단'으로 표기됨. 이유를 importance_basis에 못 쓰겠으면 null."
+                        ),
+                    },
+                    "importance_basis": {
+                        "type": ["string", "null"],
+                        "description": "그 중요도로 본 이유. importance를 채웠으면 필수.",
+                    },
                 },
-                "required": ["claim_id", "claim_type", "claim", "evidence_passage_id", "evidence_quote", "evidence_location", "as_of_date", "confidence"],
+                "required": ["claim_id", "claim_type", "claim", "evidence_passage_id", "evidence_quote", "evidence_location", "as_of_date", "confidence", "parent_claim_id", "importance", "importance_basis"],
                 "additionalProperties": False,
             },
         },
@@ -494,6 +513,58 @@ def _repair_failed_claim_quotes(
     ]
 
 
+def _verified_relations(claims: list[dict]) -> list[dict]:
+    """Strip causal links and importance scores the evidence can't carry.
+
+    Both fields are the model's judgement rather than something a document
+    states outright, so each is checked the way every other model output here
+    is - kept only where it is resolvable, dropped where it is not, and never
+    repaired into something plausible:
+
+    - a `parent_claim_id` that doesn't name another claim that survived
+      verification becomes None (the claim itself stays; only the link goes),
+    - a link that closes a cycle (A->B->A, or a claim parenting itself) is
+      dropped, since a cause tree with a loop has no root to draw from,
+    - an `importance` outside 0-100, or with no `importance_basis` saying why,
+      is discarded whole. A number with no stated reason renders as a
+      measurement while carrying an opinion, and the user's requirement was
+      the opposite: the judgement must arrive with its context attached.
+    """
+    known = {claim.get("claim_id") for claim in claims}
+    resolved: list[dict] = []
+    parents: dict[str, str] = {}
+    for claim in claims:
+        claim_id = claim.get("claim_id")
+        parent = claim.get("parent_claim_id")
+        if parent not in known or parent == claim_id:
+            parent = None
+        importance = claim.get("importance")
+        basis = (claim.get("importance_basis") or "").strip()
+        if not isinstance(importance, int) or isinstance(importance, bool) or not basis:
+            importance, basis = None, None
+        elif not 0 <= importance <= 100:
+            importance, basis = None, None
+        if parent:
+            parents[claim_id] = parent
+        resolved.append({**claim, "parent_claim_id": parent, "importance": importance,
+                         "importance_basis": basis})
+
+    def closes_a_cycle(claim_id: str) -> bool:
+        seen = {claim_id}
+        current = parents.get(claim_id)
+        while current:
+            if current in seen:
+                return True
+            seen.add(current)
+            current = parents.get(current)
+        return False
+
+    for claim in resolved:
+        if claim["parent_claim_id"] and closes_a_cycle(claim["claim_id"]):
+            claim["parent_claim_id"] = None
+    return resolved
+
+
 def _number_is_in_content(value: float, content: str) -> bool:
     """Whether this exact figure appears in the text.
 
@@ -588,6 +659,9 @@ def _namespace_chunk_evidence(
             {
                 **claim,
                 "claim_id": claim_id_map[claim["claim_id"]],
+                # A chunked PDF renames every claim; a parent link left on the
+                # old name would point at nothing and be dropped downstream.
+                "parent_claim_id": claim_id_map.get(claim.get("parent_claim_id")),
                 "evidence_passage_id": (
                     f"{claim_id_prefix}:{passage_id}" if passage_id else None
                 ),
@@ -704,6 +778,7 @@ def _analyze_document(
             grounded_claims,
             evidence_passages,
         )
+        grounded_claims = _verified_relations(grounded_claims)
         if claim_id_prefix and evidence_location_prefix:
             data, grounded_claims = _namespace_chunk_evidence(
                 data,

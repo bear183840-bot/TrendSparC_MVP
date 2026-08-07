@@ -280,5 +280,54 @@ def has_timeline(
     return bool(timeline_entries(evidence, metric_points, reference_year))
 
 
+def cause_tree(grounded_claims: list[Any], max_depth: int = 2) -> list[tuple[Any, list[Any]]]:
+    """Root claims with the claims the evidence says follow from them.
+
+    Two levels only. A deeper tree doesn't fit the column and, more to the
+    point, the third level is where a model's causal guesses start rather
+    than a document's stated chain. Roots are claims with no parent that at
+    least one other claim points at - a claim nobody derives from is a
+    finding, not the root of anything, and it belongs in the ordinary list.
+    """
+    by_id = {claim.synthesis_claim_id: claim for claim in grounded_claims}
+    children: dict[str, list[Any]] = {}
+    for claim in grounded_claims:
+        parent = getattr(claim, "parent_synthesis_claim_id", None)
+        if parent in by_id and parent != claim.synthesis_claim_id:
+            children.setdefault(parent, []).append(claim)
+    if max_depth < 2:
+        return []
+    return [
+        (claim, children[claim.synthesis_claim_id])
+        for claim in grounded_claims
+        if claim.synthesis_claim_id in children
+        and not getattr(claim, "parent_synthesis_claim_id", None)
+    ]
+
+
+def has_cause_tree(grounded_claims: list[Any]) -> bool:
+    return bool(cause_tree(grounded_claims))
+
+
+def importance_ranked(grounded_claims: list[Any], limit: int = 6) -> list[Any]:
+    """Claims the model scored for importance, strongest first.
+
+    Only claims carrying both a score and its stated basis - the verifier
+    drops one without the other, and a renderer must show the basis, so a
+    claim that can't explain its own score never reaches a bar.
+    """
+    scored = [
+        claim for claim in grounded_claims
+        if getattr(claim, "importance", None) is not None
+        and (getattr(claim, "importance_basis", None) or "").strip()
+    ]
+    return sorted(scored, key=lambda claim: claim.importance, reverse=True)[:limit]
+
+
+def has_importance_ranking(grounded_claims: list[Any]) -> bool:
+    # One bar is not a ranking; it's a single claim with a number stuck to it.
+    return len(importance_ranked(grounded_claims)) >= 2
+
+
 def has_cause_map(risks: list[str], impacts: list[str], actions: list[str]) -> bool:
     return sum(1 for column in (risks, impacts, actions) if column) >= 2

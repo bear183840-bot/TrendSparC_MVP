@@ -36,13 +36,13 @@
 
 | 블록 | 없는 것 | 필요한 변경 |
 |---|---|---|
-| 2.3 `ForecastLineCard` | 실적/전망 구분 | `MetricPoint.is_forecast: bool`. 지금은 period 문자열에 "(전망)"이 섞여 있을 뿐이라 파싱에 의존 |
+| ~~2.3 `ForecastLineCard`~~ | ~~실적/전망 구분~~ | **완료.** `MetricPoint.is_forecast` 추가. 모델이 표시하되 근거의 전망 표현(전망/예상/목표/추정/계획/가이던스)이 실제로 있을 때만 인정한다. 관측 구간은 실선, 전망으로 넘어가는 구간은 점선 + 범례, KPI 헤드라인은 **관측된 최신값**을 쓴다 |
 | 2.4 `LandscapeSplit` 도넛 | "전체의 구성비"라는 표시 | 도넛은 합이 100%인 분할이어야 한다. 지금 `ComparisonPoint`에는 그 값들이 한 모집단의 분할인지 표시할 방법이 없어, 무관한 %를 합쳐 그릴 위험이 있다 |
-| 3.1 `DriverBarList` | `value: number` (중요도) | 순위에서 역산한 %는 **의도적으로 제거**했다(근거 없는 정밀도). 실제 중요도를 근거에서 받아야 하며, AI 판단이면 "AI 판단" 표기 필수 — 진단 리포트 Step 2-1 |
+| ~~3.1 `DriverBarList`~~ | ~~`value: number` (중요도)~~ | **완료.** `GroundedClaim.importance` + `importance_basis`. 이유 없는 점수는 통째로 폐기되고, 화면에는 "AI 판단" 배지와 이유 툴팁이 항상 붙는다. 막대는 상위 항목이 아니라 100 기준으로 스케일한다 |
 | 5.1/5.2 `Timeline*` | `status: done/active/todo` | 지금 타임라인은 "날짜 있는 근거"일 뿐 진행 상태 개념이 없다 |
 | 6.3 `CompetitorPanels` | 경쟁사별 process + importance + 도넛 | 위 세 가지의 합성. 각각이 갖춰져야 가능 |
-| 7.1/7.2 `RootCauseTree` | 원인 간 부모-자식 | `GroundedClaim.parent_claim_id`. **가장 자주 요청됐고 가장 오래 막혀 있는 항목** — Step 2-1 |
-| 8.3 `ActionImpactList` | 임팩트 **수치**(진행바용) | 지금 `ActionImpact.expected_impact`는 **문장**이다. 근거가 "이탈률 5%p 개선"이라 말해도 막대 길이로 쓸 수치는 따로 없다. 근거가 수치를 말한 경우에만 채우는 `impact_value: float \| None` 추가가 필요 |
+| ~~7.1/7.2 `RootCauseTree`~~ | ~~원인 간 부모-자식~~ | **완료.** `GroundedClaim.parent_claim_id` → `SynthesisClaim.parent_synthesis_claim_id`. 검증을 통과한 같은 문서의 claim만 부모가 될 수 있고, 자기 자신·순환은 끊는다. 2단까지만 그린다 |
+| ~~8.3 `ActionImpactList`~~ | ~~임팩트 **수치**(진행바용)~~ | **완료.** `ActionImpact.impact_value` / `impact_unit`. 인용 문장에 그 숫자가 실제로 있을 때만 인정하고, 문장만 있는 행은 막대 없이 문장만 남는다 |
 
 ## 3축 데이터 문제 (별도)
 
@@ -51,19 +51,27 @@
 - 질문 1: 연령대 × 매체 × reach
 - 질문 5: 회사 × 지표 × 값
 
-`MetricPoint`는 (label, period, value, unit) 2축이라, 지금은 `period`에 연령대나
-회사명을 넣는 편법으로만 표현된다. 그래서 `is_time_period()` 같은 방어 로직이
-계속 필요해졌다. 3축을 정식으로 담으려면 `MetricPoint.dimension`(이 축이
-시간인지 대상인지) 또는 별도 `MatrixPoint` 계약이 필요하다.
+**해결됨.** `MetricPoint.subject`를 추가해 (label, subject, period) 3축이 됐다.
+주체가 2개 이상이면 기간이 무엇이든 comparison으로 분류되고, 막대 행 라벨은
+실제로 변하는 축을 따라간다(둘 다 변하면 "KT (2024년)"처럼 둘 다 표기).
+`period`는 다시 날짜 전용이므로 `is_time_period()`는 방어가 아니라 본래 용도로
+쓰인다.
 
 ## 구현 순서 제안
 
-1. **파생 계층 먼저** — KPI delta/spark, trend series. 계약 변경 0으로 블록
-   6종이 살아난다.
-2. **`MetricPoint.is_forecast` + `impact_value`** — 각각 한 필드, 블록 2종.
-3. **Step 2-1 관계 필드** — `parent_claim_id`, `importance`. 블록 3종
-   (RootCauseTree, DriverBarList, CompetitorPanels 일부).
-4. **3축 계약** — 목표 질문 1·5를 제대로 답하려면 필요.
+1. ~~**파생 계층**~~ — 완료 (KPI delta/spark, 차트 근거 캡션).
+2. ~~**`MetricPoint.is_forecast` + `impact_value`**~~ — 완료.
+3. ~~**Step 2-1 관계 필드**~~ — 완료 (`parent_claim_id`, `importance`).
+4. ~~**3축 계약**~~ — 완료 (`MetricPoint.subject`).
+
+남은 것: `LandscapeSplit` 도넛(한 모집단의 분할이라는 표시), `Timeline`의
+done/active/todo 진행 상태, `CompetitorPanels`(위 둘의 합성). 셋 다 아직
+계약이 없고, 관계 필드처럼 "근거가 실제로 말한 경우에만" 규칙을 먼저 정해야
+한다.
+
+관계 필드는 현재 **sk_broadband 어댑터에만** 구현돼 있다(계획대로). 다른 섹터는
+스키마에 같은 세 필드를 추가하고 `_verified_relations()`를 호출하면 그대로
+동작한다 — `common/contracts.py`는 섹터 무관이라 계약 변경은 필요 없다.
 
 ## 지키고 있는 원칙 (블록 구현 시 유지할 것)
 

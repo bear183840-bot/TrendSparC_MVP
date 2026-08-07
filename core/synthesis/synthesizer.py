@@ -104,6 +104,7 @@ def synthesize(
             if need not in covered_information_needs:
                 covered_information_needs.append(need)
         if analysis.grounded_claims:
+            claim_ids_in_doc = {claim.claim_id for claim in analysis.grounded_claims}
             grounded_claims.extend(
                 SynthesisClaim(
                     synthesis_claim_id=f"{analysis.doc_id}:{claim.claim_id}",
@@ -114,6 +115,18 @@ def synthesize(
                     evidence_location=claim.evidence_location,
                     as_of_date=claim.as_of_date,
                     confidence=claim.confidence,
+                    # Namespaced like every other cross-document reference, so
+                    # a parent still resolves once claims from several
+                    # documents share one list. A link whose parent didn't
+                    # survive the analyzer's verification is left unset here
+                    # rather than pointing at an id that no longer exists.
+                    parent_synthesis_claim_id=(
+                        f"{analysis.doc_id}:{claim.parent_claim_id}"
+                        if claim.parent_claim_id in claim_ids_in_doc
+                        else None
+                    ),
+                    importance=claim.importance,
+                    importance_basis=claim.importance_basis,
                     doc_id=analysis.doc_id,
                     source_id=source_id,
                     source_title=analysis.source_title,

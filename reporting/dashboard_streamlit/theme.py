@@ -395,6 +395,24 @@ def dashboard_css(dark: bool, accent_theme: str = "orange") -> str:
         width:14px; border-radius:0; }}
     .ts-kpi-forecast {{ font-size:0.62em; vertical-align:middle; padding:1px 5px; margin-left:4px;
         border:1px solid var(--ts-border); border-radius:999px; color:var(--ts-muted); }}
+    .ts-cause-tree, .ts-drivers {{ margin-top:14px; }}
+    .ts-cause-branch {{ border-left:2px solid var(--ts-accent); padding:2px 0 2px 12px;
+        margin-bottom:12px; }}
+    .ts-cause-root {{ font-weight:600; }}
+    .ts-cause-children {{ margin:6px 0 0; padding-left:18px; color:var(--ts-muted);
+        font-size:0.9rem; }}
+    .ts-cause-children li {{ margin:3px 0; }}
+    .ts-driver-row {{ display:grid; grid-template-columns:minmax(0,1fr) 120px 34px 18px;
+        align-items:center; gap:10px; padding:5px 0;
+        border-bottom:1px solid var(--ts-soft); font-size:0.88rem; }}
+    .ts-driver-row .label {{ overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }}
+    .ts-driver-row .value {{ text-align:right; color:var(--ts-muted); font-variant-numeric:tabular-nums; }}
+    .ts-driver-track {{ display:block; height:6px; border-radius:3px; background:var(--ts-soft); }}
+    .ts-driver-track i {{ display:block; height:6px; border-radius:3px; background:var(--ts-accent); }}
+    .ts-drivers-note {{ margin:2px 0 8px; font-size:0.76rem; color:var(--ts-muted); }}
+    .ts-ai-badge {{ font-size:0.66rem; padding:1px 6px; border-radius:999px;
+        border:1px solid var(--ts-border); color:var(--ts-muted); vertical-align:middle;
+        margin-left:6px; }}
     .ts-impact-bar {{ display:flex; align-items:center; gap:6px; margin-top:4px; }}
     .ts-impact-bar i {{ display:block; height:5px; border-radius:3px; background:var(--ts-accent);
         min-width:4px; }}

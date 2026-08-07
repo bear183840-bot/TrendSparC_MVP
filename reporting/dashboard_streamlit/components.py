@@ -46,6 +46,10 @@ from common.block_shapes import (  # noqa: F401
     has_radar,
     has_timeline,
     has_timeseries,
+    cause_tree,
+    has_cause_tree,
+    has_importance_ranking,
+    importance_ranked,
     metric_axis_labels,
     metric_comparison_groups,
     metric_insight,
@@ -669,6 +673,69 @@ def render_action_list(rows: list[tuple[str, str, str | None]]) -> None:
     )
 
 
+
+
+def _claim_link(claim: Any) -> str:
+    url = getattr(claim, "source_url", None)
+    return (
+        f'<a class="ts-evidence-link" href="{escape(url)}" target="_blank" title="근거 원문 열기">↗</a>'
+        if url else ""
+    )
+
+
+def render_cause_tree(grounded_claims: list[Any]) -> None:
+    """Root causes with what the evidence says follows from them.
+
+    Drawn only from `parent_synthesis_claim_id` links that survived the
+    analyzer's verification - a document that never stated a causal chain
+    produces no tree, and the flat claim list stays the honest rendering.
+    """
+    roots = cause_tree(grounded_claims or [])
+    if not roots:
+        return
+    branches = ""
+    for root, children in roots:
+        child_rows = "".join(
+            f'<li>{escape(clean_citation(child.claim))}{_claim_link(child)}</li>'
+            for child in children
+        )
+        branches += (
+            f'<div class="ts-cause-branch">'
+            f'<div class="ts-cause-root">{escape(clean_citation(root.claim))}{_claim_link(root)}</div>'
+            f'<ul class="ts-cause-children">{child_rows}</ul></div>'
+        )
+    st.markdown(
+        f'<section class="ts-cause-tree"><h3>원인 구조</h3>{branches}</section>',
+        unsafe_allow_html=True,
+    )
+
+
+def render_importance_bars(grounded_claims: list[Any]) -> None:
+    """Claims ranked by the model's stated importance.
+
+    Every bar carries an "AI 판단" badge and the reason the score was given,
+    because the number is a judgement and not a measurement - a score with no
+    reason attached never reaches this function (the analyzer discards it).
+    Bars are scaled against 100, not against the top row, so a set of claims
+    the model thought were all middling doesn't render as one dominant driver.
+    """
+    ranked = importance_ranked(grounded_claims or [])
+    if len(ranked) < 2:
+        return
+    rows = "".join(
+        f'<div class="ts-driver-row" title="{escape(claim.importance_basis or "")}">'
+        f'<span class="label">{escape(clean_citation(claim.claim))}</span>'
+        f'<span class="ts-driver-track"><i style="width:{claim.importance}%"></i></span>'
+        f'<span class="value">{claim.importance}</span>{_claim_link(claim)}</div>'
+        for claim in ranked
+    )
+    st.markdown(
+        '<section class="ts-drivers"><h3>영향도 <span class="ts-ai-badge">AI 판단</span></h3>'
+        '<p class="ts-drivers-note">근거 문서가 제시한 수치가 아니라 모델이 매긴 상대적 중요도입니다. '
+        '각 항목에 마우스를 올리면 그렇게 본 이유가 표시됩니다.</p>'
+        + rows + "</section>",
+        unsafe_allow_html=True,
+    )
 
 
 def _sparkline_svg(points: list[Any]) -> str:

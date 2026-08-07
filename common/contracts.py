@@ -402,6 +402,18 @@ class GroundedClaim(BaseModel):
     source_url: Optional[str] = None
     confidence: Literal["low", "medium", "high"]
 
+    # Why one claim sits under another, and how much it matters. Both are
+    # judgements, so both are constrained: `parent_claim_id` is only kept when
+    # the document itself states the causal link and the parent is a claim
+    # that was independently verified, and `importance` is discarded unless
+    # `importance_basis` says why - a number with no stated reason reads as a
+    # measurement while carrying an opinion. The UI must label importance as
+    # an AI judgement wherever it draws it.
+    parent_claim_id: Optional[str] = None
+    importance: Optional[int] = None
+    importance_basis: Optional[str] = None
+
+
 
 class DocumentAnalysis(BaseModel):
     doc_id: str
@@ -497,6 +509,12 @@ class SynthesisClaim(BaseModel):
     evidence_location: Optional[str] = None
     as_of_date: Optional[str] = None
     confidence: Literal["low", "medium", "high"]
+    # Namespaced to `f"{doc_id}:{claim_id}"`, the same convention
+    # `evidence_synthesis_claim_id` already uses, so a parent link stays
+    # resolvable once claims from several documents share one list.
+    parent_synthesis_claim_id: Optional[str] = None
+    importance: Optional[int] = None
+    importance_basis: Optional[str] = None
     doc_id: str
     source_id: str
     source_title: Optional[str] = None

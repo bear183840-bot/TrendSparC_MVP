@@ -64,6 +64,8 @@ DESIGN_LIBRARY_BLOCKS: dict[str, tuple[str, ...]] = {
     "Timeline": ("timeline",),
     "Table": ("table",),
     "Cause Map": ("cause_map",),
+    "Root Cause Tree": ("cause_tree",),
+    "Driver Bars": ("driver_bars",),
     "Action List": ("action_list",),
     "Evidence": ("evidence",),
 }
@@ -83,6 +85,12 @@ class Slot:
     # synthesis - observed with future_business's 위험 slot, whose sections are
     # not in that purpose's plan even though synthesis.risks was populated.
     fields: tuple[str, ...] = ()
+    # An optional slot disappears when its data isn't there, instead of
+    # resolving to the last-resort placeholder. Use it for a slot that asks a
+    # question only some evidence can answer (relative weighting of causes) -
+    # its absence says nothing was measured, where an empty card would claim
+    # the report tried and failed at something it always shows.
+    optional: bool = False
 
 
 @dataclass(frozen=True)
@@ -122,7 +130,7 @@ _ISSUE_RESPONSE: tuple[Slot, ...] = (
     Slot("problem", "문제", "무엇이 문제인가",
          ("matrix", "narrative_list"), ("issue", "problem")),
     Slot("cause", "원인", "왜 그렇게 되었는가",
-         ("cause_map", "bar", "narrative_list"), ("root_cause", "issue"), ("risks",)),
+         ("cause_tree", "cause_map", "bar", "narrative_list"), ("root_cause", "issue"), ("risks",)),
     Slot("impact", "영향", "그 결과 무엇이 달라지는가",
          ("chart", "bar", "metric_comparison", "narrative_list"), ("impact",),
          ("business_impacts",)),
@@ -156,7 +164,11 @@ _ROOT_CAUSE: tuple[Slot, ...] = (
     Slot("problem", "Problem", "어떤 현상이 관찰되는가",
          ("chart", "bar", "narrative_list"), ("problem", "issue")),
     Slot("cause", "Cause", "그 현상의 원인 구조",
-         ("cause_map", "bar", "table", "narrative_list"), ("root_cause",)),
+         ("cause_tree", "cause_map", "bar", "table", "narrative_list"), ("root_cause",)),
+    # Only drawable when the model scored the claims and said why; otherwise
+    # the slot resolves to nothing and the skeleton is three slots as before.
+    Slot("drivers", "Drivers", "어느 원인이 더 크게 작용하는가",
+         ("driver_bars",), ("root_cause",), (), optional=True),
     Slot("improvement", "Improvement", "원인 사슬의 어디를 끊을 것인가",
          ("action_list", "table", "narrative_list"), ("improvement_plan",)),
 )
@@ -221,6 +233,14 @@ def _availability() -> dict[str, Callable[[Any, list[str]], bool]]:
                 synthesis.opportunities, synthesis.risks,
             ) if field
         ) >= 2,
+        # A real chain the documents stated, ahead of cause_map's column
+        # layout, which only groups risks/impacts/actions side by side.
+        "cause_tree": lambda synthesis, items: block_shapes.has_cause_tree(
+            getattr(synthesis, "grounded_claims", []) or []
+        ),
+        "driver_bars": lambda synthesis, items: block_shapes.has_importance_ranking(
+            getattr(synthesis, "grounded_claims", []) or []
+        ),
         "cause_map": lambda synthesis, items: block_shapes.has_cause_map(
             synthesis.risks, synthesis.business_impacts, synthesis.recommended_actions
         ),
@@ -286,6 +306,8 @@ def resolve_slots(purpose_id: str | None, synthesis: Any, report: Any) -> list[R
                 chosen = candidate
                 claimed.add(candidate)
                 break
+        if chosen is LAST_RESORT and slot.optional:
+            continue
         resolved.append(ResolvedSlot(slot=slot, block_type=chosen, section_id=section_id, items=items))
     return resolved
 
