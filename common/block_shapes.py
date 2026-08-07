@@ -92,6 +92,24 @@ def bar_metric_groups(metric_points: list[Any]) -> list[list[Any]]:
     ]
 
 
+def time_bar_groups(metric_points: list[Any]) -> list[list[Any]]:
+    """Only the before/after-over-time labels - movement, not ranking."""
+    by_label = group_metric_points_by_label(metric_points)
+    return [points for points in by_label.values() if classify_metric_shape(points) == "bar"]
+
+
+def item_bar_groups(metric_points: list[Any]) -> list[list[Any]]:
+    """Only the across-items labels - ranking, not movement.
+
+    Split out from `bar_metric_groups` because the two answer different
+    questions and were competing for the same slot: 시장 상황 asks which way
+    things are moving, and a three-way comparison between companies has no
+    direction in it at all. Whichever slot ran first used to claim both.
+    """
+    by_label = group_metric_points_by_label(metric_points)
+    return [points for points in by_label.values() if classify_metric_shape(points) == "comparison"]
+
+
 def varies_by_subject(points_for_one_label: list[Any]) -> bool:
     """True when one metric was measured for two or more different subjects -
     the axis the figures vary along is *who*, not *when*."""
@@ -327,6 +345,80 @@ def importance_ranked(grounded_claims: list[Any], limit: int = 6) -> list[Any]:
 def has_importance_ranking(grounded_claims: list[Any]) -> bool:
     # One bar is not a ranking; it's a single claim with a number stuck to it.
     return len(importance_ranked(grounded_claims)) >= 2
+
+
+# Function words and reporting verbs that recur in every Korean article
+# regardless of subject. They are not a topic, so counting them would rank
+# "따르면" above whatever the documents were actually about.
+_TERM_STOPWORDS = frozenset({
+    "있다", "없다", "한다", "했다", "된다", "됐다", "이다", "관련", "대한", "대해", "통해",
+    "위해", "따르면", "밝혔다", "말했다", "설명", "분석", "전망", "예상", "지난해", "올해",
+    "이번", "지난", "가장", "많은", "다양", "경우", "때문", "이후", "이전", "기준", "정도",
+    "수준", "부분", "상황", "내용", "결과", "필요", "이용", "제공", "서비스", "그리고",
+    "하지만", "또한", "특히", "현재", "최근", "계속", "다시", "모두", "각각", "이러한",
+})
+_TERM_RE = re.compile(r"[가-힣]{2,}|[A-Za-z]{3,}")
+# Korean particles glue onto the noun, so a plain word split reads "요금" and
+# "요금과" as two different terms and neither reaches the two-document
+# threshold. Trimming a trailing particle is not morphology - it is the one
+# rule that stops the same noun being counted twice - so it only applies when
+# a real stem is left behind.
+_PARTICLES = ("으로서", "으로써", "에서는", "에게서", "으로", "에서", "에게", "부터",
+              "까지", "이라", "라는", "이나", "과의", "와의", "의", "은", "는", "이",
+              "가", "을", "를", "과", "와", "에", "도", "로", "만", "보다")
+
+
+def _strip_particle(token: str) -> str:
+    if not re.fullmatch(r"[가-힣]+", token):
+        return token
+    for particle in _PARTICLES:
+        if token.endswith(particle) and len(token) - len(particle) >= 2:
+            return token[: -len(particle)]
+    return token
+
+
+def recurring_terms(
+    grounded_claims: list[Any], min_documents: int = 2, limit: int = 8
+) -> list[tuple[str, int, Any]]:
+    """Words that recur across *separate* documents, with one claim each.
+
+    A measurement over the collected evidence, not an interpretation of it:
+    the count is how many distinct documents used the word, and every term
+    carries a real claim the reader can open. Nothing is inferred about what
+    the word means or why it matters.
+
+    Requiring two documents is the whole safeguard against noise. One article
+    repeating its own vocabulary says nothing about a market; the same word
+    turning up in unrelated sources is the observation worth showing. Terms
+    are counted once per document for the same reason - a single long article
+    must not out-vote three short ones.
+    """
+    docs_by_term: dict[str, set[str]] = {}
+    claim_by_term: dict[str, Any] = {}
+    for claim in grounded_claims:
+        doc_id = getattr(claim, "doc_id", None) or getattr(claim, "synthesis_claim_id", "")
+        text = f"{getattr(claim, 'claim', '')} {getattr(claim, 'evidence_quote', '')}"
+        for term in {
+            stem for token in _TERM_RE.findall(text)
+            if (stem := _strip_particle(token)) not in _TERM_STOPWORDS and len(stem) >= 2
+        }:
+            docs_by_term.setdefault(term, set()).add(doc_id)
+            claim_by_term.setdefault(term, claim)
+    ranked = sorted(
+        (
+            (term, len(doc_ids), claim_by_term[term])
+            for term, doc_ids in docs_by_term.items()
+            if len(doc_ids) >= min_documents
+        ),
+        key=lambda row: (-row[1], row[0]),
+    )
+    return ranked[:limit]
+
+
+def has_recurring_terms(grounded_claims: list[Any], minimum: int = 3) -> bool:
+    # Two words shared between two articles is a coincidence, not a pattern
+    # worth a card of its own.
+    return len(recurring_terms(grounded_claims or [])) >= minimum
 
 
 def has_cause_map(risks: list[str], impacts: list[str], actions: list[str]) -> bool:

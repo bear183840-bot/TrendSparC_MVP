@@ -23,7 +23,9 @@ from reporting.dashboard_streamlit.components import (
     dedupe_raw,
     evidence_url,
     headline_stats,
+    item_bar_groups,
     metric_comparison_groups,
+    time_bar_groups,
     prefer_audience_content,
     reference_year,
     render_action_list,
@@ -35,7 +37,9 @@ from reporting.dashboard_streamlit.components import (
     render_metric_chart,
     render_cause_map,
     render_cause_tree,
+    render_factor_list,
     render_importance_bars,
+    render_recurring_terms,
     render_metric_comparison,
     render_omitted_sections,
     render_radar,
@@ -168,7 +172,7 @@ def _render_slot(
     # left a heading with an empty box under it. That is what "필요 역량"
     # looked like: a header, no content, and no explanation either.
     draw = _body_renderer(
-        block_type, result, synthesis, risks, opportunities, strengths, weaknesses
+        block_type, result, synthesis, risks, opportunities, strengths, weaknesses, items
     )
     if draw is None:
         return
@@ -185,14 +189,18 @@ def _body_renderer(
     opportunities: list[str],
     strengths: list[str],
     weaknesses: list[str],
+    items: list[str] | None = None,
 ):
     """A zero-arg callable that draws this block, or None if it would draw
     nothing. Returning None is what keeps an empty card off the page."""
     if block_type == "chart":
         return lambda: render_metric_chart(synthesis.metric_series, title="확인된 수치 추이",
                                         grounded_claims=synthesis.grounded_claims)
-    if block_type == "bar":
-        groups = bar_metric_groups(synthesis.metric_series)
+    if block_type in {"bar", "item_bar"}:
+        groups = (
+            time_bar_groups(synthesis.metric_series) if block_type == "bar"
+            else item_bar_groups(synthesis.metric_series)
+        )
         return (lambda: [render_metric_bar(group, synthesis.grounded_claims) for group in groups]) if groups else None
     if block_type == "metric_comparison":
         groups = metric_comparison_groups(synthesis.metric_series)
@@ -220,6 +228,13 @@ def _body_renderer(
             opportunities=opportunities, threats=risks,
         )
         return (lambda: st.markdown(markup, unsafe_allow_html=True)) if markup else None
+    if block_type == "factor_list":
+        # Every item, not the summary card's first four: a question asking
+        # which factors is asking for the set.
+        rows = [(value, evidence_url(value, result)) for value in (items or [])[:8]]
+        return (lambda: render_factor_list(rows)) if rows else None
+    if block_type == "recurring_terms":
+        return lambda: render_recurring_terms(synthesis.grounded_claims)
     if block_type == "cause_tree":
         return lambda: render_cause_tree(synthesis.grounded_claims)
     if block_type == "driver_bars":

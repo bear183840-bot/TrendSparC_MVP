@@ -59,7 +59,7 @@ LAST_RESORT = "no_data"
 DESIGN_LIBRARY_BLOCKS: dict[str, tuple[str, ...]] = {
     "KPI Card": ("kpi_grid", "kpi_single"),
     "Line / Area": ("chart",),
-    "Bar": ("bar", "metric_comparison"),
+    "Bar": ("bar", "item_bar", "metric_comparison"),
     "Matrix": ("matrix",),
     "Timeline": ("timeline",),
     "Table": ("table",),
@@ -67,6 +67,8 @@ DESIGN_LIBRARY_BLOCKS: dict[str, tuple[str, ...]] = {
     "Root Cause Tree": ("cause_tree",),
     "Driver Bars": ("driver_bars",),
     "Action List": ("action_list",),
+    "Factor List": ("factor_list",),
+    "Keyword List": ("recurring_terms",),
     "Evidence": ("evidence",),
 }
 
@@ -113,15 +115,38 @@ _CURRENT_STATUS: tuple[Slot, ...] = (
     # `bar` sits between chart and timeline throughout: a metric measured at
     # exactly two points is still a movement, just not a trend line, and
     # dropping straight to prose threw that away.
+    # Ranking sits ahead of 시장 상황 so a "무엇이 가장 많이/높게" question
+    # claims the comparison bars for the card that is actually about ranking;
+    # 시장 상황 then falls to its own chart/timeline. Both slots reading the
+    # same metric_series is why order decides which one gets `bar`.
+    Slot("ranking", "순위·비교", "항목들 사이에서 무엇이 앞서는가",
+         ("item_bar", "metric_comparison", "table", "narrative_list"),
+         ("key_metrics", "market_status"), (), optional=True),
     Slot("market", "시장 상황", "시장이 어느 방향으로 움직이는가",
-         ("chart", "bar", "timeline", "narrative_list"), ("market_status", "current_situation")),
+         ("chart", "bar", "item_bar", "timeline", "narrative_list"),
+         ("market_status", "current_situation")),
     Slot("metrics", "지표", "확인된 수치를 제시",
          ("kpi_grid", "chart", "kpi_single"), ("key_metrics",)),
     Slot("competitor", "경쟁사", "다른 주체와 견주면 어디쯤인가",
          ("table", "radar", "narrative_list"), ("market_status",)),
+    # 요인/페인포인트 questions ("가입 고려 요인", "인기 요인") answer with a
+    # list, and a list is what the evidence actually holds - so this slot has
+    # its own place rather than being squeezed into 시장 상황's prose
+    # fallback. driver_bars first, because a scored factor list beats an
+    # unordered one where the analyzer managed to score it.
+    Slot("factors", "요인", "무엇이 그것을 좌우하는가",
+         ("driver_bars", "factor_list", "narrative_list"),
+         ("current_situation", "market_status"),
+         ("risks", "weaknesses", "opportunities"), optional=True),
+    Slot("keywords", "반복 언급", "여러 출처가 공통으로 짚은 표현",
+         ("recurring_terms",), (), (), optional=True),
+    # Optional because 현황파악 is a "what is happening" question. Four of the
+    # five 현황 questions we tested want no recommendation at all, and a
+    # 권고 조치 card appearing under an external-audience market report was
+    # answering something nobody asked.
     Slot("response", "대응 방향", "그래서 무엇을 해야 하는가",
          ("action_list", "narrative_list"), ("recommended_action", "near_term_outlook"),
-         ("recommended_actions",)),
+         ("recommended_actions",), optional=True),
 )
 
 _ISSUE_RESPONSE: tuple[Slot, ...] = (
@@ -130,9 +155,10 @@ _ISSUE_RESPONSE: tuple[Slot, ...] = (
     Slot("problem", "문제", "무엇이 문제인가",
          ("matrix", "narrative_list"), ("issue", "problem")),
     Slot("cause", "원인", "왜 그렇게 되었는가",
-         ("cause_tree", "cause_map", "bar", "narrative_list"), ("root_cause", "issue"), ("risks",)),
+         ("cause_tree", "cause_map", "bar", "item_bar", "narrative_list"),
+         ("root_cause", "issue"), ("risks",)),
     Slot("impact", "영향", "그 결과 무엇이 달라지는가",
-         ("chart", "bar", "metric_comparison", "narrative_list"), ("impact",),
+         ("chart", "bar", "item_bar", "metric_comparison", "narrative_list"), ("impact",),
          ("business_impacts",)),
     Slot("options", "선택지", "택할 수 있는 길들의 비교",
          ("matrix", "table", "narrative_list"), ("risk_and_opportunity", "impact")),
@@ -143,9 +169,9 @@ _ISSUE_RESPONSE: tuple[Slot, ...] = (
 
 _FUTURE_BUSINESS: tuple[Slot, ...] = (
     Slot("market_shift", "시장 변화", "시장이 어떻게 바뀌고 있는가",
-         ("chart", "bar", "timeline", "narrative_list"), ("trend", "market_status")),
+         ("chart", "bar", "item_bar", "timeline", "narrative_list"), ("trend", "market_status")),
     Slot("opportunity", "기회", "어디에 기회가 있는가",
-         ("matrix", "bar", "narrative_list"), ("opportunity",)),
+         ("matrix", "bar", "item_bar", "narrative_list"), ("opportunity",)),
     # No `sections`: there is no planned section about required capability, and
     # borrowing investment_signal's key_points put "디지털 광고 시장에서의
     # 존재감을 확대하는 기회" on screen under the heading "필요 역량" - a
@@ -162,9 +188,10 @@ _FUTURE_BUSINESS: tuple[Slot, ...] = (
 
 _ROOT_CAUSE: tuple[Slot, ...] = (
     Slot("problem", "Problem", "어떤 현상이 관찰되는가",
-         ("chart", "bar", "narrative_list"), ("problem", "issue")),
+         ("chart", "bar", "item_bar", "narrative_list"), ("problem", "issue")),
     Slot("cause", "Cause", "그 현상의 원인 구조",
-         ("cause_tree", "cause_map", "bar", "table", "narrative_list"), ("root_cause",)),
+         ("cause_tree", "cause_map", "bar", "item_bar", "table", "narrative_list"),
+         ("root_cause",)),
     # Only drawable when the model scored the claims and said why; otherwise
     # the slot resolves to nothing and the skeleton is three slots as before.
     Slot("drivers", "Drivers", "어느 원인이 더 크게 작용하는가",
@@ -195,6 +222,7 @@ PURPOSE_HEADLINE_STYLE: dict[str, str] = {
 # --- can this data support this block? ----------------------------------
 
 _MIN_KPI_GRID_POINTS = 2
+_MIN_FACTOR_ITEMS = 3
 
 
 def _reference_year(synthesis: Any) -> int | None:
@@ -214,7 +242,12 @@ def _availability() -> dict[str, Callable[[Any, list[str]], bool]]:
     """
     return {
         "chart": lambda synthesis, items: block_shapes.has_timeseries(synthesis.metric_series),
-        "bar": lambda synthesis, items: bool(block_shapes.bar_metric_groups(synthesis.metric_series)),
+        # Two block ids over one renderer: `bar` is a movement between two
+        # points in time, `item_bar` is a ranking across items. They read the
+        # same list but answer different questions, so a slot asking about
+        # direction can't claim the ranking bars and leave 순위 empty.
+        "bar": lambda synthesis, items: bool(block_shapes.time_bar_groups(synthesis.metric_series)),
+        "item_bar": lambda synthesis, items: bool(block_shapes.item_bar_groups(synthesis.metric_series)),
         "metric_comparison": lambda synthesis, items: bool(
             block_shapes.metric_comparison_groups(synthesis.metric_series)
         ),
@@ -245,6 +278,12 @@ def _availability() -> dict[str, Callable[[Any, list[str]], bool]]:
             synthesis.risks, synthesis.business_impacts, synthesis.recommended_actions
         ),
         "action_list": lambda synthesis, items: bool(synthesis.recommended_actions),
+        # A list is worth its own card only when it is long enough to be a
+        # list; two bullets are a sentence and belong in the prose fallback.
+        "factor_list": lambda synthesis, items: len(items) >= _MIN_FACTOR_ITEMS,
+        "recurring_terms": lambda synthesis, items: block_shapes.has_recurring_terms(
+            getattr(synthesis, "grounded_claims", []) or []
+        ),
         "narrative_list": lambda synthesis, items: bool(items),
     }
 

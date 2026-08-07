@@ -38,6 +38,8 @@ from common.block_shapes import (  # noqa: F401
     RADAR_MIN_AXES as _RADAR_MIN_AXES,
     _format_number,
     bar_metric_groups,
+    item_bar_groups,
+    time_bar_groups,
     clean_citation,
     has_bar_metrics,
     has_cause_map,
@@ -48,6 +50,8 @@ from common.block_shapes import (  # noqa: F401
     has_timeseries,
     cause_tree,
     has_cause_tree,
+    has_recurring_terms,
+    recurring_terms,
     has_importance_ranking,
     importance_ranked,
     metric_axis_labels,
@@ -673,6 +677,59 @@ def render_action_list(rows: list[tuple[str, str, str | None]]) -> None:
     )
 
 
+
+
+def render_factor_list(items: list[tuple[str, str | None]]) -> None:
+    """A list of factors, as a list - `items` = (text, evidence_url).
+
+    Separate from the narrative fallback for one reason: that card shows the
+    first four bullets of whatever a section happens to hold, because it is a
+    summary. A question that asks *which factors* is asking for the set, so
+    truncating it to four answers a different question. Nothing is ranked -
+    the evidence stated these, not an order between them; where the analyzer
+    did score them, `driver_bars` is picked ahead of this block instead.
+    """
+    if not items:
+        return
+    rows = "".join(
+        f'<li><span>{escape(clean_citation(text))}</span>'
+        + (
+            f'<a class="ts-inline-evidence" href="{escape(url)}" target="_blank" '
+            f'title="근거 원문 열기">↗</a>' if url else ""
+        )
+        + "</li>"
+        for text, url in items
+    )
+    st.markdown(
+        f'<ul class="ts-factor-list">{rows}</ul>'
+        f'<p class="ts-factor-note">근거에서 확인된 {len(items)}개 항목이며, 순서는 우열이 아닙니다.</p>',
+        unsafe_allow_html=True,
+    )
+
+
+def render_recurring_terms(grounded_claims: list[Any]) -> None:
+    """Words several separate documents used, with how many used each.
+
+    A count of the evidence, not a reading of it. The number beside a term is
+    the number of distinct documents it appeared in, and clicking through
+    lands on a real claim containing it - so a reader can check the word
+    rather than take the list on faith. No weighting, no sentiment, no
+    inference about why a word recurs.
+    """
+    terms = recurring_terms(grounded_claims or [])
+    if not terms:
+        return
+    chips = "".join(
+        f'<span class="ts-term" title="{escape(clean_citation(claim.claim))}">'
+        f'{escape(term)}<b>{count}</b></span>'
+        for term, count, claim in terms
+    )
+    st.markdown(
+        f'<div class="ts-terms">{chips}</div>'
+        '<p class="ts-factor-note">숫자는 그 표현이 등장한 <b>서로 다른 출처 문서의 수</b>입니다. '
+        '빈도만 센 것이며 중요도 판단이 아닙니다.</p>',
+        unsafe_allow_html=True,
+    )
 
 
 def _claim_link(claim: Any) -> str:

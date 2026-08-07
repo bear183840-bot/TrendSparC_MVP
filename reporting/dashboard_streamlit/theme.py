@@ -395,6 +395,14 @@ def dashboard_css(dark: bool, accent_theme: str = "orange") -> str:
         width:14px; border-radius:0; }}
     .ts-kpi-forecast {{ font-size:0.62em; vertical-align:middle; padding:1px 5px; margin-left:4px;
         border:1px solid var(--ts-border); border-radius:999px; color:var(--ts-muted); }}
+    .ts-factor-list {{ margin:0; padding-left:18px; }}
+    .ts-factor-list li {{ margin:5px 0; display:flex; gap:6px; align-items:baseline;
+        font-size:0.9rem; }}
+    .ts-factor-note {{ margin:8px 0 0; font-size:0.74rem; color:var(--ts-muted); }}
+    .ts-terms {{ display:flex; flex-wrap:wrap; gap:6px; }}
+    .ts-term {{ display:inline-flex; align-items:center; gap:5px; padding:3px 9px;
+        border:1px solid var(--ts-border); border-radius:999px; font-size:0.82rem; }}
+    .ts-term b {{ color:var(--ts-accent); font-variant-numeric:tabular-nums; }}
     .ts-cause-tree, .ts-drivers {{ margin-top:14px; }}
     .ts-cause-branch {{ border-left:2px solid var(--ts-accent); padding:2px 0 2px 12px;
         margin-bottom:12px; }}

@@ -46,7 +46,8 @@ def _resolve(fixture_name: str, mutate=None):
 
 def test_every_purpose_has_the_agreed_slot_order():
     assert [slot.slot_id for slot in PURPOSE_SLOTS["current_status"]] == [
-        "summary", "market", "metrics", "competitor", "response",
+        "summary", "ranking", "market", "metrics", "competitor", "factors",
+        "keywords", "response",
     ]
     assert [slot.slot_id for slot in PURPOSE_SLOTS["issue_response"]] == [
         "problem", "cause", "impact", "options", "recommendation",
@@ -314,7 +315,9 @@ def test_bare_four_digit_years_still_count_as_a_trend():
 def test_brand_marketing_fills_every_future_business_slot():
     by_id, resolved = _resolve("brand_marketing")
 
-    assert by_id["market_shift"].block_type == "bar"
+    # An age-bracket comparison is an item ranking, not a movement in time -
+    # same renderer, but the block id now says which question it answers.
+    assert by_id["market_shift"].block_type == "item_bar"
     assert by_id["capability"].block_type == "table"
     # strengths is empty here, so the SWOT has 3 of 4 quadrants - still enough.
     assert by_id["opportunity"].block_type == "matrix"
@@ -382,7 +385,7 @@ def test_unrelated_comparison_axes_do_not_share_a_table():
 def test_jungang_fixture_fills_every_issue_response_slot():
     by_id, resolved = _resolve("jungang_group_crisis")
 
-    assert by_id["impact"].block_type == "bar"
+    assert by_id["impact"].block_type == "item_bar"
     assert by_id["options"].block_type == "table"
     assert by_id["recommendation"].block_type == "action_list"
     assert not any(slot.is_last_resort for slot in resolved)
