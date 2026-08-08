@@ -135,6 +135,42 @@ def _missing_analysis_needs(
     return [need for need in information_needs if need not in covered]
 
 
+def _evidence_needs(result: "PipelineResult") -> list[str]:
+    """Broad source categories + the question's concrete deliverables.
+
+    The former keeps registry selection working; the latter stops a document
+    about the right industry but the wrong question from satisfying every
+    requested output.  Prefer the persisted search context on resume so a run
+    is evaluated against the same contract it was collected with.
+    """
+    persisted = (
+        result.source_plan.search_context.information_needs
+        if result.source_plan and result.source_plan.search_context else []
+    )
+    broad = result.entities.information_needs if result.entities else []
+    return list(dict.fromkeys([*persisted, *broad, *_answer_needs(result)]))
+
+
+def _answer_needs(result: "PipelineResult") -> list[str]:
+    """Only concrete question deliverables, excluding registry categories."""
+    if result.entities:
+        explicit = list(dict.fromkeys(result.entities.answer_requirements))
+        if explicit:
+            return explicit
+    if result.source_plan and result.source_plan.search_context:
+        broad = set(result.source_plan.information_needs)
+        persisted_explicit = [
+            need for need in result.source_plan.search_context.information_needs
+            if need not in broad
+        ]
+        if persisted_explicit:
+            return persisted_explicit
+    # Full results created before this contract was added have neither field.
+    # Preserve their original question as one conservative requirement so a
+    # resume run gains the new guard instead of silently retaining old rules.
+    return [result.question.strip()] if result.question and result.question.strip() else []
+
+
 class PipelineResult(BaseModel):
     request_id: str
     # Persist the user's actual question with the result.  The archive also
@@ -347,6 +383,10 @@ def _run_pipeline_stages(
     try:
         _maybe_force_fail("source_planner")
         search_terms = build_search_terms(result.entities, result.sector_route.matched_profile)
+        evidence_needs = list(dict.fromkeys([
+            *result.entities.information_needs,
+            *result.entities.answer_requirements,
+        ]))
         result.source_plan = plan_sources(
             request.request_id,
             sector_id,
@@ -365,7 +405,7 @@ def _run_pipeline_stages(
                     request.question, result.entities.perspective
                 ),
                 report_purpose_id=result.report_purpose.purpose_id,
-                information_needs=result.entities.information_needs,
+                information_needs=evidence_needs,
                 target_block_shapes=[
                     *target_block_shapes(result.block_priority_plan),
                     *coverage_hints(result.question_coverage),
@@ -412,7 +452,7 @@ def _run_pipeline_stages(
                 args = (
                     [*documents, *attachment_documents],
                     question_with_context,
-                    result.source_plan.information_needs,
+                    _evidence_needs(result),
                     [*target_block_shapes(result.block_priority_plan),
                      *coverage_hints(result.question_coverage or QuestionCoverageRequirement())],
                 )
@@ -536,9 +576,10 @@ def _run_pipeline_stages(
                 structural_gaps = assess_question_coverage(
                     usable, result.question_coverage or QuestionCoverageRequirement()
                 )
+                answer_gaps = _missing_analysis_needs(usable, _answer_needs(result))
 
                 while (
-                    ((target > 0 and len(usable) < target) or structural_gaps)
+                    ((target > 0 and len(usable) < target) or structural_gaps or answer_gaps)
                     and recollection_attempt < max_recollections
                 ):
                     recollection_attempt += 1
@@ -557,7 +598,7 @@ def _run_pipeline_stages(
                     )
                     missing_needs = _missing_analysis_needs(
                         usable,
-                        result.source_plan.information_needs,
+                        _evidence_needs(result),
                     )
                     retry_context = previous_context.model_copy(
                         update={
@@ -570,6 +611,7 @@ def _run_pipeline_stages(
                                     f"Analyzer retained {len(usable)} usable documents; "
                                     f"collect toward the target of {target} usable documents "
                                     f"with replacement evidence for missing needs: {missing_needs}; "
+                                    f"missing explicit answer requirements: {answer_gaps}; "
                                     f"missing question axes: {structural_gaps}."
                                 ),
                             ],
@@ -619,7 +661,7 @@ def _run_pipeline_stages(
                         "analyzer",
                         retry_validated,
                         question_with_context,
-                        retry_plan.information_needs,
+                        _evidence_needs(result),
                         [*target_block_shapes(result.block_priority_plan),
                          *coverage_hints(result.question_coverage or QuestionCoverageRequirement())],
                     )
@@ -636,6 +678,7 @@ def _run_pipeline_stages(
                     structural_gaps = assess_question_coverage(
                         usable, result.question_coverage or QuestionCoverageRequirement()
                     )
+                    answer_gaps = _missing_analysis_needs(usable, _answer_needs(result))
                     documents.extend(retry_validated)
                     result.source_plan = retry_plan
 
@@ -822,7 +865,7 @@ def _run_report_stages(
         # report_generator._missing_needs_limitation).
         still_missing = _missing_analysis_needs(
             result.document_analyses,
-            result.source_plan.information_needs if result.source_plan else [],
+            _evidence_needs(result),
         )
         still_missing = list(dict.fromkeys([*still_missing, *result.question_coverage_gaps]))
         # A fixture run starts at report_planner, so the entity stage never
@@ -949,7 +992,7 @@ def run_pipeline_from_documents(
         _maybe_force_fail("sector_adapter.analyzer")
         analyses = _call_sector_adapter_stage(
             result.sector_route, "analyzer", documents, question,
-            result.source_plan.information_needs if result.source_plan else [],
+            _evidence_needs(result),
             [*target_block_shapes(result.block_priority_plan),
              *coverage_hints(result.question_coverage)],
         )

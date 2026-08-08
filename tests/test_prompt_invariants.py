@@ -13,6 +13,7 @@ import pytest
 
 from common.content_quality_validator import (
     COMPARISON_COMPLETENESS_INSTRUCTION,
+    PARALLEL_STRUCTURE_COMPLETENESS_INSTRUCTION,
     SWOT_COMPLETENESS_INSTRUCTION,
     TABLE_COMPLETENESS_INSTRUCTION,
 )
@@ -60,6 +61,12 @@ def test_comparison_instruction_asks_for_every_mentioned_item():
     assert "1위" in COMPARISON_COMPLETENESS_INSTRUCTION
 
 
+def test_parallel_structure_instruction_preserves_every_subject():
+    assert "명시적인 우열 표현이 없어도" in PARALLEL_STRUCTURE_COMPLETENESS_INSTRUCTION
+    assert "comparison_points" in PARALLEL_STRUCTURE_COMPLETENESS_INSTRUCTION
+    assert "일부 항목만" in PARALLEL_STRUCTURE_COMPLETENESS_INSTRUCTION
+
+
 @pytest.mark.parametrize("path", _ANALYZERS, ids=lambda p: p.parts[-4])
 def test_every_sector_analyzer_gets_both_completeness_instructions(path):
     """Both rules, in every analyzer that calls a model.
@@ -80,6 +87,7 @@ def test_every_sector_analyzer_gets_both_completeness_instructions(path):
         "the analyzer sends a sector prompt but not the SWOT completeness rule"
     )
     assert "COMPARISON_COMPLETENESS_INSTRUCTION" in text
+    assert "PARALLEL_STRUCTURE_COMPLETENESS_INSTRUCTION" in text
 
 
 @pytest.mark.parametrize("path", _ANALYZERS, ids=lambda p: p.parts[-4])
@@ -148,6 +156,7 @@ def test_entity_runtime_prompt_is_compact_without_losing_search_guards():
     assert 'sector_id="general"' in _COMPACT_SYSTEM_PROMPT
     assert "3-6 short canonical topic terms" in _COMPACT_SYSTEM_PROMPT
     assert "both Korean and English forms" in _COMPACT_SYSTEM_PROMPT
+    assert "answer_requirements" in _COMPACT_SYSTEM_PROMPT
 
 
 def test_entity_routing_choices_do_not_send_downstream_analysis_dimensions():

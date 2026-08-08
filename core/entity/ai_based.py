@@ -262,6 +262,11 @@ not make a market question company_update.
 - information_needs selects 1-4 from {information_need_categories}, describing needed
 evidence: financial results; customers/demand; product/technology; operations/supply;
 strategy/investment; competition; regulation/risk; or user sentiment.
+- answer_requirements: split only the deliverables explicitly requested by the user
+into 1-5 short, independently verifiable evidence requirements. Preserve every stated
+axis and relationship (time range, compared groups, target segment, cause, effect,
+recommendation, or forecast). Do not add a desirable output the user did not ask for,
+and do not replace concrete requirements with broad labels such as market analysis.
 
 Search fields:
 - organizations: named or clearly implied companies, agencies, institutions.
@@ -322,11 +327,17 @@ def _schema(sector_ids: list[str]) -> dict:
                 "minItems": 0,
                 "maxItems": 4,
             },
+            "answer_requirements": {
+                "type": "array",
+                "items": {"type": "string", "minLength": 2, "maxLength": 180},
+                "minItems": 0,
+                "maxItems": 5,
+            },
         },
         "required": [
             "response_mode", "direct_answer", "sector_id", "routing_confidence",
             "primary_intent", "perspective", "organizations", "technologies",
-            "keywords", "information_needs",
+            "keywords", "information_needs", "answer_requirements",
         ],
         "additionalProperties": False,
     }
@@ -480,6 +491,9 @@ def extract_entities_ai(
                 if entity
             )
         ]
+        answer_requirements = list(dict.fromkeys(data.get("answer_requirements", [])))
+        if not answer_requirements and data.get("response_mode", "report") == "report":
+            answer_requirements = [request.question.strip()]
         result = EntityExtractionResult(
             request_id=request.request_id,
             primary_intent=data["primary_intent"],
@@ -488,6 +502,7 @@ def extract_entities_ai(
             technologies=list(dict.fromkeys(technologies)),
             keywords=list(dict.fromkeys(clean_keywords)),
             information_needs=list(dict.fromkeys(data.get("information_needs", []))),
+            answer_requirements=answer_requirements,
             response_mode=data.get("response_mode", "report"),
             direct_answer=data.get("direct_answer"),
             sector_id=selected_sector_id,
@@ -509,6 +524,7 @@ def extract_entities_ai(
                 "technologies": len(result.technologies),
                 "keywords": len(result.keywords),
                 "information_needs": len(result.information_needs),
+                "answer_requirements": len(result.answer_requirements),
             },
         )
         return result

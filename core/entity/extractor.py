@@ -114,4 +114,9 @@ def extract_entities(request: UserRequest) -> EntityExtractionResult:
         organizations=organizations,
         technologies=technologies,
         keywords=keywords,
+        # The no-AI fallback cannot safely infer how many sub-questions the
+        # user intended.  Keeping the complete original ask as one requirement
+        # is conservative and still prevents downstream stages from treating a
+        # merely adjacent document as a complete answer.
+        answer_requirements=[question.strip()] if question.strip() else [],
     )

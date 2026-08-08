@@ -19,6 +19,7 @@ from openai import OpenAI
 from common.ai_client import openai_client_kwargs
 from common.content_quality_validator import (
     COMPARISON_COMPLETENESS_INSTRUCTION,
+    PARALLEL_STRUCTURE_COMPLETENESS_INSTRUCTION,
     SWOT_COMPLETENESS_INSTRUCTION,
     TABLE_COMPLETENESS_INSTRUCTION,
 )
@@ -165,6 +166,7 @@ def _analyze_document(client: OpenAI, system_prompt: str, document: SourceDocume
         "실제 주제가 질문과 무관한 경우(키워드만 겹치고 본문 내용은 다른 경우)에만 false로 판단하세요. "
         f"{SWOT_COMPLETENESS_INSTRUCTION} "
         f"{COMPARISON_COMPLETENESS_INSTRUCTION} "
+        f"{PARALLEL_STRUCTURE_COMPLETENESS_INSTRUCTION} "
                 f"{TABLE_COMPLETENESS_INSTRUCTION} "
         "문서에 수치와 시점이 함께 명시되어 있으면(예: '2023년 매출 500억원') "
         "metric_points에 그대로 추출하고, 두 대상을 비교하는 서술이 있으면(예: 'A사가 B사보다 저렴하다') "

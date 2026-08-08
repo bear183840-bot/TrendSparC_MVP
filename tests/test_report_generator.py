@@ -406,6 +406,52 @@ def test_generate_report_openai_path_keeps_every_recommended_action_reachable(mo
     assert expected_doc_ids <= reachable_doc_ids
 
 
+def test_generate_report_drops_writer_actions_absent_from_synthesis(monkeypatch):
+    import json
+    import openai
+
+    synthesis = _synthesis().model_copy(update={"recommended_actions": []})
+    plan = _issue_response_plan(synthesis, "req_no_invented_action")
+
+    class FakeResponses:
+        def create(self, **kwargs):
+            sections = [
+                {
+                    "section_id": section_id,
+                    "title": section_id,
+                    "summary": "근거 요약",
+                    "key_points": [],
+                    "evidence": [],
+                    "risks": [],
+                    "opportunities": [],
+                    "actions": ["새 전략을 추진한다 [doc_id=doc:1]"],
+                    "monitoring_indicators": [],
+                    "confidence": "high",
+                }
+                for section_id in plan.sections
+            ]
+            payload = {
+                "title": "보고서",
+                "executive_summary": "요약",
+                "sections": sections,
+                "limitations": [],
+            }
+            return type(
+                "Response", (),
+                {"output_text": json.dumps(payload, ensure_ascii=False)},
+            )()
+
+    class FakeOpenAI:
+        def __init__(self, **kwargs):
+            self.responses = FakeResponses()
+
+    monkeypatch.setenv("TRENDSPARC_REPORT_GENERATOR_API_KEY", "test-key")
+    monkeypatch.setattr(openai, "OpenAI", FakeOpenAI)
+
+    report = generate_report("무엇을 해야 하나?", synthesis, plan, "executive")
+    assert all(section.actions == [] for section in report.sections)
+
+
 def test_fallback_report_discloses_missing_information_needs_honestly(monkeypatch):
     monkeypatch.delenv("TRENDSPARC_REPORT_GENERATOR_API_KEY", raising=False)
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)

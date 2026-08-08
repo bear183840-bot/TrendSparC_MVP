@@ -259,6 +259,31 @@ def _ensure_all_actions_reachable(
     ]
 
 
+def _remove_unsupported_section_actions(
+    sections: list[GeneratedReportSection], synthesis: TrendSynthesis
+) -> list[GeneratedReportSection]:
+    """A writer may paraphrase an analyzer action, but may not create one.
+
+    Provenance is the contract: a section action is retained only when its
+    ``[doc_id=...]`` belongs to an analyzer-verified recommended action.  This
+    is purpose/topic agnostic and closes the path where prose generation
+    silently became an ungrounded strategy recommender.
+    """
+    allowed_doc_ids = {
+        doc_id for action in synthesis.recommended_actions
+        if (doc_id := _doc_id(action)) is not None
+    }
+    return [
+        section.model_copy(update={
+            "actions": [
+                action for action in section.actions
+                if (doc_id := _doc_id(action)) is not None and doc_id in allowed_doc_ids
+            ]
+        })
+        for section in sections
+    ]
+
+
 # Analyzers label each key point by what kind of signal it is - the sector
 # prompts ask for "시장 변화", "전략 영향", "Risk", "Opportunity", "Action"
 # prefixes. Sections that would otherwise all receive the same flat list can
@@ -1319,6 +1344,7 @@ def generate_report(
             _repair_section(returned_by_id.get(section_id, fallback_by_id[section_id]), fallback_by_id[section_id])
             for section_id in report_plan.sections
         ]
+        sections = _remove_unsupported_section_actions(sections, synthesis)
         sections = _ensure_all_actions_reachable(sections, synthesis)
         limitations = list(
             dict.fromkeys(
