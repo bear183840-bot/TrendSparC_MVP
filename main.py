@@ -140,6 +140,15 @@ def main() -> int:
         help="save raw collector documents as Markdown under DIR/<request_id>/",
     )
     parser.add_argument(
+        "--save-result",
+        type=Path,
+        default=None,
+        metavar="PATH",
+        help="write the full PipelineResult JSON to PATH so the dashboard can open the "
+             "same run (streamlit: 저장된 실행 결과 열기). storage/requests/ keeps only a "
+             "summary, which is not enough to redraw the report.",
+    )
+    parser.add_argument(
         "--summary-only",
         action="store_true",
         help="print a compact execution summary instead of the full PipelineResult JSON",
@@ -174,6 +183,13 @@ def main() -> int:
     if args.save_source_documents is not None:
         saved_dir = _save_source_documents(result, args.save_source_documents)
         print(f"[source_documents] saved to {saved_dir.resolve()}", file=sys.stderr)
+
+    if args.save_result is not None:
+        args.save_result.parent.mkdir(parents=True, exist_ok=True)
+        args.save_result.write_text(
+            result.model_dump_json(indent=2, exclude_none=False), encoding="utf-8"
+        )
+        print(f"[save-result] {args.save_result.resolve()}", file=sys.stderr)
 
     if args.summary_only:
         print(

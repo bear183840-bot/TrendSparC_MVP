@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import base64
 import io
+import json
 import re
 import sys
 import textwrap
@@ -30,7 +31,7 @@ load_dotenv()
 from audience.contracts import list_audience_ids
 from common.contracts import Attachment, UserRequest
 from common.errors import StageStatus
-from core.request_pipeline.pipeline import run_pipeline
+from core.request_pipeline.pipeline import PipelineResult, run_pipeline
 from core.sector_router.router import scan_sectors
 from reporting.dashboard_streamlit.collection_progress_view import _STATUS_LABELS, render_execution_record
 from reporting.dashboard_streamlit.generic_dashboard import render_generic_dashboard
@@ -78,15 +79,35 @@ AUDIENCE_LABELS = {
 
 st.set_page_config(page_title="TrendSparC", page_icon="◼", layout="wide", initial_sidebar_state="expanded")
 
-APP_STATE_VERSION = 7
+APP_STATE_VERSION = 8  # 8: orange is the default accent
 if st.session_state.get("app_state_version") != APP_STATE_VERSION:
     st.session_state.result = None
     st.session_state.submitted_question = None
     st.session_state.recent_questions = []
     st.session_state.dark_mode = False
-    st.session_state.accent_theme = "burgundy"
+    # Orange is the product's own accent - it is what the delivered design is
+    # drawn in and what every block's tokens are tuned against. Burgundy is
+    # the alternate, reachable from the toggle.
+    st.session_state.accent_theme = "orange"
     st.session_state.terminal_log = None
     st.session_state.app_state_version = APP_STATE_VERSION
+
+
+
+def _archived_question(result: "PipelineResult") -> str:
+    """The question a saved run was asked, read back from its archive record.
+
+    PipelineResult doesn't carry the question text - every stage that needs it
+    receives it as an argument - so a run opened from a file would otherwise
+    lose its own title. The archive under storage/requests/ does keep it.
+    """
+    record = Path("storage/requests") / f"{result.request_id}.json"
+    if record.exists():
+        try:
+            return json.loads(record.read_text(encoding="utf-8")).get("question") or "분석 결과"
+        except (OSError, ValueError):
+            pass
+    return "분석 결과"
 
 
 def _html(markup: str) -> None:
@@ -132,10 +153,10 @@ if result is None:
     )
     theme_col, accent_col, dark_col = st.columns([0.88, 0.06, 0.06], vertical_alignment="center")
     with accent_col, st.container(key="landing_toggle_accent"):
-        is_orange = st.toggle(
-            "오렌지", value=(st.session_state.accent_theme == "orange"), label_visibility="collapsed"
+        is_burgundy = st.toggle(
+            "버건디", value=(st.session_state.accent_theme == "burgundy"), label_visibility="collapsed"
         )
-        st.session_state.accent_theme = "orange" if is_orange else "burgundy"
+        st.session_state.accent_theme = "burgundy" if is_burgundy else "orange"
     with dark_col, st.container(key="landing_toggle_dark"):
         st.session_state.dark_mode = st.toggle("다크", value=st.session_state.dark_mode, label_visibility="collapsed")
 else:
@@ -151,7 +172,7 @@ else:
         st.session_state.dark_mode = st.toggle("다크 모드", value=st.session_state.dark_mode)
         st.session_state.accent_theme = (
             "burgundy" if st.toggle("버건디 테마", value=(st.session_state.accent_theme == "burgundy")) else "orange"
-        )
+        )  # off = orange, the default
         recent = st.session_state.recent_questions[-4:]
         recent_html = '<div class="ts-recent"><b>Recent Analyses</b>'
         for index, item in enumerate(reversed(recent)):
@@ -220,6 +241,27 @@ if result is None:
         _, submit_col = st.columns([0.78, 0.22])
         with submit_col:
             submitted = st.form_submit_button("Start!", use_container_width=True)
+
+    # Open a run that was executed elsewhere (main.py --save-result). The
+    # archive under storage/requests/ keeps only a summary of each run, which
+    # is enough to answer "what happened across many runs" but not enough to
+    # redraw one - so a full PipelineResult JSON is what this takes. It means
+    # a live run can be executed once, on the command line where its stderr
+    # is readable, and still be reviewed here in its finished form.
+    with st.expander("저장된 실행 결과 열기"):
+        uploaded_result = st.file_uploader(
+            "PipelineResult JSON", type="json", key="result_upload",
+            label_visibility="collapsed",
+        )
+        if uploaded_result is not None:
+            try:
+                loaded = PipelineResult.model_validate_json(uploaded_result.getvalue())
+            except Exception as exc:  # noqa: BLE001
+                st.error(f"이 파일은 실행 결과로 읽히지 않습니다: {exc}")
+            else:
+                st.session_state.result = loaded
+                st.session_state.submitted_question = _archived_question(loaded)
+                st.rerun()
 
     if submitted:
         if not question.strip():
