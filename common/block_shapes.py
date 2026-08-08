@@ -2,7 +2,7 @@
 
 Pure predicates over the synthesis contracts - no Streamlit, no HTML. They
 answer "is this drawable as X", never "should we draw X here", which is the
-slot templates' job (reporting/dashboard_streamlit/purpose_slots.py).
+slot templates' job (common/purpose_slots.py).
 
 These used to live in components.py, next to the renderers that call them.
 That made every consumer of a data question import the whole rendering layer

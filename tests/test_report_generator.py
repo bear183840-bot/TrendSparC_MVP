@@ -753,3 +753,55 @@ def test_repair_is_never_called_when_nothing_failed_verification(monkeypatch):
     report = generate_report("가격은?", synthesis, plan, "external")
 
     assert report.generation_mode == "openai"
+
+
+# --- citation repair must not launder an unsupported figure --------------
+
+
+def test_a_repaired_metric_needs_its_own_number_in_the_sentence_it_cites():
+    """The default check compares a figure's digits against the digits of the
+    *whole* corpus. A repaired item passes that for free - repair substitutes
+    a sentence taken from that same corpus - so the test degenerates into
+    "the chosen sentence contains a number". Live-reproduced before the fix:
+    999만명, present nowhere in the evidence, was rejected and then accepted
+    once its source_sentence was swapped for a real sentence about 682만명."""
+    from common.contracts import TrendSynthesis
+    from core.report_generator.generator import _metric_points_with_failures
+
+    synthesis = TrendSynthesis(
+        request_id="r", sector_id="sk_broadband",
+        evidence=["2025년 2분기 IPTV 가입자는 682만명이었다."],
+    )
+    laundered = {
+        "label": "가입자", "period": "2025년", "value": 999, "unit": "만명",
+        # A real corpus sentence - just not one that states this figure.
+        "source_sentence": "2025년 2분기 IPTV 가입자는 682만명이었다.",
+    }
+
+    verified, failures = _metric_points_with_failures(
+        [laundered], synthesis, set(), value_must_be_in_own_sentence=True
+    )
+
+    assert verified == []
+    assert len(failures) == 1
+
+
+def test_a_repaired_metric_whose_figure_is_in_its_sentence_survives():
+    from common.contracts import TrendSynthesis
+    from core.report_generator.generator import _metric_points_with_failures
+
+    synthesis = TrendSynthesis(
+        request_id="r", sector_id="sk_broadband",
+        evidence=["2025년 2분기 IPTV 가입자는 682만명이었다."],
+    )
+    genuine = {
+        "label": "가입자", "period": "2025년 2분기", "value": 682, "unit": "만명",
+        "source_sentence": "2025년 2분기 IPTV 가입자는 682만명이었다.",
+    }
+
+    verified, failures = _metric_points_with_failures(
+        [genuine], synthesis, set(), value_must_be_in_own_sentence=True
+    )
+
+    assert [point.value for point in verified] == [682.0]
+    assert failures == []

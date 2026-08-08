@@ -957,10 +957,14 @@ def _run_search_harness_result(
                 # possible, even though the system prompt tells the model to
                 # prioritize exactly that gap. One more round is spent
                 # chasing it only when the model actually proposed a query
-                # for it (an untried query, not an open-ended retry) - still
-                # bounded by max_rounds/max_total_scrape_calls like every
-                # other round, and this round's own `if sufficient: break`
-                # still applies on the next iteration regardless of outcome.
+                # for it. Note what this does *not* bound: if the next round
+                # still reports a missing shape and still proposes an untried
+                # query, this test passes again, so a run that used to stop
+                # at round 1 can now use all of max_rounds. The real bounds
+                # are max_rounds / max_total_scrape_calls and the untried-query
+                # requirement below - not this branch - so a block-shape gap
+                # the model keeps proposing queries for does cost extra
+                # rounds. That is the intended trade; it is not free.
                 if not (missing_block_shapes and next_queries):
                     break
         else:

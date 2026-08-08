@@ -316,7 +316,8 @@ def normalize_metric_label(label: str) -> str:
 
 
 def _metric_points_with_failures(
-    raw_points: list[dict], synthesis: TrendSynthesis, foreign_names: set[str]
+    raw_points: list[dict], synthesis: TrendSynthesis, foreign_names: set[str],
+    *, value_must_be_in_own_sentence: bool = False,
 ) -> tuple[list[MetricPoint], list[dict]]:
     """Split candidate figures into verified points and repair-eligible failures.
 
@@ -334,6 +335,16 @@ def _metric_points_with_failures(
     before. Only "the stated digits don't show up anywhere in the corpus" is
     treated as repair-eligible and returned in the second list, tagged with a
     stable item_id, for _repair_failed_extraction_quotes to attempt.
+
+    `value_must_be_in_own_sentence` tightens the check to "this figure appears
+    in the sentence being cited for it", and the repair path must set it.
+    The default check compares against the digits of the *whole* corpus, which
+    a repaired item passes for free: repair substitutes a sentence taken from
+    that same corpus, so any sentence containing a digit satisfies it and the
+    test degenerates into "the chosen sentence has a number in it". Live-
+    reproduced: a value of 999만명 present nowhere in the evidence was
+    rejected, then accepted once its source_sentence was swapped for a real
+    one about 682만명.
     """
     corpus = [*synthesis.evidence, *synthesis.key_points, *synthesis.highlights]
     corpus_digits: set[str] = set()
@@ -348,8 +359,14 @@ def _metric_points_with_failures(
             continue
         if any(name in label for name in foreign_names):
             continue
-        stated = _digit_runs(raw.get("source_sentence", "")) | _digit_runs(str(raw.get("value", "")))
-        if not stated & corpus_digits:
+        sentence = raw.get("source_sentence", "")
+        if value_must_be_in_own_sentence:
+            supported = bool(_digit_runs(str(raw.get("value", ""))) & _digit_runs(sentence))
+        else:
+            supported = bool(
+                (_digit_runs(sentence) | _digit_runs(str(raw.get("value", "")))) & corpus_digits
+            )
+        if not supported:
             failures.append({"item_id": f"m{index}", "kind": "metric", "raw": raw})
             continue
         verified.append(
@@ -1128,8 +1145,13 @@ def generate_report(
                     if failure["kind"] == kind and failure["item_id"] in repaired_sentences
                 ]
 
+            # Strict here, not corpus-wide: see the flag's docstring - the
+            # sentence repair just chose is by construction part of the
+            # corpus, so the default check would wave every repaired figure
+            # through on the strength of some other sentence's digits.
             extra_metrics, _ = _metric_points_with_failures(
-                _patched(metric_failures, "metric"), synthesis, foreign_names
+                _patched(metric_failures, "metric"), synthesis, foreign_names,
+                value_must_be_in_own_sentence=True,
             )
             extra_comparisons, _ = _comparison_points_with_failures(
                 _patched(comparison_failures, "comparison"), synthesis

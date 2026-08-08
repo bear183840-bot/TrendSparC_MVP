@@ -88,7 +88,7 @@ add to these; they never override or relax them.
 리포트의 섹션 순서는 이것이 아니라 **보고 목적(purpose)**이 정합니다 —
 현황파악은 핵심요약→시장상황→지표→경쟁사→대응방향, 이슈대응은 문제→원인→
 영향→선택지→권장조치처럼 목적마다 다릅니다
-(`prompts/report_purposes/*.md`, `reporting/dashboard_streamlit/purpose_slots.py`).
+(`prompts/report_purposes/*.md`, `common/purpose_slots.py`).
 
 그러니 위 4단은 **당신이 문서를 읽고 판단을 정리하는 순서**로만 쓰고, 최종
 섹션 배치는 목적 프롬프트에 맡기세요. 둘을 같은 것으로 착각해 목적이 요구한
