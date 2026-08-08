@@ -1088,22 +1088,46 @@ def analyze(
     needs = list(information_needs or [])
     shapes = list(target_block_shapes or [])
     analyses = []
+    failures: list[str] = []
     for document in source_documents:
-        if (
-            _is_pdf_document(document)
-            and len(document.content or "") > _MAX_CONTENT_CHARS
-        ):
-            analyses.append(
-                _analyze_pdf_document(
-                    client, system_prompt, document, question, needs,
-                    target_block_shapes=shapes,
+        # One document failing must not take the other four with it.
+        # Live-observed: a 롱폼/숏폼 run collected five good sources - a KOCCA
+        # trend report, a 숏폼 이용률 ranking article, a survey piece - and the
+        # whole run halted because a single page's response came back off
+        # schema. The stage's own job is to analyse what it can; whether
+        # what's left is enough is already decided downstream, against the
+        # sector's minimum, by code that can also trigger recollection.
+        try:
+            if (
+                _is_pdf_document(document)
+                and len(document.content or "") > _MAX_CONTENT_CHARS
+            ):
+                analyses.append(
+                    _analyze_pdf_document(
+                        client, system_prompt, document, question, needs,
+                        target_block_shapes=shapes,
+                    )
                 )
-            )
-        else:
-            analyses.append(
-                _analyze_document(
-                    client, system_prompt, document, question, needs,
-                    target_block_shapes=shapes,
+            else:
+                analyses.append(
+                    _analyze_document(
+                        client, system_prompt, document, question, needs,
+                        target_block_shapes=shapes,
+                    )
                 )
-            )
+        except PipelineStageError as exc:
+            failures.append(f"{document.doc_id}: {exc.reason}")
+            print(f"[analyzer] doc '{document.doc_id}' could not be analysed: {exc.reason}",
+                  file=sys.stderr)
+    if not analyses:
+        # Nothing survived - that genuinely is a stage failure, and the reason
+        # carries every document's own error rather than only the first.
+        raise PipelineStageError(
+            stage=_STAGE,
+            reason="no document could be analysed",
+            detail="; ".join(failures),
+        )
+    if failures:
+        print(f"[analyzer] {len(analyses)} of {len(source_documents)} documents analysed; "
+              f"{len(failures)} skipped", file=sys.stderr)
     return analyses

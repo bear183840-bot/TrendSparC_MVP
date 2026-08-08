@@ -1,0 +1,18 @@
+[1/2] OpenAI 웹검색 수집 중...
+[ai_search] round 1/3 [company_specific_round] query='SK브로드밴드 롱폼과 숏폼 미디어 소비 트렌드는 어떻게 변하고 있나요? 연령대별 이용률 차이도 함께 알려주세요'
+[ai_search]   round 1 returned 3 grounded candidate(s)
+[ai_search_harness] round 1 for 'question' query='SK브로드밴드 롱폼과 숏폼 미디어 소비 트렌드는 어떻게 변하고 있나요? 연령대별 이용률 차이도 함께 알려주세요': 3 grounded candidate(s), 3 selected
+[ai_search]   next query (from model): '미디어 소비 트렌드 순위 비중 차트'
+[ai_search] round 2/3 [generic_topic_round] query='미디어 소비 트렌드 순위 비중 차트'
+[ai_search]   round 2 returned 7 grounded candidate(s)
+[ai_search_harness] round 2 for 'question' query='미디어 소비 트렌드 순위 비중 차트': 7 grounded candidate(s), 5 selected
+[ai_search]   next query (from model): '숏폼 미디어의 연도별 시청률 변화 및 시장 점유율 데이터를 제공하는 소스'
+[ai_search] round 3/3 [company_specific_round] query='숏폼 미디어의 연도별 시청률 변화 및 시장 점유율 데이터를 제공하는 소스'
+[ai_search]   round 3 returned 6 grounded candidate(s)
+[ai_search_harness] round 3 for 'question' query='숏폼 미디어의 연도별 시청률 변화 및 시장 점유율 데이터를 제공하는 소스': 6 grounded candidate(s), 3 selected
+[ai_search]   next query (from model): '지금 미디어 기업에서 롱폼과 숏폼 관련 경쟁 구도에 대한 최신 분석'
+[KOFIC] no post ids discovered for '영화진흥위원회(KOFIC)' from search results or the listing page - either the site's markup changed again or there's genuinely nothing new; see _extract_kofic_board_seq_numbers
+[analyzer] PDF '한국콘텐츠진흥원(KOCCA):6a617729ddf39e2f' split into 7 chunk(s); analyzing 7
+[analyzer] PDF chunk 3/7 failed for '한국콘텐츠진흥원(KOCCA):6a617729ddf39e2f': analysis response for doc '한국콘텐츠진흥원(KOCCA):6a617729ddf39e2f' did not match the expected schema
+[analyzer] PDF chunk 4/7 failed for '한국콘텐츠진흥원(KOCCA):6a617729ddf39e2f': analysis response for doc '한국콘텐츠진흥원(KOCCA):6a617729ddf39e2f' did not match the expected schema
+[save-result] C:\Users\bear1\Desktop\TrendSparC_MVP\runs\longform_shortform.json
