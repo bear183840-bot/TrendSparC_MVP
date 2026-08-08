@@ -26,7 +26,7 @@ from typing import Any
 try:
     from reportlab.lib import colors
     from reportlab.lib.enums import TA_LEFT
-    from reportlab.lib.pagesizes import A4
+    from reportlab.lib.pagesizes import A4, landscape
     from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
     from reportlab.lib.units import mm
     from reportlab.pdfbase import pdfmetrics
@@ -213,6 +213,141 @@ def build_report_pdf(result: Any, question: str) -> bytes:
     story.append(Spacer(1, 8))
     story.append(Paragraph(
         "이 리포트의 모든 수치와 주장은 수집된 근거 문서에서 확인된 것만 포함합니다.", styles["small"]
+    ))
+    document.build(story)
+    return buffer.getvalue()
+
+
+def build_dashboard_pdf(result: Any, question: str) -> bytes:
+    """A landscape, card-based snapshot of the evidence dashboard.
+
+    This is deliberately distinct from ``build_report_pdf``: the report PDF
+    is a linear document, while this export preserves the dashboard's visual
+    hierarchy (summary band, KPI cards, two-column insight cards). Both read
+    the same finished contracts and never regenerate or invent content.
+    """
+    if not _register_font():
+        raise RuntimeError("no Hangul-capable font found for PDF export")
+    styles = _styles()
+    dashboard_body = ParagraphStyle(
+        "ts-dashboard-body", parent=styles["body"], fontSize=8.5, leading=12,
+    )
+    dashboard_label = ParagraphStyle(
+        "ts-dashboard-label", parent=styles["small"], fontName=_FONT_BOLD,
+        fontSize=7.5, leading=10, textColor=_MUTED,
+    )
+    dashboard_value = ParagraphStyle(
+        "ts-dashboard-value", parent=styles["body"], fontName=_FONT_BOLD,
+        fontSize=15, leading=18, textColor=_INK,
+    )
+    buffer = io.BytesIO()
+    page = landscape(A4)
+    usable_width = page[0] - 28 * mm
+    document = SimpleDocTemplate(
+        buffer, pagesize=page,
+        leftMargin=14 * mm, rightMargin=14 * mm, topMargin=12 * mm, bottomMargin=12 * mm,
+        title=f"Dashboard — {question or 'TrendSparC'}", author="TrendSparC",
+    )
+    report = getattr(result, "generated_report", None)
+    synthesis = getattr(result, "synthesis", None)
+    story: list[Any] = [
+        Paragraph("TrendSparC Dashboard", styles["title"]),
+        Paragraph(_escape(question or "분석 결과"), styles["meta"]),
+    ]
+
+    summary = (report.executive_summary if report else None) or (
+        synthesis.synthesis_text if synthesis else ""
+    )
+    if summary:
+        summary_table = Table(
+            [[Paragraph("핵심 요약", ParagraphStyle(
+                "ts-dashboard-summary-title", parent=styles["section"],
+                textColor=colors.white, spaceBefore=0,
+            )), Paragraph(_escape(summary), ParagraphStyle(
+                "ts-dashboard-summary", parent=styles["body"],
+                textColor=colors.white, fontName=_FONT_BOLD,
+            ))]],
+            colWidths=[32 * mm, usable_width - 32 * mm],
+        )
+        summary_table.setStyle(TableStyle([
+            ("BACKGROUND", (0, 0), (-1, -1), _ACCENT),
+            ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+            ("LEFTPADDING", (0, 0), (-1, -1), 10),
+            ("RIGHTPADDING", (0, 0), (-1, -1), 10),
+            ("TOPPADDING", (0, 0), (-1, -1), 9),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 9),
+        ]))
+        story += [summary_table, Spacer(1, 7)]
+
+    metrics = list(getattr(synthesis, "metric_series", []) or [])[:4]
+    if metrics:
+        cards = []
+        for point in metrics:
+            value = f"{point.value:,.10g}{point.unit or ''}"
+            if getattr(point, "is_forecast", False):
+                value += " 전망"
+            cards.append(Table([
+                [Paragraph(_escape(point.label or "지표"), dashboard_label)],
+                [Paragraph(_escape(value), dashboard_value)],
+                [Paragraph(_escape(" · ".join(filter(None, (
+                    getattr(point, "subject", None), point.period,
+                )))), dashboard_label)],
+            ], colWidths=[usable_width / len(metrics) - 4]))
+        kpi_table = Table([cards], colWidths=[usable_width / len(cards)] * len(cards))
+        kpi_table.setStyle(TableStyle([
+            ("BOX", (0, 0), (-1, -1), 0.5, _LINE),
+            ("INNERGRID", (0, 0), (-1, -1), 0.5, _LINE),
+            ("BACKGROUND", (0, 0), (-1, -1), colors.white),
+            ("VALIGN", (0, 0), (-1, -1), "TOP"),
+            ("LEFTPADDING", (0, 0), (-1, -1), 7),
+            ("RIGHTPADDING", (0, 0), (-1, -1), 7),
+            ("TOPPADDING", (0, 0), (-1, -1), 7),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 7),
+        ]))
+        story += [kpi_table, Spacer(1, 8)]
+
+    section_cards: list[Any] = []
+    for section in (report.sections if report else []):
+        lines = []
+        if section.summary:
+            lines.append(section.summary)
+        lines.extend(list(section.key_points or [])[:3])
+        lines.extend(list(section.actions or [])[:2])
+        if not lines:
+            continue
+        body = "<br/>".join(f"• {_escape(line)}" for line in lines[:5])
+        card = Table([
+            [Paragraph(_escape(section.title or section.section_id), styles["section"])],
+            [Paragraph(body, dashboard_body)],
+        ], colWidths=[usable_width / 2 - 5])
+        card.setStyle(TableStyle([
+            ("BOX", (0, 0), (-1, -1), 0.6, _LINE),
+            ("BACKGROUND", (0, 0), (-1, -1), colors.white),
+            ("LEFTPADDING", (0, 0), (-1, -1), 9),
+            ("RIGHTPADDING", (0, 0), (-1, -1), 9),
+            ("TOPPADDING", (0, 0), (-1, -1), 6),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 8),
+            ("VALIGN", (0, 0), (-1, -1), "TOP"),
+        ]))
+        section_cards.append(card)
+
+    for index in range(0, len(section_cards), 2):
+        row = section_cards[index:index + 2]
+        if len(row) == 1:
+            row.append("")
+        grid = Table([row], colWidths=[usable_width / 2] * 2, hAlign="LEFT")
+        grid.setStyle(TableStyle([
+            ("VALIGN", (0, 0), (-1, -1), "TOP"),
+            ("LEFTPADDING", (0, 0), (-1, -1), 0),
+            ("RIGHTPADDING", (0, 0), (0, -1), 5),
+            ("LEFTPADDING", (1, 0), (1, -1), 5),
+            ("RIGHTPADDING", (1, 0), (1, -1), 0),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 8),
+        ]))
+        story.append(grid)
+
+    story.append(Paragraph(
+        "모든 수치와 주장은 저장된 실행 결과의 근거 계약에서만 렌더링했습니다.", styles["small"]
     ))
     document.build(story)
     return buffer.getvalue()

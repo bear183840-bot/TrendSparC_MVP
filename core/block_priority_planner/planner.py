@@ -33,7 +33,9 @@ _REQUIRED_DATA_HINTS: dict[str, str] = {
     "status_bar": "근거가 등급(High/Medium/Low)을 매긴 항목 2개 이상",
     "bar": "같은 라벨로 서로 다른 시점 정확히 2개의 수치 (전후 비교)",
     "item_bar": "같은 라벨을 2개 이상 주체(기업·연령대 등)에 대해 측정한 수치 (항목 비교)",
+    "ranking_list": "같은 라벨을 4개 이상 항목에 대해 측정한 수치 (긴 순위 목록)",
     "share_split": "하나의 전체(share_of)에 대한 비중(%) 2개 이상, 합계 100 이하",
+    "composition_breakdown": "하나의 전체(share_of)에 대한 비중(%) 4개 이상 (상세 구성)",
     "metric_comparison": "같은 시점·같은 단위를 공유하는 서로 다른 라벨의 수치 2개 이상",
     "kpi_grid": "확인된 수치(metric) 2개 이상",
     "kpi_single": "확인된 수치(metric) 1개 이상",
@@ -42,6 +44,7 @@ _REQUIRED_DATA_HINTS: dict[str, str] = {
     "segment_table": "같은 기준으로 비교된 연령대·성별 등 이용자 집단 2개 이상",
     "level_matrix": "2개 이상 기업·브랜드를 2개 이상 공통 기준으로 high/medium/low 등급 평가",
     "competitor_panels": "경쟁사별로 등급·수치·구성비 중 2가지 이상이 확인되는 자료",
+    "benchmark_table": "기업·국가·기술 2개 이상을 공통 정량/정성 기준 2개 이상으로 비교한 자료",
     "radar": "등급(level)이 매겨진 공통 기준 3개 이상, 엔티티 2개 이상",
     "matrix": "강점/약점/기회/위험 중 2개 이상 항목에 근거",
     "cause_tree": "원인-결과로 연결된(parent_claim_id) claim",
@@ -50,6 +53,7 @@ _REQUIRED_DATA_HINTS: dict[str, str] = {
     "action_list": "권고 조치(recommended_actions)",
     "factor_list": "요인·페인포인트 항목 3개 이상",
     "recurring_terms": "서로 다른 문서 2개 이상에서 반복된 표현",
+    "keyword_tags": "서로 다른 문서 2개 이상에서 반복된 표현",
     "narrative_list": "질문과 관련된 서술형 근거 문장",
 }
 
@@ -62,9 +66,10 @@ _REQUIRED_DATA_HINTS: dict[str, str] = {
 # 문장" would displace a query for a shape that genuinely depends on finding
 # the right document.
 _SEARCHABLE_BLOCK_TYPES = frozenset({
-    "chart", "landscape", "bar", "item_bar", "grouped_bar", "share_split",
+    "chart", "landscape", "bar", "item_bar", "ranking_list", "grouped_bar", "share_split",
+    "composition_breakdown",
     "metric_comparison", "kpi_grid", "timeline", "table", "segment_table",
-    "competitor_panels", "level_matrix", "radar", "matrix",
+    "competitor_panels", "benchmark_table", "level_matrix", "radar", "matrix",
     "cause_tree", "driver_bars", "factor_list",
     # `status_bar` is deliberately absent: a grade is something an analyzer
     # assigns while reading, not a document shape a query can go and find.

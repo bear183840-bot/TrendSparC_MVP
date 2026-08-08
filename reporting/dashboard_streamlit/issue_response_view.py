@@ -6,6 +6,8 @@ from typing import Any
 
 import streamlit as st
 
+from audience.presentation import load_audience_presentation
+from common.action_quality import actions_for_owner, routed_action_owner
 from reporting.dashboard_streamlit.components import (
     action_impact_lookup,
     headline_stats,
@@ -67,22 +69,45 @@ def render_issue_response_dashboard(result: Any, question: str, sector: str, aud
     summary = clean_citation((report.executive_summary if report else None) or synthesis.synthesis_text)
     market_rows = _points_for_roles(result, {"market_analysis", "search", "regulatory_official"})
     competitor_rows = _points_for_roles(result, {"competitor_official"})
-    risks = prefer_audience_content(report, "risks", synthesis.risks, 3)
-    opportunities = prefer_audience_content(report, "opportunities", synthesis.opportunities, 3)
+    audience_id = (
+        result.report_plan.audience_id if getattr(result, "report_plan", None) else "_default"
+    )
+    presentation = load_audience_presentation(audience_id)
+    risks = prefer_audience_content(
+        report, "risks", synthesis.risks, presentation.narrative_limit
+    )
+    opportunities = prefer_audience_content(
+        report, "opportunities", synthesis.opportunities, presentation.narrative_limit
+    )
     # strengths/weaknesses are never LLM-rewritten (report_generator._repair_section
     # always takes them from the rule-based fallback, i.e. straight from synthesis) -
     # they're facts, not audience-tailored prose, so there's nothing to prefer here.
     strengths = dedupe_clean(synthesis.strengths, 3)
     weaknesses = dedupe_clean(synthesis.weaknesses, 3)
-    actions = prefer_audience_content_raw(report, "actions", synthesis.recommended_actions, 4)
-    monitoring = prefer_audience_content(report, "monitoring_indicators", synthesis.monitoring_indicators, 3)
+    action_owner = routed_action_owner(getattr(result, "sector_route", None))
+    actions = actions_for_owner(
+        prefer_audience_content_raw(
+            report, "actions", synthesis.recommended_actions, presentation.narrative_limit
+        ),
+        action_owner,
+    )
+    monitoring = prefer_audience_content(
+        report, "monitoring_indicators", synthesis.monitoring_indicators,
+        presentation.narrative_limit,
+    )
 
     question_terms = question.split()
 
     render_page_header(question, sector, audience, purpose)
     # This view only ever renders issue_response reports.
-    render_executive_summary(summary, headline_stats(synthesis, "issue_response"))
-    render_kpi_row(synthesis.metric_series, question_terms=question_terms)
+    render_executive_summary(
+        summary, headline_stats(synthesis, "issue_response"),
+        heading=presentation.summary_label,
+    )
+    render_kpi_row(
+        synthesis.metric_series, limit=presentation.kpi_limit,
+        question_terms=question_terms,
+    )
 
     columns = st.columns(3)
     with columns[0]:
@@ -144,7 +169,7 @@ def render_issue_response_dashboard(result: Any, question: str, sector: str, aud
     render_cause_tree(synthesis.grounded_claims)
     render_importance_bars(synthesis.grounded_claims)
 
-    render_action_list(action_rows)
+    render_action_list(action_rows, owner=action_owner)
 
     with st.expander("Evidence & Sources"):
         st.markdown(render_source_list(result), unsafe_allow_html=True)

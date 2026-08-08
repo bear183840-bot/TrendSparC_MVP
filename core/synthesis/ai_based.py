@@ -34,27 +34,34 @@ import sys
 
 from openai import OpenAI
 
+from common.ai_usage import emit_ai_usage
 from common.ai_client import openai_client_kwargs
 from common.contracts import (
     Contradiction,
     ContradictingClaim,
     CorroboratedPoint,
+    SynthesisClaim,
     SynthesisConclusion,
     TrendSynthesis,
 )
 
 _API_KEY_ENV_VAR = "TRENDSPARC_SYNTHESIS_AI_API_KEY"
 _MODEL_ENV_VAR = "TRENDSPARC_SYNTHESIS_AI_MODEL"
-# Optional - points this stage at an OpenAI-API-compatible alternative
-# provider (e.g. Upstage Solar) instead of stock OpenAI. Unset by default;
-# see common/ai_client.py.
+# Stage-local provider switch: Upstage-compatible URL -> Solar default,
+# no URL -> OpenAI default. An explicit model env var always wins, so the
+# stage can be switched back independently. See common/ai_client.py.
 _BASE_URL_ENV_VAR = "TRENDSPARC_SYNTHESIS_AI_BASE_URL"
-_DEFAULT_MODEL = "gpt-4o-mini"
+_DEFAULT_OPENAI_MODEL = "gpt-4o-mini"
+_DEFAULT_UPSTAGE_MODEL = "solar-pro3"
 _STAGE = "synthesis"
 
 
 def _model() -> str:
-    return os.environ.get(_MODEL_ENV_VAR, _DEFAULT_MODEL)
+    configured = os.environ.get(_MODEL_ENV_VAR)
+    if configured:
+        return configured
+    base_url = os.environ.get(_BASE_URL_ENV_VAR, "").casefold()
+    return _DEFAULT_UPSTAGE_MODEL if "upstage.ai" in base_url else _DEFAULT_OPENAI_MODEL
 # Below this many distinct source_ids, a claim group is not "corroborated" —
 # it's just the same source (or the same lone source) restating itself.
 _MIN_INDEPENDENT_SOURCES_FOR_CORROBORATION = 2
@@ -105,18 +112,45 @@ Never invent a doc_id that wasn't in the input. If the input is very short (1-2 
 points), it's fine for synthesis_text to be brief and for little or no deduplication \
 to occur."""
 
+_COMPACT_SYSTEM_PROMPT = """You synthesize verified evidence for TrendSparC.
+Answer the original question in Korean without inventing any fact, number, entity,
+relationship, claim ID, or document ID.
+
+Inputs contain verified_claims with stable synthesis_claim_id and doc_id. A legacy
+tagged-point list is present only when an older analyzer supplied no structured claims.
+
+Return:
+- highlights: at most 8 concise, non-duplicate points, ordered by direct relevance.
+- synthesis_text: 2-4 concise sentences that answer the question. Connect general
+industry evidence to the named company only when the verified evidence supports that
+connection; otherwise state the limitation.
+- conclusions: at most 6 useful conclusions. Each must list every supporting ID from
+verified_claims and use conservative confidence. Omit unsupported conclusions.
+- claim_groups: group claims that state the same underlying fact. Return only their
+synthesis_claim_id values; do not repeat claim text or provenance. Return only groups
+of 2 or more IDs. Code adds every ungrouped verified claim as a singleton afterward.
+- contradictions: only genuine factual conflicts about the same scope/period/metric.
+Return a short topic and the conflicting synthesis_claim_id values. Different emphasis
+or scope is not a contradiction.
+
+Keep wording compact but do not merge distinct facts or drop a distinct claim from
+claim_groups. IDs are provenance, never presentation copy."""
+
 _SCHEMA = {
     "type": "object",
     "properties": {
-        "highlights": {"type": "array", "items": {"type": "string"}},
-        "synthesis_text": {"type": "string"},
+        "highlights": {
+            "type": "array", "maxItems": 8,
+            "items": {"type": "string", "maxLength": 220},
+        },
+        "synthesis_text": {"type": "string", "maxLength": 700},
         "conclusions": {
             "type": "array",
             "items": {
                 "type": "object",
                 "additionalProperties": False,
                 "properties": {
-                    "conclusion": {"type": "string"},
+                    "conclusion": {"type": "string", "maxLength": 240},
                     "supporting_claim_ids": {
                         "type": "array",
                         "items": {"type": "string"},
@@ -125,16 +159,19 @@ _SCHEMA = {
                 },
                 "required": ["conclusion", "supporting_claim_ids", "confidence"],
             },
+            "maxItems": 6,
         },
         "claim_groups": {
             "type": "array",
             "items": {
                 "type": "object",
                 "properties": {
-                    "claim": {"type": "string"},
-                    "doc_ids": {"type": "array", "items": {"type": "string"}},
+                    "claim_ids": {
+                        "type": "array", "minItems": 2,
+                        "items": {"type": "string"},
+                    },
                 },
-                "required": ["claim", "doc_ids"],
+                "required": ["claim_ids"],
                 "additionalProperties": False,
             },
         },
@@ -143,21 +180,10 @@ _SCHEMA = {
             "items": {
                 "type": "object",
                 "properties": {
-                    "topic": {"type": "string"},
-                    "conflicting_claims": {
-                        "type": "array",
-                        "items": {
-                            "type": "object",
-                            "properties": {
-                                "claim": {"type": "string"},
-                                "doc_id": {"type": "string"},
-                            },
-                            "required": ["claim", "doc_id"],
-                            "additionalProperties": False,
-                        },
-                    },
+                    "topic": {"type": "string", "maxLength": 120},
+                    "claim_ids": {"type": "array", "items": {"type": "string"}},
                 },
-                "required": ["topic", "conflicting_claims"],
+                "required": ["topic", "claim_ids"],
                 "additionalProperties": False,
             },
         },
@@ -168,7 +194,9 @@ _SCHEMA = {
 
 
 def _split_by_corroboration(
-    claim_groups: list[dict], doc_source_map: dict[str, str]
+    claim_groups: list[dict],
+    doc_source_map: dict[str, str],
+    claims_by_id: dict[str, SynthesisClaim] | None = None,
 ) -> tuple[list[CorroboratedPoint], list[CorroboratedPoint]]:
     """Verify each model-proposed claim group's independent-source count in
     code rather than trusting the model's own count — a group whose doc_ids
@@ -184,8 +212,19 @@ def _split_by_corroboration(
     corroborated: list[CorroboratedPoint] = []
     uncorroborated: list[CorroboratedPoint] = []
     for group in claim_groups:
-        claim = group.get("claim")
-        doc_ids = group.get("doc_ids") or []
+        claim_ids = list(dict.fromkeys(group.get("claim_ids") or []))
+        known_claims = [
+            claims_by_id[claim_id]
+            for claim_id in claim_ids
+            if claims_by_id and claim_id in claims_by_id
+        ]
+        if known_claims:
+            claim = known_claims[0].claim
+            doc_ids = list(dict.fromkeys(item.doc_id for item in known_claims))
+        else:
+            # Backward-compatible parsing for old saved fixtures/providers.
+            claim = group.get("claim")
+            doc_ids = group.get("doc_ids") or []
         if not claim or not doc_ids:
             continue
         known_doc_ids = [doc_id for doc_id in doc_ids if doc_id in doc_source_map]
@@ -204,23 +243,44 @@ def _split_by_corroboration(
     return corroborated, uncorroborated
 
 
-def _filter_contradictions(raw_contradictions: list[dict], doc_source_map: dict[str, str]) -> list[Contradiction]:
+def _filter_contradictions(
+    raw_contradictions: list[dict],
+    doc_source_map: dict[str, str],
+    claims_by_id: dict[str, SynthesisClaim] | None = None,
+) -> list[Contradiction]:
     """Drop any contradiction referencing a doc_id that doesn't actually exist
     in this synthesis — a hallucination guard, mirroring the collector's
     "never trust a URL the model just says" principle applied to doc_ids."""
     contradictions: list[Contradiction] = []
     for item in raw_contradictions:
         topic = item.get("topic")
-        raw_claims = item.get("conflicting_claims") or []
-        claims = [
-            ContradictingClaim(
-                claim=claim["claim"],
-                doc_id=claim["doc_id"],
-                source_id=doc_source_map.get(claim["doc_id"]),
-            )
-            for claim in raw_claims
-            if claim.get("doc_id") in doc_source_map and claim.get("claim")
+        claim_ids = list(dict.fromkeys(item.get("claim_ids") or []))
+        known_claims = [
+            claims_by_id[claim_id]
+            for claim_id in claim_ids
+            if claims_by_id and claim_id in claims_by_id
         ]
+        if known_claims:
+            claims = [
+                ContradictingClaim(
+                    claim=claim.claim,
+                    doc_id=claim.doc_id,
+                    source_id=doc_source_map.get(claim.doc_id),
+                )
+                for claim in known_claims
+            ]
+        else:
+            # Backward-compatible parsing for old saved fixtures/providers.
+            raw_claims = item.get("conflicting_claims") or []
+            claims = [
+                ContradictingClaim(
+                    claim=claim["claim"],
+                    doc_id=claim["doc_id"],
+                    source_id=doc_source_map.get(claim["doc_id"]),
+                )
+                for claim in raw_claims
+                if claim.get("doc_id") in doc_source_map and claim.get("claim")
+            ]
         if topic and len(claims) >= 2:
             contradictions.append(Contradiction(topic=topic, conflicting_claims=claims))
     return contradictions
@@ -254,6 +314,52 @@ def _validated_conclusions(
     return conclusions
 
 
+def _complete_claim_groups(
+    raw_groups: list[dict], claims_by_id: dict[str, SynthesisClaim]
+) -> list[dict]:
+    """Keep model-proposed duplicate groups and add all safe singletons.
+
+    Asking the model to echo one JSON object per input claim exhausted Solar's
+    completion budget. Singleton membership needs no semantic judgement, so
+    code supplies it from verified IDs. Overlapping or unknown model IDs are
+    removed rather than allowing one claim to appear in several groups.
+    """
+    assigned: set[str] = set()
+    groups: list[dict] = []
+    for group in raw_groups:
+        claim_ids = [
+            claim_id
+            for claim_id in dict.fromkeys(group.get("claim_ids") or [])
+            if claim_id in claims_by_id and claim_id not in assigned
+        ]
+        if len(claim_ids) < 2:
+            continue
+        groups.append({"claim_ids": claim_ids})
+        assigned.update(claim_ids)
+    groups.extend(
+        {"claim_ids": [claim_id]}
+        for claim_id in claims_by_id
+        if claim_id not in assigned
+    )
+    return groups
+
+
+def _expand_claim_aliases(data: dict, original_id_by_alias: dict[str, str]) -> dict:
+    """Translate compact model-facing IDs back to pipeline provenance IDs."""
+    def expand(items: list[str]) -> list[str]:
+        return [original_id_by_alias.get(item, item) for item in items]
+
+    for conclusion in data.get("conclusions") or []:
+        conclusion["supporting_claim_ids"] = expand(
+            conclusion.get("supporting_claim_ids") or []
+        )
+    for group in data.get("claim_groups") or []:
+        group["claim_ids"] = expand(group.get("claim_ids") or [])
+    for contradiction in data.get("contradictions") or []:
+        contradiction["claim_ids"] = expand(contradiction.get("claim_ids") or [])
+    return data
+
+
 def refine_synthesis_ai(rule_based_result: TrendSynthesis, question: str) -> TrendSynthesis:
     api_key = os.environ.get(_API_KEY_ENV_VAR)
     if not api_key or not (rule_based_result.highlights or rule_based_result.grounded_claims):
@@ -261,28 +367,48 @@ def refine_synthesis_ai(rule_based_result: TrendSynthesis, question: str) -> Tre
 
     try:
         client = OpenAI(api_key=api_key, **openai_client_kwargs(_BASE_URL_ENV_VAR))
+        original_id_by_alias = {
+            f"C{index:03d}": claim.synthesis_claim_id
+            for index, claim in enumerate(rule_based_result.grounded_claims, 1)
+        }
+        alias_by_original_id = {
+            original_id: alias for alias, original_id in original_id_by_alias.items()
+        }
+        doc_alias_by_id = {
+            doc_id: f"D{index:02d}"
+            for index, doc_id in enumerate(dict.fromkeys(
+                claim.doc_id for claim in rule_based_result.grounded_claims
+            ), 1)
+        }
         user_content = json.dumps(
             {
                 "question": question,
                 "verified_claims": [
                     {
-                        "synthesis_claim_id": claim.synthesis_claim_id,
+                        "synthesis_claim_id": alias_by_original_id[claim.synthesis_claim_id],
                         "claim_type": claim.claim_type,
                         "claim": claim.claim,
-                        "source_id": claim.source_id,
-                        "confidence": claim.confidence,
+                        "doc_id": doc_alias_by_id[claim.doc_id],
                     }
                     for claim in rule_based_result.grounded_claims
                 ],
-                "legacy_tagged_points": rule_based_result.highlights,
+                # Older sector adapters may have highlights but no verified
+                # structured claims. Never send both representations: they
+                # repeat the same facts and previously doubled this payload.
+                "legacy_tagged_points": (
+                    rule_based_result.highlights
+                    if not rule_based_result.grounded_claims
+                    else []
+                ),
             },
             ensure_ascii=False,
         )
         response = client.chat.completions.create(
             model=_model(),
-            max_tokens=1500,
+            max_tokens=2500 if len(rule_based_result.grounded_claims) >= 50 else 1500,
+            temperature=0,
             messages=[
-                {"role": "system", "content": _SYSTEM_PROMPT},
+                {"role": "system", "content": _COMPACT_SYSTEM_PROMPT},
                 {"role": "user", "content": user_content},
             ],
             response_format={
@@ -297,15 +423,43 @@ def refine_synthesis_ai(rule_based_result: TrendSynthesis, question: str) -> Tre
         message = response.choices[0].message
         if message.refusal:
             raise RuntimeError(message.refusal)
-        data = json.loads(message.content)
+        data = _expand_claim_aliases(json.loads(message.content), original_id_by_alias)
+        claims_by_id = {
+            claim.synthesis_claim_id: claim
+            for claim in rule_based_result.grounded_claims
+        }
+        claim_groups = (
+            _complete_claim_groups(data.get("claim_groups") or [], claims_by_id)
+            if claims_by_id
+            else data.get("claim_groups") or []
+        )
         corroborated_points, uncorroborated_points = _split_by_corroboration(
-            data.get("claim_groups") or [], rule_based_result.doc_source_map
+            claim_groups,
+            rule_based_result.doc_source_map,
+            claims_by_id,
         )
         contradictions = _filter_contradictions(
-            data.get("contradictions") or [], rule_based_result.doc_source_map
+            data.get("contradictions") or [],
+            rule_based_result.doc_source_map,
+            claims_by_id,
         )
         conclusions = _validated_conclusions(
             data.get("conclusions") or [], rule_based_result
+        )
+        emit_ai_usage(
+            stage=_STAGE,
+            model=_model(),
+            system_content=_COMPACT_SYSTEM_PROMPT,
+            user_content=user_content,
+            schema=_SCHEMA,
+            requested_max_tokens=2500 if len(rule_based_result.grounded_claims) >= 50 else 1500,
+            response=response,
+            counts={
+                "input_claims": len(rule_based_result.grounded_claims),
+                "input_highlights": len(rule_based_result.highlights),
+                "output_highlights": len(data.get("highlights", [])),
+                "claim_groups": len(data.get("claim_groups", [])),
+            },
         )
         return rule_based_result.model_copy(
             update={
@@ -318,5 +472,18 @@ def refine_synthesis_ai(rule_based_result: TrendSynthesis, question: str) -> Tre
             }
         )
     except Exception as exc:  # noqa: BLE001 - AI refinement is best-effort, never fatal
+        emit_ai_usage(
+            stage=_STAGE,
+            model=_model(),
+            system_content=_COMPACT_SYSTEM_PROMPT,
+            user_content=locals().get("user_content", ""),
+            schema=_SCHEMA,
+            requested_max_tokens=(
+                2500 if len(rule_based_result.grounded_claims) >= 50 else 1500
+            ),
+            response=locals().get("response"),
+            outcome="failed",
+            error_type=type(exc).__name__,
+        )
         print(f"[{_STAGE}] AI-based synthesis refinement failed, using rule-based result: {exc}", file=sys.stderr)
         return rule_based_result

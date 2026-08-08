@@ -191,9 +191,6 @@ Bash 힙독(heredoc)에 파이썬을 넣으면 따옴표가 자주 망가진다 
 
 ## 7. 지금 열려 있는 것
 
-- `theme.py`에 아무 데도 붙지 않는 죽은 CSS 규칙 7개: `ts-signal`, `ts-signal-stack`,
-  `ts-summary-compact`, `ts-section-grid`, `ts-purpose-grid`, `ts-compose-meta`,
-  `ts-cause-children`. 눈으로 확인 못 한 상태라 남겨둠.
 - `sk_broadband` 외 섹터에는 관계 필드(`parent_claim_id`, `importance`)가 아직 없다.
   스키마에 세 필드를 추가하고 `_verified_relations()`를 호출하면 그대로 동작한다.
 - `audience/adapter.py`는 아직 실제로 청중별 재작성을 하지 않는다(`CLAUDE.md`의

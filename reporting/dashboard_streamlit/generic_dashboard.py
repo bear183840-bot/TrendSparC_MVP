@@ -2,13 +2,22 @@
 
 from __future__ import annotations
 
-import contextlib
-
 from html import escape
+import re
 from typing import Any
 
 import streamlit as st
 
+from audience.presentation import load_audience_presentation, order_slots_for_audience
+from common.metric_quality import display_metric_points
+from common.action_quality import actions_for_owner, routed_action_owner
+from core.question_coverage import (
+    assess_question_coverage,
+    coverage_safe_summary,
+    derive_question_coverage,
+    minimum_drawable_periods,
+)
+from common.content_quality_validator import select_chartable_series
 from common.content_quality_validator import dedupe_across_blocks
 # Importing the package is what registers every block, including the live
 # ones - the registry is only "the one table" if nothing can reach the
@@ -19,6 +28,7 @@ from reporting.dashboard_streamlit.blocks.registry import slot_renderer
 from common.purpose_slots import (
     LAST_RESORT,
     ResolvedSlot,
+    Slot,
     resolve_slots,
     under_evidenced,
 )
@@ -40,7 +50,6 @@ from reporting.dashboard_streamlit.components import (
     render_comparison_table,
     render_executive_summary,
     render_footer_note,
-    render_kpi_row,
     render_metric_bar,
     render_metric_chart,
     render_cause_map,
@@ -64,6 +73,11 @@ from reporting.dashboard_streamlit.components import (
 # SWOT-worthy (core/layout_generator/generator.py:_candidate_content_types) -
 # kept in sync so this view and the block-type contract agree on what counts.
 _SWOT_QUALIFYING_FIELD_COUNT = 2
+_PROPOSAL_SENTENCE_RE = re.compile(
+    r"(?:해야\s*한다|할\s*필요가?\s*(?:있다|필요하다)|필요하다|권고한다|제안한다|"
+    r"검토해야|대응해야|추진해야|본다면.{0,80}(?:할|해)\s*볼\s*수\s*있다)(?:[.!?]|$)",
+    re.IGNORECASE,
+)
 
 
 # How each planned section is presented: display title, CSS accent, and
@@ -155,11 +169,12 @@ def _render_under_evidenced_notice(resolved: list[ResolvedSlot]) -> None:
 
 
 def _render_narrative_list(
-    title: str, items: list[str], result: Any, uncorroborated_ids: frozenset[str]
+    title: str, items: list[str], result: Any, uncorroborated_ids: frozenset[str],
+    limit: int = 4,
 ) -> None:
     rows = "".join(
         _item_markup(value, result, index, uncorroborated_ids)
-        for index, value in enumerate(items[:4], 1)
+        for index, value in enumerate(items[:limit], 1)
     )
     st.markdown(
         f'<section class="ts-card ts-purpose-card"><h3>{escape(title)}</h3>'
@@ -181,21 +196,31 @@ def _render_narrative_list(
 # either the full width bought nothing but a taller page - the whole point of
 # the landscape grid. Only blocks that need real horizontal room - a dated
 # rail, a branching chain, or several panels side by side - take both units.
-_WIDE_BLOCKS = frozenset({
-    "landscape", "timeline", "cause_map", "cause_tree",
-    "competitor_panels", "matrix",
-})
-_GRID_UNITS = 2
+_BLOCK_UNITS = {
+    # Compact exact-value blocks: one quarter of the landscape.
+    "ranking_list": 1, "item_bar": 1, "bar": 1, "kpi_grid": 1,
+    "kpi_single": 1, "keyword_tags": 1, "recurring_terms": 1,
+    "factor_list": 1, "status_bar": 1,
+    # Comparisons and actions need two readable columns.
+    "benchmark_table": 2, "table": 2, "level_matrix": 2,
+    "radar": 2, "metric_comparison": 2, "grouped_bar": 2,
+    "action_list": 2, "narrative_list": 2, "chart": 2, "driver_bars": 2,
+    "question_comparison": 2,
+    "composition_breakdown": 2, "share_split": 2,
+    # Flows keep the full landscape width.
+    "landscape": 4, "timeline": 4, "cause_map": 4,
+    "cause_tree": 4, "competitor_panels": 4, "matrix": 4,
+}
+_GRID_UNITS = 4
 
 
-def _slot_width(slot: ResolvedSlot) -> int:
+def _slot_width(slot: ResolvedSlot, compact: bool = False) -> int:
     """Units this slot occupies - the widest block in its composition wins."""
-    if any(block_type in _WIDE_BLOCKS for block_type in slot.block_types):
-        return _GRID_UNITS
-    return 1
+    block_types = slot.block_types[:1] if compact else slot.block_types
+    return max((_BLOCK_UNITS.get(block_type, 2) for block_type in block_types), default=2)
 
 
-def _grid_rows(slots: list[ResolvedSlot]) -> list[list[ResolvedSlot]]:
+def _grid_rows(slots: list[ResolvedSlot], compact: bool = False) -> list[list[ResolvedSlot]]:
     """Greedy left-to-right packing that keeps the skeleton's reading order.
 
     Deliberately not a masonry re-order: the purpose skeleton is an argument
@@ -207,7 +232,7 @@ def _grid_rows(slots: list[ResolvedSlot]) -> list[list[ResolvedSlot]]:
     current: list[ResolvedSlot] = []
     used = 0
     for slot in slots:
-        width = _slot_width(slot)
+        width = _slot_width(slot, compact=compact)
         if used + width > _GRID_UNITS:
             rows.append(current)
             current, used = [], 0
@@ -228,6 +253,10 @@ def _render_slot(
     strengths: list[str],
     weaknesses: list[str],
     uncorroborated_ids: frozenset[str],
+    presentation: Any,
+    question: str = "",
+    compact: bool = True,
+    complete: bool = False,
 ) -> None:
     """Draw whichever block the slot resolved to, under the slot's own title."""
     title = slot.slot.title
@@ -238,7 +267,30 @@ def _render_slot(
         # copy of the same message.
         return
     if slot.block_type == "narrative_list":
-        _render_narrative_list(title, items, result, uncorroborated_ids)
+        # A status/finding slot may quote what the source observed, but a
+        # source author's proposal is not itself market status. Recommendations
+        # have their own owner-validated action slot.
+        if slot.slot.slot_id not in {"response", "recommendation", "options"}:
+            finding_items = [item for item in items if not _PROPOSAL_SENTENCE_RE.search(item)]
+            items = finding_items or items
+        # A Korean question must not surface untranslated source prose as the
+        # finished dashboard copy. Prefer Korean material already present in
+        # the same synthesis; never machine-invent a translation here.
+        if any("가" <= char <= "힣" for char in question):
+            korean_items = [
+                item for item in items
+                if any("가" <= char <= "힣" for char in item)
+            ]
+            if not korean_items:
+                korean_items = [
+                    item for item in synthesis.key_points
+                    if any("가" <= char <= "힣" for char in item)
+                ]
+            items = korean_items or items
+        _render_narrative_list(
+            title, items, result, uncorroborated_ids,
+            limit=(min(presentation.narrative_limit, 3) if compact else max(len(items), 1)),
+        )
         return
 
     # Decide what every body will be BEFORE opening the card. The title used
@@ -249,13 +301,17 @@ def _render_slot(
     # composition the same rule applies per block: a companion that would
     # draw nothing is simply not drawn, and if none of them draw, the card
     # never opens.
+    block_types = slot.block_types if complete or not compact else slot.block_types[:1]
     draws = [
         draw for draw in (
             _body_renderer(
                 block_type, result, synthesis, risks, opportunities,
                 strengths, weaknesses, items,
+                presentation,
+                compact,
+                question,
             )
-            for block_type in slot.block_types
+            for block_type in block_types
         ) if draw is not None
     ]
     if not draws:
@@ -275,6 +331,9 @@ def _body_renderer(
     strengths: list[str],
     weaknesses: list[str],
     items: list[str] | None = None,
+    presentation: Any | None = None,
+    compact: bool = True,
+    question: str = "",
 ):
     """A zero-arg callable that draws this block, or None if it would draw
     nothing. Returning None is what keeps an empty card off the page.
@@ -297,7 +356,175 @@ def _body_renderer(
         opportunities=opportunities,
         strengths=strengths,
         weaknesses=weaknesses,
+        presentation=presentation,
+        question=question,
+        compact=compact,
     ))
+
+
+def _partition_dashboard_slots(
+    slots: list[ResolvedSlot], primary_limit: int,
+) -> tuple[list[ResolvedSlot], list[ResolvedSlot]]:
+    """Split the decision surface from the complete supporting analysis.
+
+    Summary and KPI-only slots are already represented by the dedicated
+    summary/KPI bands above the grid, so repeating them is duplication rather
+    than preservation.  The next audience-ordered slots become the first
+    screen; every other supported slot remains available in detail.
+    """
+    supported = [slot for slot in slots if not slot.is_last_resort]
+    candidates: list[ResolvedSlot] = []
+    complete: list[ResolvedSlot] = []
+    for slot in supported:
+        if slot.slot.slot_id == "summary":
+            continue
+        complete.append(slot)
+        if set(slot.block_types) <= {"kpi_grid"}:
+            continue
+        if len(candidates) < primary_limit:
+            candidates.append(slot)
+    return candidates, complete
+
+
+def _detail_slot_order(slots: list[ResolvedSlot]) -> list[ResolvedSlot]:
+    """Keep compact keyword frequency in the bottom-right supporting cell."""
+    keywords = [
+        slot for slot in slots
+        if any(kind in {"keyword_tags", "recurring_terms"} for kind in slot.block_types)
+    ]
+    others = [slot for slot in slots if slot not in keywords]
+    return [*others, *keywords]
+
+
+def _question_structure_order(
+    slots: list[ResolvedSlot], coverage_requirement: Any,
+    metric_points: list[Any] | None = None,
+) -> list[ResolvedSlot]:
+    """Put the question's requested evidence shape first, without topics.
+
+    An N-period trend question leads with the slot that resolved to a real
+    time-series chart.  An A-vs-B question leads with a supported comparison
+    when no time-series requirement outranks it.  This is intentionally about
+    structural contracts, not OTT, chips, telecoms, brands, or any example.
+    """
+    ordered = list(slots)
+    requested_periods = getattr(coverage_requirement, "minimum_distinct_periods", 0)
+    chartable = select_chartable_series(metric_points or [])
+    drawable_periods = max(
+        (
+            len({point.period for point in chartable if point.label == label})
+            for label in {point.label for point in chartable}
+        ),
+        default=0,
+    )
+    if (
+        requested_periods >= 3
+        and drawable_periods >= minimum_drawable_periods(requested_periods)
+    ):
+        for index, slot in enumerate(ordered):
+            if slot.block_type == "chart":
+                return [slot, *ordered[:index], *ordered[index + 1:]]
+    if len(getattr(coverage_requirement, "comparison_anchors", ()) or ()) >= 2:
+        for index, slot in enumerate(ordered):
+            if slot.block_type == "question_comparison":
+                return [slot, *ordered[:index], *ordered[index + 1:]]
+        comparison_types = {
+            "grouped_bar", "benchmark_table", "table", "level_matrix",
+            "metric_comparison", "ranking_list", "item_bar", "share_split",
+            "question_comparison",
+        }
+        for index, slot in enumerate(ordered):
+            if slot.block_type in comparison_types:
+                return [slot, *ordered[:index], *ordered[index + 1:]]
+    return ordered
+
+
+def _axis_match_score(text: str, anchor: str) -> int:
+    lowered = text.casefold()
+    return 1 if anchor.casefold() in lowered else 0
+
+
+def _report_comparison_sentences(
+    result: Any, synthesis: Any, question: str, safe_summary: str | None = None,
+) -> list[str]:
+    values: list[str] = []
+    report = getattr(result, "generated_report", None)
+    if report:
+        values.append(safe_summary if safe_summary is not None else (report.executive_summary or ""))
+        for section in report.sections:
+            for field in (
+                "key_points", "evidence", "risks", "opportunities",
+                "monitoring_indicators",
+            ):
+                values.extend(getattr(section, field, None) or [])
+    values.extend([*synthesis.key_points, *synthesis.evidence])
+    sentences: list[str] = []
+    korean_question = any("가" <= char <= "힣" for char in question)
+    for value in values:
+        for sentence in re.split(r"(?<=[.!?])\s+", clean_citation(value)):
+            sentence = sentence.strip()
+            if not sentence or (korean_question and not any("가" <= char <= "힣" for char in sentence)):
+                continue
+            if _PROPOSAL_SENTENCE_RE.search(sentence):
+                continue
+            if sentence not in sentences:
+                sentences.append(sentence)
+    return sentences
+
+
+def _question_comparison_slot(
+    result: Any, synthesis: Any, question: str, anchors: list[str],
+    safe_summary: str | None = None,
+) -> ResolvedSlot | None:
+    """Fallback comparison block when the two sides lack a shared axis."""
+    if len(anchors) != 2:
+        return None
+    grouped: dict[str, list[str]] = {anchor: [] for anchor in anchors}
+    for sentence in _report_comparison_sentences(
+        result, synthesis, question, safe_summary=safe_summary
+    ):
+        scores = [_axis_match_score(sentence, anchor) for anchor in anchors]
+        best = max(scores)
+        if best <= 0 or scores.count(best) != 1:
+            continue
+        anchor = anchors[scores.index(best)]
+        if len(grouped[anchor]) < 2:
+            grouped[anchor].append(sentence)
+    # The block is still required when one side is missing: an explicit empty
+    # side is more truthful than silently answering only half the comparison.
+    if not any(grouped.values()):
+        return None
+    encoded: list[str] = []
+    for anchor in anchors:
+        payload = "\x1e".join(
+            f"{sentence}\x1d{evidence_url(sentence, result) or ''}"
+            for sentence in grouped[anchor]
+        )
+        encoded.append(f"{anchor}\x1f{payload}")
+    slot = Slot(
+        "question_comparison", f"{anchors[0]} vs {anchors[1]} 비교",
+        "질문에 명시된 두 축은 어떻게 다른가",
+        ("question_comparison",), optional=False,
+    )
+    return ResolvedSlot(slot, ("question_comparison",), None, encoded)
+
+
+def _has_shared_axis_for_anchors(synthesis: Any, anchors: list[str]) -> bool:
+    """Whether structured data already compares both requested sides."""
+    by_label: dict[tuple[str, str], list[Any]] = {}
+    for point in synthesis.metric_series:
+        by_label.setdefault((point.label, point.unit), []).append(point)
+    for points in by_label.values():
+        subjects = [point.subject or "" for point in points]
+        if all(any(_axis_match_score(subject, anchor) for subject in subjects) for anchor in anchors):
+            return True
+    by_criterion: dict[str, list[str]] = {}
+    for point in synthesis.comparison_points:
+        by_criterion.setdefault(point.criterion, []).append(point.entity)
+    return any(
+        all(any(_axis_match_score(entity, anchor) for entity in entities) for anchor in anchors)
+        for entities in by_criterion.values()
+    )
 
 
 def render_generic_dashboard(
@@ -308,27 +535,45 @@ def render_generic_dashboard(
     purpose: str,
     purpose_id: str | None,
 ) -> None:
-    synthesis = result.synthesis
+    action_owner = routed_action_owner(getattr(result, "sector_route", None))
+    synthesis = result.synthesis.model_copy(update={
+        "metric_series": display_metric_points(result.synthesis.metric_series),
+        "recommended_actions": actions_for_owner(
+            result.synthesis.recommended_actions, action_owner
+        ),
+    })
     report = result.generated_report
     summary = clean_citation((report.executive_summary if report else None) or synthesis.synthesis_text)
+    coverage_requirement = (
+        getattr(result, "question_coverage", None) or derive_question_coverage(question)
+    )
+    coverage_gaps = (
+        list(getattr(result, "question_coverage_gaps", None) or [])
+        or assess_question_coverage(result.document_analyses, coverage_requirement)
+    )
+    summary = coverage_safe_summary(summary, coverage_requirement, coverage_gaps)
     risks = prefer_audience_content(report, "risks", synthesis.risks, 3)
     opportunities = prefer_audience_content(report, "opportunities", synthesis.opportunities, 3)
     # strengths/weaknesses are never LLM-rewritten (see issue_response_view.py's
     # identical comment) - facts, not audience-tailored prose.
     strengths = dedupe_clean(synthesis.strengths, 3)
     weaknesses = dedupe_clean(synthesis.weaknesses, 3)
-
-    question_terms = question.split()
+    audience_id = (
+        result.report_plan.audience_id if getattr(result, "report_plan", None) else "_default"
+    )
+    presentation = load_audience_presentation(audience_id)
 
     render_page_header(question, sector, audience, purpose)
-    render_executive_summary(summary, headline_stats(synthesis, purpose_id))
-    render_kpi_row(synthesis.metric_series, question_terms=question_terms)
-
+    render_executive_summary(
+        summary, headline_stats(synthesis, purpose_id), heading=presentation.summary_label,
+    )
     # The purpose's slot skeleton drives the page: fixed order, but each slot
     # takes the first block type its data can honestly support. See
     # purpose_slots.py - a slot only reaches "정보 없음" after every candidate
     # for its intent has been tried.
-    resolved = resolve_slots(purpose_id, synthesis, report)
+    resolved = order_slots_for_audience(
+        resolve_slots(purpose_id, synthesis, report), presentation,
+    )
     if under_evidenced(resolved):
         _render_under_evidenced_notice(resolved)
 
@@ -339,15 +584,57 @@ def render_generic_dashboard(
     # same rule again over the rendered slots removed items a second time -
     # "시장 변화" showed 1 of its 3 key points because two had been claimed by
     # a neighbouring slot that was drawing from the same section.
-    for row in _grid_rows([slot for slot in resolved if not slot.is_last_resort]):
-        # A row of one wide card needs no column wrapper - st.columns([1]) adds
-        # padding that makes a full-width block narrower than the ones above it.
-        columns = st.columns(len(row), gap="small") if len(row) > 1 else [contextlib.nullcontext()]
+    dashboard_slots = _detail_slot_order([
+        slot for slot in resolved
+        if not slot.is_last_resort and slot.slot.slot_id != "summary"
+        and not (
+            slot.slot.slot_id in {"response", "recommendation"}
+            and not synthesis.recommended_actions
+        )
+    ])
+    anchors = list(coverage_requirement.comparison_anchors)
+    if len(anchors) == 2 and not _has_shared_axis_for_anchors(synthesis, anchors):
+        comparison_slot = _question_comparison_slot(
+            result, synthesis, question, anchors, safe_summary=summary
+        )
+        if comparison_slot is not None:
+            market_index = next(
+                (
+                    index for index, slot in enumerate(dashboard_slots)
+                    if slot.slot.slot_id == "market" and slot.block_type == "narrative_list"
+                ),
+                len(dashboard_slots),
+            )
+            dashboard_slots = [
+                slot for slot in dashboard_slots
+                if not (slot.slot.slot_id == "market" and slot.block_type == "narrative_list")
+            ]
+            dashboard_slots.insert(min(market_index, len(dashboard_slots)), comparison_slot)
+    dashboard_slots = _question_structure_order(
+        dashboard_slots, coverage_requirement, synthesis.metric_series
+    )
+    for row in _grid_rows(dashboard_slots, compact=True):
+        widths = [_slot_width(slot, compact=True) for slot in row]
+        remainder = _GRID_UNITS - sum(widths)
+        keyword_last = any(
+            kind in {"keyword_tags", "recurring_terms"} for kind in row[-1].block_types
+        )
+        if remainder and keyword_last:
+            ratios = [*widths[:-1], remainder, widths[-1]]
+            all_columns = st.columns(ratios, gap="small")
+            columns = [*all_columns[:len(widths) - 1], all_columns[-1]]
+        else:
+            ratios = [*widths, remainder] if remainder else widths
+            all_columns = st.columns(ratios, gap="small")
+            columns = all_columns[:len(row)]
         for slot, column in zip(row, columns):
             with column:
                 _render_slot(
                     slot, list(dict.fromkeys(slot.items)), result, synthesis, risks,
                     opportunities, strengths, weaknesses, uncorroborated_ids,
+                    presentation,
+                    question,
+                    compact=True,
                 )
 
     # Sections report_planner dropped for lack of evidence, shown with its

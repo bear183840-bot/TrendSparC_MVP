@@ -32,8 +32,7 @@ from audience.contracts import list_audience_ids
 from common.contracts import Attachment, UserRequest
 from common.errors import StageStatus
 from core.request_pipeline.pipeline import PipelineResult, run_pipeline
-from core.run_archive import list_runs, load_result
-from reporting.export.report_pdf import build_report_pdf, pdf_font_available
+from core.run_archive import load_result
 from core.sector_router.router import scan_sectors
 from reporting.dashboard_streamlit.collection_progress_view import _STATUS_LABELS, render_execution_record
 from reporting.dashboard_streamlit.generic_dashboard import render_generic_dashboard
@@ -41,6 +40,11 @@ from reporting.dashboard_streamlit.issue_response_view import render_issue_respo
 from reporting.dashboard_streamlit.logo import wordmark_html
 from reporting.dashboard_streamlit.build_stamp import build_stamp_html
 from reporting.dashboard_streamlit.theme import dashboard_css
+from reporting.dashboard_streamlit.sidebar import (
+    render_artifact_preview,
+    render_settings_placeholder,
+    render_sidebar,
+)
 
 SECTORS_DIR = PROJECT_ROOT / "sectors"
 _SECTOR_ENGLISH_NAME = re.compile(r"\(([^)]+)\)")
@@ -81,7 +85,7 @@ AUDIENCE_LABELS = {
 
 st.set_page_config(page_title="TrendSparC", page_icon="◼", layout="wide", initial_sidebar_state="expanded")
 
-APP_STATE_VERSION = 8  # 8: orange is the default accent
+APP_STATE_VERSION = 9  # 9: compact sidebar navigation and artifact center
 if st.session_state.get("app_state_version") != APP_STATE_VERSION:
     st.session_state.result = None
     st.session_state.submitted_question = None
@@ -92,6 +96,10 @@ if st.session_state.get("app_state_version") != APP_STATE_VERSION:
     # the alternate, reachable from the toggle.
     st.session_state.accent_theme = "orange"
     st.session_state.terminal_log = None
+    st.session_state.sidebar_page = "dashboard"
+    st.session_state.sidebar_download_kind = None
+    st.session_state.sidebar_show_all = False
+    st.session_state.artifact_preview = None
     st.session_state.app_state_version = APP_STATE_VERSION
 
 
@@ -99,10 +107,14 @@ if st.session_state.get("app_state_version") != APP_STATE_VERSION:
 def _archived_question(result: "PipelineResult") -> str:
     """The question a saved run was asked, read back from its archive record.
 
-    PipelineResult doesn't carry the question text - every stage that needs it
-    receives it as an argument - so a run opened from a file would otherwise
-    lose its own title. The archive under storage/requests/ does keep it.
+    New results carry the question themselves.  Older full-result files can
+    still recover it from their source plan, then from the small archive.
     """
+    if result.question:
+        return result.question
+    search_context = getattr(getattr(result, "source_plan", None), "search_context", None)
+    if search_context is not None and search_context.question:
+        return search_context.question
     record = Path("storage/requests") / f"{result.request_id}.json"
     if record.exists():
         try:
@@ -111,65 +123,6 @@ def _archived_question(result: "PipelineResult") -> str:
             pass
     return "분석 결과"
 
-
-
-def _render_archive_panel(current: "PipelineResult | None") -> None:
-    """Past questions, reopenable, plus this run as a PDF.
-
-    A dashboard answers "what does this say"; a PDF answers "what did it say
-    on the day we decided" - which is why the download is of the report, not
-    a screenshot of the page. Export needs a Hangul-capable font on the host;
-    where there is none, saying so beats shipping a page of empty boxes.
-    """
-    st.markdown("#### 다운로드")
-    if current is not None:
-        question_text = st.session_state.get("submitted_question") or "분석 결과"
-        if pdf_font_available():
-            try:
-                pdf_bytes = build_report_pdf(current, question_text)
-            except Exception as exc:  # noqa: BLE001
-                st.caption(f"PDF를 만들지 못했습니다: {exc}")
-            else:
-                st.download_button(
-                    "리포트 PDF 저장", pdf_bytes,
-                    file_name=f"{current.request_id}.pdf", mime="application/pdf",
-                    use_container_width=True,
-                )
-        else:
-            st.caption("한글 글꼴이 없어 PDF 대신 실행 결과 JSON으로 저장합니다.")
-        st.download_button(
-            "실행 결과 JSON", current.model_dump_json(indent=2, exclude_none=False),
-            file_name=f"{current.request_id}.json", mime="application/json",
-            use_container_width=True,
-        )
-
-    runs = list_runs(limit=12)
-    if not runs:
-        return
-    st.markdown("#### 지난 질문")
-    for run in runs:
-        label = (run.get("question") or "(질문 없음)").strip()
-        stamp = (run.get("archived_at") or "")[:10]
-        caption = f"{stamp} · {run.get('purpose_id') or '-'} · {run.get('audience_id') or '-'}"
-        if run.get("halted_at_stage"):
-            caption += f" · 중단: {run['halted_at_stage']}"
-        with st.container(border=True):
-            st.caption(caption)
-            if run.get("reopenable"):
-                if st.button(label[:40], key=f"open_{run['request_id']}", use_container_width=True):
-                    reopened = load_result(run["request_id"])
-                    if reopened is None:
-                        st.error("저장된 결과를 읽지 못했습니다.")
-                    else:
-                        st.session_state.result = reopened
-                        st.session_state.submitted_question = run.get("question")
-                        st.session_state.terminal_log = None
-                        st.rerun()
-            else:
-                # Runs archived before full results were stored, and any run
-                # whose result failed to write. Listed rather than hidden, so
-                # the history stays honest about what it can and can't reopen.
-                st.caption(f"{label[:40]} — 결과 미저장(재열람 불가)")
 
 
 def _diagnostics(result: "PipelineResult") -> dict:
@@ -200,6 +153,7 @@ def _diagnostics(result: "PipelineResult") -> dict:
     ]
     metrics = list(getattr(synthesis, "metric_series", []) or [])
     comparisons = list(getattr(synthesis, "comparison_points", []) or [])
+    delivery = getattr(result, "block_delivery_trace", None)
     return {
         "중단된 단계": result.halted_at_stage,
         "문제 있는 단계": failed_stages or "없음",
@@ -232,6 +186,26 @@ def _diagnostics(result: "PipelineResult") -> dict:
             ),
         },
         "그릴 수 있는 블록": _drawable_blocks(synthesis),
+        "블록 전달 추적": (
+            {
+                "계획 출처": delivery.plan_source,
+                "단계별 보존": [stage.model_dump(mode="json") for stage in delivery.stages],
+                "슬롯": [
+                    {
+                        "slot_id": slot.slot_id,
+                        "수집 목표": slot.target_block_types,
+                        "최종 블록": slot.selected_block_types,
+                        "필수 폴백": slot.last_resort,
+                        "후보 판정": {
+                            candidate.block_type: candidate.decision_reason
+                            for candidate in slot.candidates
+                        },
+                    }
+                    for slot in delivery.slots
+                ],
+            }
+            if delivery else "없음"
+        ),
         "리포트": {
             "섹션": [section.section_id for section in result.generated_report.sections]
             if result.generated_report else [],
@@ -297,6 +271,9 @@ def _reset() -> None:
     st.session_state.result = None
     st.session_state.submitted_question = None
     st.session_state.terminal_log = None
+    st.session_state.sidebar_page = "dashboard"
+    st.session_state.sidebar_download_kind = None
+    st.session_state.artifact_preview = None
     for key in ("intake_question", "intake_audience", "intake_sector"):
         st.session_state.pop(key, None)
 
@@ -330,36 +307,25 @@ if result is None:
     with dark_col, st.container(key="landing_toggle_dark"):
         st.session_state.dark_mode = st.toggle("다크", value=st.session_state.dark_mode, label_visibility="collapsed")
 else:
-    with st.sidebar:
-        _html(wordmark_html())
-        if st.button("⌕  New Analysis", use_container_width=True):
-            _reset()
-            st.rerun()
-        _html(
-            '<div class="ts-side-nav"><div class="ts-nav active">▦　Dashboard</div>'
-            '<div class="ts-nav">⚙　Settings</div></div>'
-        )
-        # Monitoring was a label with nothing behind it. What was actually
-        # missing is this: a question asked yesterday could not be opened
-        # again, because only a summary of each run was kept. Now the full
-        # result is stored, so past questions are reachable and downloadable.
-        _render_archive_panel(result)
-        st.session_state.dark_mode = st.toggle("다크 모드", value=st.session_state.dark_mode)
-        st.session_state.accent_theme = (
-            "burgundy" if st.toggle("버건디 테마", value=(st.session_state.accent_theme == "burgundy")) else "orange"
-        )  # off = orange, the default
-        recent = st.session_state.recent_questions[-4:]
-        recent_html = '<div class="ts-recent"><b>Recent Analyses</b>'
-        for index, item in enumerate(reversed(recent)):
-            active = " active" if index == 0 else ""
-            recent_html += f'<div class="ts-recent-item{active}">{textwrap.shorten(item, width=27, placeholder="…")}</div>'
-        _html(recent_html + "</div>")
+    render_sidebar(
+        result,
+        st.session_state.get("submitted_question") or _archived_question(result),
+        _reset,
+    )
 
 _html(dashboard_css(st.session_state.dark_mode, st.session_state.accent_theme))
 # Streamlit Cloud redeploys on push, so this answers "is my fix live yet?"
 # without leaving the page. Rendered once, outside the result branches, so it
 # shows on the landing screen too.
 _html(build_stamp_html())
+
+if result is not None and st.session_state.get("sidebar_page") == "settings":
+    render_settings_placeholder()
+    st.stop()
+
+if result is not None and st.session_state.get("sidebar_page") == "artifact_preview":
+    if render_artifact_preview(result):
+        st.stop()
 
 if result is None:
     _html(
@@ -571,5 +537,9 @@ with st.expander("실행 기록 및 원본 계약"):
             _without_internal_provenance(result.layout.model_dump(mode="json"))
             if result.layout
             else None
+        ),
+        "block_delivery_trace": (
+            result.block_delivery_trace.model_dump(mode="json")
+            if result.block_delivery_trace else None
         ),
     })

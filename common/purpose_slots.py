@@ -66,20 +66,20 @@ LAST_RESORT = "no_data"
 DESIGN_LIBRARY_BLOCKS: dict[str, tuple[str, ...]] = {
     "KPI Card": ("kpi_grid", "kpi_single"),
     "Line / Area": ("chart", "landscape"),
-    "Bar": ("bar", "item_bar", "grouped_bar", "metric_comparison"),
+    "Bar": ("bar", "item_bar", "ranking_list", "grouped_bar", "metric_comparison"),
     "KPI Status Bar": ("status_bar",),
-    "Share Split": ("share_split",),
+    "Share Split": ("share_split", "composition_breakdown"),
     "Matrix": ("matrix",),
     "Timeline": ("timeline",),
     "Table": ("table", "segment_table"),
-    "Competitor Panels": ("competitor_panels",),
+    "Competitor Panels": ("competitor_panels", "benchmark_table"),
     "Level Matrix": ("level_matrix",),
     "Cause Map": ("cause_map",),
     "Root Cause Tree": ("cause_tree",),
     "Driver Bars": ("driver_bars",),
     "Action List": ("action_list",),
     "Factor List": ("factor_list",),
-    "Keyword List": ("recurring_terms",),
+    "Keyword List": ("recurring_terms", "keyword_tags"),
     "Evidence": ("evidence",),
 }
 
@@ -159,14 +159,13 @@ _CURRENT_STATUS: tuple[Slot, ...] = (
     # 시장 상황 then falls to its own chart/timeline. Both slots reading the
     # same metric_series is why order decides which one gets `bar`.
     Slot("ranking", "순위·비교", "항목들 사이에서 무엇이 앞서는가",
-         ("share_split", "grouped_bar", "item_bar", "metric_comparison", "table", "narrative_list"),
+         ("share_split", "grouped_bar", "composition_breakdown", "ranking_list", "item_bar",
+          "metric_comparison", "table", "narrative_list"),
          ("key_metrics", "market_status"), (), optional=True),
-    # `metric_comparison` sits ahead of `timeline` deliberately. Several
-    # different metrics sharing one date are a cross-section, and the only
-    # block that says so is the one that compares labels within a period; a
-    # timeline given the same data draws six steps that never happened.
+    # A dated sequence is more coherent than a cross-KPI snapshot. The latter
+    # remains a fallback only when no real timeline exists.
     Slot("market", "시장 상황", "시장이 어느 방향으로 움직이는가",
-         ("landscape", "chart", "bar", "item_bar", "metric_comparison", "timeline",
+         ("landscape", "chart", "bar", "timeline", "metric_comparison",
           "narrative_list"),
          ("market_status", "current_situation")),
     Slot("metrics", "지표", "확인된 수치를 제시",
@@ -176,8 +175,7 @@ _CURRENT_STATUS: tuple[Slot, ...] = (
     # same entities' free-text values, radar needs a full numeric profile -
     # each is the richest form its own data supports, in that order.
     Slot("competitor", "경쟁사", "다른 주체와 견주면 어디쯤인가",
-         ("competitor_panels", "level_matrix", "table", "radar", "share_split",
-          "narrative_list"),
+         ("benchmark_table", "table", "level_matrix", "radar"),
          ("market_status",), subject="organisation"),
     # 요인/페인포인트 questions ("가입 고려 요인", "인기 요인") answer with a
     # list, and a list is what the evidence actually holds - so this slot has
@@ -197,7 +195,7 @@ _CURRENT_STATUS: tuple[Slot, ...] = (
          ("grouped_bar", "segment_table", "narrative_list"),
          ("market_status",), (), subject="demographic", optional=True),
     Slot("keywords", "반복 언급", "여러 출처가 공통으로 짚은 표현",
-         ("recurring_terms",), (), (), optional=True),
+         ("keyword_tags",), (), (), optional=True),
     # Optional because 현황파악 is a "what is happening" question. Four of the
     # five 현황 questions we tested want no recommendation at all, and a
     # 권고 조치 card appearing under an external-audience market report was
@@ -216,10 +214,10 @@ _ISSUE_RESPONSE: tuple[Slot, ...] = (
          ("cause_tree", "cause_map", "bar", "item_bar", "narrative_list"),
          ("root_cause", "issue"), ("risks",)),
     Slot("impact", "영향", "그 결과 무엇이 달라지는가",
-         ("chart", "bar", "item_bar", "metric_comparison", "narrative_list"), ("impact",),
+         ("chart", "bar", "ranking_list", "item_bar", "metric_comparison", "narrative_list"), ("impact",),
          ("business_impacts",)),
     Slot("options", "선택지", "택할 수 있는 길들의 비교",
-         ("matrix", "level_matrix", "table", "narrative_list"),
+         ("matrix", "level_matrix", "benchmark_table", "table", "narrative_list"),
          ("risk_and_opportunity", "impact")),
     Slot("recommendation", "권장 조치", "무엇을 먼저 할 것인가",
          ("action_list", "narrative_list"), ("response_actions", "recommended_action"),
@@ -228,7 +226,7 @@ _ISSUE_RESPONSE: tuple[Slot, ...] = (
 
 _FUTURE_BUSINESS: tuple[Slot, ...] = (
     Slot("market_shift", "시장 변화", "시장이 어떻게 바뀌고 있는가",
-         ("landscape", "chart", "bar", "item_bar", "timeline", "narrative_list"),
+         ("landscape", "chart", "bar", "ranking_list", "item_bar", "timeline", "narrative_list"),
          ("trend", "market_status")),
     Slot("opportunity", "기회", "어디에 기회가 있는가",
          ("matrix", "bar", "item_bar", "narrative_list"), ("opportunity",)),
@@ -249,7 +247,7 @@ _FUTURE_BUSINESS: tuple[Slot, ...] = (
     # the emptiness was never visible. An empty card is the wrong way to show
     # it - the slot simply does not appear.
     Slot("capability", "필요 역량", "그 기회를 잡으려면 무엇이 있어야 하는가",
-         ("radar", "table", "narrative_list"), (), ("strengths",), optional=True),
+         ("radar", "benchmark_table", "table", "narrative_list"), (), ("strengths",), optional=True),
     Slot("roadmap", "실행 단계", "어떤 순서로 움직이는가",
          ("timeline", "action_list", "narrative_list"), ("strategic_recommendation",)),
     Slot("risk", "위험", "무엇이 어긋날 수 있는가",
@@ -258,7 +256,7 @@ _FUTURE_BUSINESS: tuple[Slot, ...] = (
 
 _ROOT_CAUSE: tuple[Slot, ...] = (
     Slot("problem", "Problem", "어떤 현상이 관찰되는가",
-         ("chart", "bar", "item_bar", "narrative_list"), ("problem", "issue")),
+         ("chart", "bar", "ranking_list", "item_bar", "narrative_list"), ("problem", "issue")),
     Slot("cause", "Cause", "그 현상의 원인 구조",
          ("cause_tree", "cause_map", "bar", "item_bar", "table", "narrative_list"),
          ("root_cause",)),
@@ -321,6 +319,9 @@ def _availability() -> dict[str, Callable[[Any, list[str]], bool]]:
         # direction can't claim the ranking bars and leave 순위 empty.
         "bar": lambda synthesis, items: bool(block_shapes.time_bar_groups(synthesis.metric_series)),
         "item_bar": lambda synthesis, items: bool(block_shapes.item_bar_groups(synthesis.metric_series)),
+        "ranking_list": lambda synthesis, items: block_shapes.has_ranking_list(
+            synthesis.metric_series, synthesis.comparison_points
+        ),
         # Three axes at once (metric x subject x category) - strictly more
         # than item_bar shows, so it is offered first wherever both fit.
         "grouped_bar": lambda synthesis, items: block_shapes.has_grouped_bars(synthesis.metric_series),
@@ -330,11 +331,19 @@ def _availability() -> dict[str, Callable[[Any, list[str]], bool]]:
         # Two axes of graded comparison - strictly more than the status band,
         # which keeps one row per criterion.
         "level_matrix": lambda synthesis, items: block_shapes.has_level_matrix(
-            synthesis.comparison_points
+            block_shapes.comparison_points_without_rank_dimensions(
+                synthesis.comparison_points
+            )
         ),
         # Composition, not ranking - and only where the source framed the
         # figures as parts of one named whole.
-        "share_split": lambda synthesis, items: block_shapes.has_share_split(synthesis.metric_series),
+        "share_split": lambda synthesis, items: any(
+            2 <= len(slices) <= 3
+            for _, slices in block_shapes.share_groups(synthesis.metric_series)
+        ),
+        "composition_breakdown": lambda synthesis, items: any(
+            len(slices) >= 4 for _, slices in block_shapes.share_groups(synthesis.metric_series)
+        ),
         "metric_comparison": lambda synthesis, items: bool(
             block_shapes.metric_comparison_groups(synthesis.metric_series)
         ),
@@ -350,14 +359,22 @@ def _availability() -> dict[str, Callable[[Any, list[str]], bool]]:
         # and showing 50대/60대/70대 이상 under "경쟁사" states something
         # false about the market rather than merely looking odd.
         "table": lambda synthesis, items: block_shapes.has_comparison(
-            synthesis.comparison_points, demographic=False
+            block_shapes.comparison_points_not_covered_by_ranking(
+                synthesis.comparison_points, synthesis.metric_series
+            ),
+            demographic=False,
         ),
         "segment_table": lambda synthesis, items: block_shapes.has_comparison(
             synthesis.comparison_points, demographic=True
         ),
         # Richer than the table wherever each competitor has several
         # kinds of fact attached, so it is offered first in 경쟁사.
-        "competitor_panels": lambda synthesis, items: block_shapes.has_competitor_panels(
+        "competitor_panels": lambda synthesis, items: bool(
+            block_shapes.competitor_panels_not_covered_by_ranking(
+                synthesis.comparison_points, synthesis.metric_series
+            )
+        ),
+        "benchmark_table": lambda synthesis, items: block_shapes.has_benchmark_grid(
             synthesis.comparison_points, synthesis.metric_series
         ),
         "radar": lambda synthesis, items: block_shapes.has_radar(synthesis.comparison_points),
@@ -385,6 +402,9 @@ def _availability() -> dict[str, Callable[[Any, list[str]], bool]]:
         # list; two bullets are a sentence and belong in the prose fallback.
         "factor_list": lambda synthesis, items: len(items) >= _MIN_FACTOR_ITEMS,
         "recurring_terms": lambda synthesis, items: block_shapes.has_recurring_terms(
+            getattr(synthesis, "grounded_claims", []) or []
+        ),
+        "keyword_tags": lambda synthesis, items: block_shapes.has_recurring_terms(
             getattr(synthesis, "grounded_claims", []) or []
         ),
         "narrative_list": lambda synthesis, items: bool(items),
@@ -425,14 +445,26 @@ def _consumption() -> dict[str, Callable[[Any, list[str]], set[str]]]:
         },
         "bar": lambda s, i: _metric_label_keys(block_shapes.time_bar_groups(s.metric_series)),
         "item_bar": lambda s, i: _metric_label_keys(block_shapes.item_bar_groups(s.metric_series)),
+        "ranking_list": lambda s, i: _metric_label_keys(
+            block_shapes.item_bar_groups(s.metric_series)
+        ) | {
+            f"cmp:{point.entity}"
+            for group in block_shapes.ranking_comparison_groups(s.comparison_points)
+            for point in group
+        },
         "grouped_bar": lambda s, i: {
             f"metric:{label}" for label, _, _ in block_shapes.grouped_bar_series(s.metric_series)
         },
         "share_split": lambda s, i: {
             f"metric:{label}" for label, _ in block_shapes.share_groups(s.metric_series)
         },
+        "composition_breakdown": lambda s, i: {
+            f"metric:{label}" for label, _ in block_shapes.share_groups(s.metric_series)
+        },
         "metric_comparison": lambda s, i: {
-            f"metric:{label}" for label, _ in block_shapes.metric_comparison_groups(s.metric_series)
+            f"metric:{point.label}"
+            for _, points in block_shapes.metric_comparison_groups(s.metric_series)
+            for point in points
         },
         "kpi_grid": lambda s, i: {f"metric:{point.label}" for point in s.metric_series},
         "kpi_single": lambda s, i: {f"metric:{point.label}" for point in s.metric_series},
@@ -449,6 +481,7 @@ def _consumption() -> dict[str, Callable[[Any, list[str]], set[str]]]:
             f"cmp:{point.entity}"
             for point in block_shapes.comparison_points_of_kind(s.comparison_points, False)
         },
+        "benchmark_table": lambda s, i: {"benchmark"},
         "radar": lambda s, i: {f"cmp:{point.entity}" for point in s.comparison_points},
         "status_bar": lambda s, i: {
             f"cmp:{entity}" for entity, _, _ in block_shapes.status_levels(s.comparison_points)
@@ -463,6 +496,7 @@ def _consumption() -> dict[str, Callable[[Any, list[str]], set[str]]]:
         "action_list": lambda s, i: {"actions"},
         "factor_list": lambda s, i: {f"item:{value}" for value in i},
         "recurring_terms": lambda s, i: {"recurring_terms"},
+        "keyword_tags": lambda s, i: {"recurring_terms"},
         # Every slot draws its own section's prose, so two narrative_lists are
         # two different texts. This was the one reusable block under the old
         # rule and stays unclaimable under this one.
@@ -524,6 +558,28 @@ def _synthesis_items(synthesis: Any, fields: tuple[str, ...]) -> list[str]:
     ]
 
 
+def slot_evidence_items(slot: Slot, synthesis: Any, report: Any) -> tuple[str | None, list[str]]:
+    """The exact prose inputs `resolve_slots()` gives one slot.
+
+    Exposed for diagnostics so a trace can observe the same evidence without
+    reimplementing subject routing or section fallback rules.
+    """
+    section_id, items = _section_items(report, slot.sections)
+    if not items:
+        items = _synthesis_items(synthesis, slot.fields)
+    return section_id, _items_about(items, slot.subject)
+
+
+def block_data_supported(block_type: str, synthesis: Any, items: list[str]) -> bool:
+    """Whether the evidence alone supports a block, before report-wide claims.
+
+    This is diagnostic only. Final selection remains the two-pass algorithm
+    in `resolve_slots()` and still accounts for prior ownership/duplication.
+    """
+    predicate = _availability().get(block_type)
+    return predicate is not None and predicate(synthesis, items)
+
+
 def resolve_slots(purpose_id: str | None, synthesis: Any, report: Any) -> list[ResolvedSlot]:
     """Fill each of the purpose's slots with the best block its data supports."""
     slots = PURPOSE_SLOTS.get(purpose_id or "", DEFAULT_PURPOSE_SLOTS)
@@ -545,10 +601,7 @@ def resolve_slots(purpose_id: str | None, synthesis: Any, report: Any) -> list[R
     # this pass reproduces the single-block behaviour verbatim.
     leads: list[tuple[Slot, str | None, str | None, list[str]]] = []
     for slot in slots:
-        section_id, items = _section_items(report, slot.sections)
-        if not items:
-            items = _synthesis_items(synthesis, slot.fields)
-        items = _items_about(items, slot.subject)
+        section_id, items = slot_evidence_items(slot, synthesis, report)
         lead = next(
             (c for c in slot.candidates if drawable(c, synthesis, items)), None
         )

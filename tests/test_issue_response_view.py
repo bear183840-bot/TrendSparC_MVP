@@ -85,7 +85,7 @@ def test_dashboard_does_not_invent_reference_mockup_scores_or_time_series(monkey
 
     output = "\n".join(captured)
     assert "SWOT" in output
-    assert "Recommended Actions" in output
+    assert "실행 제안" in output
     assert "Medium" not in output
     assert "2025E" not in output
     assert "https://example.com/kt" in output
@@ -134,4 +134,3 @@ def test_dashboard_prefers_audience_tailored_generated_report_over_raw_synthesis
     assert "가입자 이탈 위험" not in output
     assert "AI 추천 강화 기회" not in output
     assert "추천 서비스를 고도화한다" not in output
-

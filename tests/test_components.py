@@ -393,3 +393,30 @@ def test_importance_bars_print_the_reason_instead_of_hiding_it(monkeypatch):
     assert 'class="ts-action-basis"' in output
     body = output.split('class="ts-action-basis"')[1].split(">", 1)[1]
     assert "세 개 문서가 같은 방향을 보고했다" in body
+
+
+def test_compact_ranking_prefers_question_entities_over_adjacent_valid_groups(monkeypatch):
+    captured: list[str] = []
+    monkeypatch.setattr(components.st, "markdown", lambda body, **kwargs: captured.append(body))
+    points = [
+        *[
+            MetricPoint(label="OTT 이용 기기 선호도", subject=name, period="2025", value=value, unit="%")
+            for name, value in (("스마트폰", 90), ("TV", 40), ("PC", 20), ("태블릿", 10))
+        ],
+        *[
+            MetricPoint(label="유료 OTT 플랫폼 이용률", subject=name, period="2025", value=value, unit="%")
+            for name, value in (("Netflix", 50), ("TVING", 30), ("Wavve", 20), ("Disney+", 10))
+        ],
+    ]
+
+    components.render_ranking_list(
+        points,
+        group_limit=1,
+        show_insight=False,
+        question="OTT 생태계 비교",
+        preferred_entities=["Netflix", "TVING", "Wavve", "Disney+", "OTT"],
+    )
+    output = "".join(captured)
+
+    assert "유료 OTT 플랫폼 이용률" in output
+    assert "OTT 이용 기기 선호도" not in output

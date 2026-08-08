@@ -995,7 +995,13 @@ _PAYLOAD_CHAR_BUDGET = int(os.getenv("TRENDSPARC_REPORT_GENERATOR_CHAR_BUDGET", 
 # Highlights go first because they restate key_points; evidence goes last and
 # keeps a floor, because it is the text every figure is extracted from - a
 # report that loses its evidence sentences loses its charts with them.
-_TRIM_ORDER = (("highlights", 0), ("key_points", 3), ("grounded_claims", 4), ("evidence", 8))
+_TRIM_ORDER = (
+    ("highlights", 0),
+    ("key_points", 3),
+    ("grounded_claims", 4),
+    ("metric_series", 12),
+    ("evidence", 8),
+)
 
 
 def _claim_for_writer(claim: dict) -> dict:
@@ -1012,6 +1018,27 @@ def _claim_for_writer(claim: dict) -> dict:
         "claim_type": claim.get("claim_type"),
         "claim": claim.get("claim"),
         "source_id": claim.get("source_id"),
+    }
+
+
+def _metric_for_writer(point: dict) -> dict:
+    """Keep the chart axes and provenance reference, not repeated evidence.
+
+    One evidence sentence can contain many values.  Serialising that same
+    sentence, URL, document metadata and two claim ids into every metric made
+    a 62-claim run spend 42,802 characters on `metric_series` alone.  The
+    sentence already exists once in `synthesis.evidence`; the report writer
+    only needs the structured axes plus a stable reference to it.
+    """
+    return {
+        "metric_id": point.get("metric_id"),
+        "label": point.get("label"),
+        "subject": point.get("subject"),
+        "period": point.get("period"),
+        "value": point.get("value"),
+        "unit": point.get("unit"),
+        "is_forecast": bool(point.get("is_forecast")),
+        "evidence_synthesis_claim_id": point.get("evidence_synthesis_claim_id"),
     }
 
 
@@ -1042,6 +1069,9 @@ def _fit_payload(payload: dict, report_plan: Any, budget: int) -> dict:
     claims = synthesis.get("grounded_claims") or []
     if claims:
         synthesis["grounded_claims"] = [_claim_for_writer(claim) for claim in claims]
+    metrics = synthesis.get("metric_series") or []
+    if metrics:
+        synthesis["metric_series"] = [_metric_for_writer(point) for point in metrics]
     conclusions = synthesis.get("conclusions") or []
     if conclusions and all(
         str(item.get("conclusion_id", "")).startswith("rule:") for item in conclusions
@@ -1060,7 +1090,6 @@ def _fit_payload(payload: dict, report_plan: Any, budget: int) -> dict:
                 synthesis["grounded_claims"],
                 key=lambda claim: claim.get("synthesis_claim_id") not in referenced,
             )
-
     dropped: dict[str, int] = {}
     for field, floor in _TRIM_ORDER:
         while size() > budget and len(synthesis.get(field) or []) > floor:
@@ -1088,6 +1117,7 @@ def generate_report(
     audience_id: str,
     canonical_entities: list[str] | None = None,
     missing_information_needs: list[str] | None = None,
+    target_company: str | None = None,
 ) -> GeneratedReport:
     """Use structured output when configured; otherwise create an evidence-safe report."""
     api_key = os.getenv("TRENDSPARC_REPORT_GENERATOR_API_KEY") or os.getenv("OPENAI_API_KEY")
@@ -1104,6 +1134,7 @@ def generate_report(
         payload = {
             "question": question,
             "canonical_entities": list(dict.fromkeys(canonical_entities or [])),
+            "target_company": target_company,
             "sector_id": synthesis.sector_id,
             "purpose": {
                 "id": purpose_id,
@@ -1158,6 +1189,11 @@ def generate_report(
                         "For an executive report, use: so-what summary, key metrics, timeline, decision required, risk, sources. "
                         "Include only evidenced KPI values and timeline events; otherwise label what still needs verification. "
                         "Treat unsupported recommendations as proposals to review, not established decisions. "
+                        "payload.target_company is the accountable actor for every recommendation in actions. "
+                        "Never turn another company, government body, research institute, association, or source "
+                        "publisher's announced plan into payload.target_company's action. Keep such third-party "
+                        "plans only as evidence or benchmarks. A subjectless proposal may be framed as an action "
+                        "for payload.target_company, but must remain a proposal unless evidence supports adoption. "
                         "The output-language rule is strict: write the title, executive summary, every section, "
                         "and every limitation in the question's language. For a Korean question, all narrative "
                         "text must be Korean; keep only proper names and standard acronyms such as NVIDIA, HBM, "

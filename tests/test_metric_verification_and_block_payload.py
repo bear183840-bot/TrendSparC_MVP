@@ -12,6 +12,10 @@ import pytest
 
 from sectors.sk_broadband.adapter.analyzer import (
     _number_is_in_content,
+    _recover_missing_metric_claims,
+    _recovered_metric_points,
+    _merge_metric_points,
+    _displayable_metric_points,
     _verified_metric_points,
 )
 
@@ -74,6 +78,154 @@ def test_a_metric_whose_number_is_not_in_its_quote_is_still_dropped():
         "evidence_claim_id": "c1",
     }
     assert _verified_metric_points({"metric_points": [point]}, _QUOTE, _CLAIMS) == []
+
+
+def test_a_grounded_value_is_kept_when_only_the_period_is_not_local():
+    quote = "숏폼 플랫폼별 이용률은 유튜브 쇼츠가 78.8%로 가장 많았다."
+    claims = [{"claim_id": "c1", "claim_type": "metric", "evidence_quote": quote}]
+    point = {
+        "label": "유튜브 쇼츠 이용률", "subject": "유튜브 쇼츠",
+        "period": "2024년", "value": 78.8, "unit": "%",
+        "share_of": None, "is_forecast": False, "evidence_claim_id": "c1",
+    }
+
+    verified = _verified_metric_points({"metric_points": [point]}, quote, claims)
+
+    assert len(verified) == 1
+    assert verified[0]["period"] == "시점 미상"
+    assert verified[0]["value"] == 78.8
+
+
+def test_year_suffix_and_percentage_point_notation_are_safe_equivalents():
+    quote = "2024 아이엠 리포트에서 이용률은 전년보다 3.7%p 증가했다."
+    claims = [{"claim_id": "c1", "claim_type": "metric", "evidence_quote": quote}]
+    point = {
+        "label": "이용률 증가폭", "subject": "모델이 덧붙인 주체",
+        "period": "2024년", "value": 3.7, "unit": "p.p.",
+        "share_of": "모델이 덧붙인 모집단", "is_forecast": False,
+        "evidence_claim_id": "c1",
+    }
+
+    verified = _verified_metric_points({"metric_points": [point]}, quote, claims)
+
+    assert len(verified) == 1
+    assert verified[0]["period"] == "2024년"
+    assert verified[0]["unit"] == "p.p."
+    assert verified[0]["subject"] is None
+    assert verified[0]["share_of"] is None
+
+
+def test_verified_comparison_quote_recovers_every_literal_value():
+    quote = "유튜브 쇼츠 78.8%, 인스타그램 릴스 46.2%, 틱톡 22.9% 순이다."
+    claims = [{
+        "claim_id": "c1", "claim_type": "comparison",
+        "claim": "플랫폼별 이용률 비교", "evidence_quote": quote,
+    }]
+
+    recovered = _recovered_metric_points(claims)
+
+    assert [point["value"] for point in recovered] == [78.8, 46.2, 22.9]
+    assert all(point["unit"] == "%" for point in recovered)
+    assert all(point["period"] == "시점 미상" for point in recovered)
+    assert all(point["evidence_claim_id"] == "c1" for point in recovered)
+
+
+def test_numeric_lists_become_separate_generic_series_without_domain_hardcoding():
+    quote = (
+        "주로 시청한 콘텐츠는 게임(63.9%), 음악·공연·댄스(50.6%), "
+        "요리·먹방(먹는 방송, 40.6%) 등이고, 주로 이용하는 플랫폼은 "
+        "인스타그램 릴스(37.2%), 유튜브(35.8%), 유튜브 쇼츠(16.5%), "
+        "틱톡(8.0%), 네이버 클립(1.3%) 등의 순이었다."
+    )
+    claims = [{
+        "claim_id": "c1", "claim_type": "metric",
+        "claim": quote, "evidence_quote": quote,
+    }]
+
+    recovered = _recovered_metric_points(claims)
+    content = recovered[:3]
+    platforms = recovered[3:]
+
+    assert {point["label"] for point in content} == {"주로 시청한 콘텐츠"}
+    assert [point["subject"] for point in content] == [
+        "게임", "음악·공연·댄스", "요리·먹방",
+    ]
+    assert [point["value"] for point in content] == [63.9, 50.6, 40.6]
+    assert {point["label"] for point in platforms} == {"주로 이용하는 플랫폼"}
+    assert [point["subject"] for point in platforms] == [
+        "인스타그램 릴스", "유튜브", "유튜브 쇼츠", "틱톡", "네이버 클립",
+    ]
+    assert [point["value"] for point in platforms] == [37.2, 35.8, 16.5, 8.0, 1.3]
+
+
+def test_numeric_list_grouping_is_vocabulary_free_for_company_comparisons():
+    quote = "가입자 수는 A사(912만명), B사(682만명), C사(551만명) 순이다."
+    claims = [{
+        "claim_id": "c1", "claim_type": "comparison",
+        "claim": quote, "evidence_quote": quote,
+    }]
+
+    recovered = _recovered_metric_points(claims)
+
+    assert {point["label"] for point in recovered} == {"가입자 수"}
+    assert [point["subject"] for point in recovered] == ["A사", "B사", "C사"]
+    assert [point["value"] for point in recovered] == [912, 682, 551]
+
+
+def test_recovery_never_turns_bare_years_or_united_numbers_into_metrics():
+    claims = [{
+        "claim_id": "c1", "claim_type": "metric",
+        "claim": "표본 설명", "evidence_quote": "2024년 보고서는 표본 5000을 조사했다.",
+    }]
+
+    assert _recovered_metric_points(claims) == []
+
+
+def test_question_relevant_numeric_sentence_becomes_an_exact_quote_claim():
+    passages = [{
+        "passage_id": "P007",
+        "text": "숏폼 플랫폼 이용률은 93.2%였다. 조사 대상 표본 크기는 2000명이다.",
+    }]
+
+    claims = _recover_missing_metric_claims([], passages, "숏폼 이용률은?", [])
+
+    assert len(claims) == 1
+    assert claims[0]["claim_type"] == "metric"
+    assert claims[0]["claim"] == claims[0]["evidence_quote"]
+    assert claims[0]["evidence_quote"] == "숏폼 플랫폼 이용률은 93.2%였다."
+    assert claims[0]["evidence_passage_id"] == "P007"
+    assert _recovered_metric_points(claims)[0]["value"] == 93.2
+
+
+def test_numeric_passage_without_a_question_term_is_not_promoted():
+    passages = [{"passage_id": "P001", "text": "무관한 매출은 300억원이다."}]
+
+    assert _recover_missing_metric_claims([], passages, "숏폼 이용률은?", []) == []
+
+
+def test_deterministic_recovery_does_not_duplicate_a_verified_ai_point():
+    verified = [{
+        "label": "증가폭", "period": "지난해", "value": 3.7,
+        "unit": "p.p.", "evidence_claim_id": "c1",
+    }]
+    recovered = [{
+        "label": "증가폭", "period": "2024", "value": 3.7,
+        "unit": "%p", "evidence_claim_id": "c1",
+    }]
+
+    assert _merge_metric_points(verified, recovered) == verified
+
+
+def test_url_and_sentence_debris_never_become_dashboard_axes():
+    points = [
+        {"label": "com/User/abc%2Fdef", "subject": "path", "value": 1},
+        {"label": "**가입자 수**", "subject": "▲ 국내", "value": 2},
+        {"label": "근거 문장 전체를 축 이름으로 복사해서 단어가 열 개보다 훨씬 더 많아진 잘못된 지표 이름입니다", "value": 3},
+    ]
+
+    assert _displayable_metric_points(points) == [
+        {"label": "가입자 수", "subject": "국내", "value": 2}
+    ]
 
 
 # --- block payloads carry only what the block type reads ----------------

@@ -36,6 +36,19 @@ def _payload(claims: int = 20, evidence: int = 20) -> dict:
             "highlights": [f"하이라이트 {index} " + "내용 " * 20 for index in range(10)],
             "key_points": [f"핵심 {index} " + "내용 " * 20 for index in range(10)],
             "evidence": [f"근거 {index}: 이용률은 {index}0.5%였다." for index in range(evidence)],
+            "metric_series": [
+                {
+                    "metric_id": f"m{index}", "label": "플랫폼 이용률",
+                    "subject": f"플랫폼 {index}", "period": "2025년",
+                    "value": index + 0.5, "unit": "%", "is_forecast": False,
+                    "evidence_claim_id": f"c{index}",
+                    "evidence_synthesis_claim_id": f"d1:c{index}",
+                    "evidence_quote": "같은 근거 문장이 각 수치마다 반복된다. " * 20,
+                    "doc_id": "d1", "source_id": "example.com",
+                    "source_url": "https://example.com/very/long/path",
+                }
+                for index in range(evidence)
+            ],
         },
     }
 
@@ -65,6 +78,18 @@ def test_rule_based_conclusions_are_dropped_because_they_restate_the_claims():
     fitted = _fit_payload(payload, _plan([]), budget=10_000)
 
     assert fitted["synthesis"]["conclusions"] == []
+
+
+def test_metrics_keep_chart_axes_but_do_not_repeat_evidence_and_urls():
+    fitted = _fit_payload(_payload(evidence=20), _plan([]), budget=20_000)
+    metric = fitted["synthesis"]["metric_series"][0]
+
+    assert set(metric) == {
+        "metric_id", "label", "subject", "period", "value", "unit",
+        "is_forecast", "evidence_synthesis_claim_id",
+    }
+    assert metric["label"] == "플랫폼 이용률"
+    assert metric["subject"] == "플랫폼 0"
 
 
 def test_evidence_survives_when_something_has_to_go():

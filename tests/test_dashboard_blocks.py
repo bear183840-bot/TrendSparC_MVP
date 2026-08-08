@@ -103,6 +103,17 @@ def test_metric_comparison_does_not_mix_units():
     assert components.has_metric_comparison(mixed) is False
 
 
+def test_metric_comparison_rejects_unknown_period_and_ranking_subjects():
+    unknown = [_metric("이용률", "시점 미상", 89, "%"), _metric("선호도", "시점 미상", 91, "%")]
+    ranked = [
+        MetricPoint(label="플랫폼 이용률", subject=name, period="2025년", value=value, unit="%")
+        for name, value in (("A", 50), ("B", 30), ("C", 20))
+    ]
+
+    assert components.has_metric_comparison(unknown) is False
+    assert components.has_metric_comparison(ranked) is False
+
+
 def test_render_metric_comparison_bar_length_is_the_real_ratio(markup):
     components.render_metric_comparison(
         "2025년", [_metric("매출", "2025년", 100), _metric("영업이익", "2025년", 25)]
@@ -120,7 +131,7 @@ def test_timeline_orders_entries_chronologically():
         ["2026년 1분기에 신규 요금제를 출시했다", "2024년 3분기 가입자가 감소했다"],
         [_metric("매출", "2025년", 45406)],
     )
-    assert [period for period, _ in entries] == ["2024년 3분기", "2025년", "2026년 1분기"]
+    assert [period for period, _ in entries] == ["2024년 3분기", "2026년 1분기"]
 
 
 def test_timeline_excludes_undated_prose():

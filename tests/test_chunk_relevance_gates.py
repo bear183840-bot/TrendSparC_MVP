@@ -55,6 +55,19 @@ def test_no_question_terms_keeps_everything():
     assert analyzer._chunk_can_answer("아무 내용", []) is True
 
 
+def test_only_very_dense_numeric_chunks_get_the_larger_output_ceiling():
+    ordinary = "이용률 1% " * (analyzer._DENSE_FIGURE_COUNT - 1)
+    dense = "이용률 1% " * analyzer._DENSE_FIGURE_COUNT
+
+    assert analyzer._analysis_max_tokens(ordinary) == analyzer._DEFAULT_ANALYSIS_MAX_TOKENS
+    assert analyzer._analysis_max_tokens(dense) == analyzer._DENSE_ANALYSIS_MAX_TOKENS
+
+
+def test_only_large_quote_repair_batches_get_the_larger_output_ceiling():
+    assert analyzer._repair_max_tokens(7) == analyzer._DEFAULT_REPAIR_MAX_TOKENS
+    assert analyzer._repair_max_tokens(8) == analyzer._DENSE_REPAIR_MAX_TOKENS
+
+
 # --- after the call: an irrelevant chunk contributes nothing --------------
 
 

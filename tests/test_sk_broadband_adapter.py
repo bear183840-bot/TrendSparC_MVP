@@ -1328,6 +1328,10 @@ def test_broadband_analyzer_uses_structured_schema(monkeypatch):
         "경쟁사별 가입자 수치",
     ]
     assert "content" not in user_payload["document"]
+    assert "source_id" not in user_payload["document"]
+    assert "reliability_tier" not in user_payload["document"]
+    assert "url" not in user_payload["document"]
+    assert user_payload["document"]["title"]
     assert user_payload["document"]["evidence_passages"][0]["passage_id"] == "P001"
 
 

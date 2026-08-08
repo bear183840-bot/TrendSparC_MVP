@@ -31,6 +31,11 @@ class SlotContext:
     opportunities: list[str]
     strengths: list[str]
     weaknesses: list[str]
+    presentation: Any | None = None
+    question: str = ""
+    # Direct registry callers historically receive the complete block.
+    # The dashboard opts into the first-screen budget explicitly.
+    compact: bool = False
 
 
 # Returns a zero-arg callable that draws the block, or None when the data

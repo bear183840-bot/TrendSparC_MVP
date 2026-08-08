@@ -30,3 +30,9 @@ def test_save_source_documents_writes_markdown_and_index(tmp_path):
     index = json.loads((saved_dir / "index.json").read_text(encoding="utf-8"))
     assert index[0]["file"] == markdown_path.name
     assert index[0]["doc_id"] == "doc1"
+
+
+def test_pipeline_result_keeps_the_actual_question_in_full_json():
+    result = PipelineResult(request_id="req_question", question="실제 사용자 질문")
+
+    assert PipelineResult.model_validate_json(result.model_dump_json()).question == "실제 사용자 질문"

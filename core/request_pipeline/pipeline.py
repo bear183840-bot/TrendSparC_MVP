@@ -31,6 +31,7 @@ from audience.adapter import adapt_for_audience
 from common.contracts import (
     AttachmentExtraction,
     AudienceAdaptation,
+    BlockDeliveryTrace,
     BlockPriorityPlan,
     DocumentAnalysis,
     DynamicLayout,
@@ -38,6 +39,7 @@ from common.contracts import (
     GeneratedReport,
     ReportPlan,
     ReportPurposeClassification,
+    QuestionCoverageRequirement,
     SectorRoute,
     SourceCollectionResult,
     SourceDocument,
@@ -51,12 +53,18 @@ from common.content_quality_validator import needs_generic_topic_search
 from common.errors import PipelineStageError, StageStatus, StageTrace
 from core.attachments.extractor import build_question_context, extract_attachments
 from core.block_priority_planner.planner import plan_block_priorities, target_block_shapes
+from core.block_delivery_trace import build_block_delivery_trace
 from core.collection_progress import bind_collection_events, reset_collection_events
 from core.entity.ai_based import extract_entities_ai
 from core.entity.search_terms import build_search_terms
 from core.layout_generator.generator import generate_layout
 from core.report_planner.planner import plan_report
 from core.report_generator.generator import generate_report
+from core.question_coverage import (
+    assess_question_coverage,
+    coverage_hints,
+    derive_question_coverage,
+)
 from core.report_purpose.classifier import classify_report_purpose
 from core.run_archive import archive_run
 from core.request_pipeline.direct_response import direct_response_for
@@ -129,6 +137,12 @@ def _missing_analysis_needs(
 
 class PipelineResult(BaseModel):
     request_id: str
+    # Persist the user's actual question with the result.  The archive also
+    # stores it, but uploaded/full result JSON must remain self-describing
+    # even when its small archive record is not present on this machine.
+    question: Optional[str] = None
+    question_coverage: Optional[QuestionCoverageRequirement] = None
+    question_coverage_gaps: list[str] = Field(default_factory=list)
     trace: list[StageTrace] = []
     attachment_extractions: list[AttachmentExtraction] = []
     entities: Optional[EntityExtractionResult] = None
@@ -148,6 +162,7 @@ class PipelineResult(BaseModel):
     generated_report: Optional[GeneratedReport] = None
     audience_adaptation: Optional[AudienceAdaptation] = None
     layout: Optional[DynamicLayout] = None
+    block_delivery_trace: Optional[BlockDeliveryTrace] = None
     halted_at_stage: Optional[str] = None
     direct_answer: Optional[str] = None
 
@@ -199,7 +214,11 @@ def _run_pipeline_stages(
     # One question's search history must not colour the next - the stability
     # warning compares repeats of the same query within a single run.
     reset_query_yield_history()
-    result = PipelineResult(request_id=request.request_id)
+    result = PipelineResult(
+        request_id=request.request_id,
+        question=request.question,
+        question_coverage=derive_question_coverage(request.question),
+    )
     if progress_sink is not None:
         # Let a caller (e.g. the Streamlit UI, polling this list from another
         # thread while run_pipeline is still executing) observe collection
@@ -347,7 +366,11 @@ def _run_pipeline_stages(
                 ),
                 report_purpose_id=result.report_purpose.purpose_id,
                 information_needs=result.entities.information_needs,
-                target_block_shapes=target_block_shapes(result.block_priority_plan),
+                target_block_shapes=[
+                    *target_block_shapes(result.block_priority_plan),
+                    *coverage_hints(result.question_coverage),
+                ],
+                question_coverage=result.question_coverage,
                 suggested_terms=search_terms,
                 as_of_date=request.created_at.date().isoformat(),
                 excluded_domains=list(result.sector_route.matched_profile.blocked_scrape_domains),
@@ -390,7 +413,8 @@ def _run_pipeline_stages(
                     [*documents, *attachment_documents],
                     question_with_context,
                     result.source_plan.information_needs,
-                    target_block_shapes(result.block_priority_plan),
+                    [*target_block_shapes(result.block_priority_plan),
+                     *coverage_hints(result.question_coverage or QuestionCoverageRequirement())],
                 )
             elif role == "validator":
                 args = (documents, result.source_plan.search_context)
@@ -509,8 +533,14 @@ def _run_pipeline_stages(
                 target = max(minimum, profile.target_analyzed_documents)
                 max_recollections = profile.max_analysis_recollection_attempts
                 recollection_attempt = 0
+                structural_gaps = assess_question_coverage(
+                    usable, result.question_coverage or QuestionCoverageRequirement()
+                )
 
-                while target > 0 and len(usable) < target and recollection_attempt < max_recollections:
+                while (
+                    ((target > 0 and len(usable) < target) or structural_gaps)
+                    and recollection_attempt < max_recollections
+                ):
                     recollection_attempt += 1
                     previous_context = result.source_plan.search_context
                     if previous_context is None:
@@ -539,7 +569,8 @@ def _run_pipeline_stages(
                                 (
                                     f"Analyzer retained {len(usable)} usable documents; "
                                     f"collect toward the target of {target} usable documents "
-                                    f"with replacement evidence for missing needs: {missing_needs}."
+                                    f"with replacement evidence for missing needs: {missing_needs}; "
+                                    f"missing question axes: {structural_gaps}."
                                 ),
                             ],
                         }
@@ -589,7 +620,8 @@ def _run_pipeline_stages(
                         retry_validated,
                         question_with_context,
                         retry_plan.information_needs,
-                        target_block_shapes(result.block_priority_plan),
+                        [*target_block_shapes(result.block_priority_plan),
+                         *coverage_hints(result.question_coverage or QuestionCoverageRequirement())],
                     )
                     retry_output = _enrich_document_analyses(retry_output, retry_validated)
                     result.trace.append(
@@ -601,8 +633,13 @@ def _run_pipeline_stages(
                         for analysis in _usable_analyses(output)
                     }
                     usable = list(usable_by_doc_id.values())
+                    structural_gaps = assess_question_coverage(
+                        usable, result.question_coverage or QuestionCoverageRequirement()
+                    )
                     documents.extend(retry_validated)
                     result.source_plan = retry_plan
+
+                result.question_coverage_gaps = structural_gaps
 
                 if minimum > 0 and len(usable) < minimum:
                     raise PipelineStageError(
@@ -754,6 +791,18 @@ def _run_report_stages(
     these four stages are pure transforms over `result.synthesis`, and
     re-running them shouldn't require paying for collection again.
     """
+    # Recommendations are owned by the company selected by sector routing.
+    # A source organisation's announced plan remains in claims/evidence, but
+    # must not become that company's action merely because an analyzer put it
+    # in recommended_actions.
+    from common.action_quality import actions_for_owner, routed_action_owner
+
+    action_owner = routed_action_owner(result.sector_route)
+    result.synthesis = result.synthesis.model_copy(update={
+        "recommended_actions": actions_for_owner(
+            result.synthesis.recommended_actions, action_owner
+        )
+    })
     # 6. report_planner
     try:
         maybe_force_fail("report_planner")
@@ -761,6 +810,7 @@ def _run_report_stages(
         result.trace.append(StageTrace(stage="report_planner", status=StageStatus.OK))
     except PipelineStageError as exc:
         halt("report_planner", exc.reason, exc.detail)
+        result.block_delivery_trace = build_block_delivery_trace(result, audience_id)
         return
 
     # 7. report_generator
@@ -774,6 +824,7 @@ def _run_report_stages(
             result.document_analyses,
             result.source_plan.information_needs if result.source_plan else [],
         )
+        still_missing = list(dict.fromkeys([*still_missing, *result.question_coverage_gaps]))
         # A fixture run starts at report_planner, so the entity stage never
         # ran and there are no canonical entities to normalize names against.
         entities = result.entities
@@ -787,6 +838,7 @@ def _run_report_stages(
             audience_id,
             canonical_entities=canonical_entities,
             missing_information_needs=still_missing,
+            target_company=action_owner,
         )
         # The dashboard's chart/KPI/timeline blocks read
         # TrendSynthesis.metric_series, not the report's sections, so figures
@@ -796,6 +848,7 @@ def _run_report_stages(
         result.trace.append(StageTrace(stage="report_generator", status=StageStatus.OK))
     except PipelineStageError as exc:
         halt("report_generator", exc.reason, exc.detail)
+        result.block_delivery_trace = build_block_delivery_trace(result, audience_id)
         return
 
     # 8. audience_adapter
@@ -810,6 +863,7 @@ def _run_report_stages(
         result.trace.append(StageTrace(stage="audience_adapter", status=StageStatus.OK))
     except PipelineStageError as exc:
         halt("audience_adapter", exc.reason, exc.detail)
+        result.block_delivery_trace = build_block_delivery_trace(result, audience_id)
         return
 
     # 9. layout_generator
@@ -824,6 +878,7 @@ def _run_report_stages(
         result.trace.append(StageTrace(stage="layout_generator", status=StageStatus.OK))
     except PipelineStageError as exc:
         halt("layout_generator", exc.reason, exc.detail)
+    result.block_delivery_trace = build_block_delivery_trace(result, audience_id)
 
 
 # Stages a fixture run replaces rather than executes - recorded as SKIPPED so
@@ -859,6 +914,8 @@ def run_pipeline_from_documents(
     run, so the trace still shows what actually happened rather than implying
     those stages ran again.
     """
+    result.question = question
+    result.question_coverage = derive_question_coverage(question)
     documents = list(result.collected_source_documents or [])
     if not documents:
         raise PipelineStageError(
@@ -893,7 +950,8 @@ def run_pipeline_from_documents(
         analyses = _call_sector_adapter_stage(
             result.sector_route, "analyzer", documents, question,
             result.source_plan.information_needs if result.source_plan else [],
-            target_block_shapes(result.block_priority_plan),
+            [*target_block_shapes(result.block_priority_plan),
+             *coverage_hints(result.question_coverage)],
         )
         # Same relevance gate the live path applies: a document search matched
         # is not a document that answers the question.
@@ -906,6 +964,9 @@ def run_pipeline_from_documents(
             if analysis not in usable:
                 print(f"[synthesis] doc '{analysis.doc_id}' excluded on resume", file=sys.stderr)
         result.document_analyses = usable
+        result.question_coverage_gaps = assess_question_coverage(
+            usable, result.question_coverage
+        )
         result.trace.append(StageTrace(stage="sector_adapter.analyzer", status=StageStatus.OK,
                                        reason="resumed from saved documents"))
     except PipelineStageError as exc:
@@ -940,7 +1001,11 @@ def run_pipeline_from_synthesis(
     TrendSynthesis straight off disk instead. No collector, analyzer, entity
     or synthesis AI pass runs on this path.
     """
-    result = PipelineResult(request_id=synthesis.request_id)
+    result = PipelineResult(
+        request_id=synthesis.request_id,
+        question=question,
+        question_coverage=derive_question_coverage(question),
+    )
     result.synthesis = synthesis
     result.report_purpose = report_purpose
     for stage in _FIXTURE_SKIPPED_STAGES:

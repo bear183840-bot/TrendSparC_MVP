@@ -116,7 +116,7 @@ def test_ai_prompt_explicitly_handles_dirty_language_and_general(monkeypatch):
 
     fake = _FakeOpenAI(response)
     fake.chat.completions = CapturingCompletions()
-    monkeypatch.setattr(entity_ai_module, "OpenAI", lambda api_key: fake)
+    monkeypatch.setattr(entity_ai_module, "OpenAI", lambda api_key, **kwargs: fake)
 
     request = UserRequest(request_id="req_prompt", question="오늘 점심 뭐먹지")
     extract_entities_ai(request, _rule_based_result(request.request_id))
@@ -275,6 +275,7 @@ def test_ai_reclassifies_the_canonical_name_itself_into_organizations(monkeypatc
 def test_entity_ai_model_defaults_to_gpt4o_and_respects_env_override(monkeypatch):
     monkeypatch.setenv("TRENDSPARC_ENTITY_AI_API_KEY", "test-key")
     monkeypatch.delenv("TRENDSPARC_ENTITY_AI_MODEL", raising=False)
+    monkeypatch.delenv("TRENDSPARC_ENTITY_AI_BASE_URL", raising=False)
     response = _make_response("current_status", [], [], [])
     captured = {}
 
@@ -285,12 +286,17 @@ def test_entity_ai_model_defaults_to_gpt4o_and_respects_env_override(monkeypatch
 
     fake = _FakeOpenAI(response)
     fake.chat.completions = CapturingCompletions()
-    monkeypatch.setattr(entity_ai_module, "OpenAI", lambda api_key: fake)
+    monkeypatch.setattr(entity_ai_module, "OpenAI", lambda api_key, **kwargs: fake)
 
     request = UserRequest(request_id="req_model", question="SK하이닉스 HBM 시장 전망은?")
     extract_entities_ai(request, _rule_based_result(request.request_id))
 
     assert captured["model"] == "gpt-4o"
+
+    captured.clear()
+    monkeypatch.setenv("TRENDSPARC_ENTITY_AI_BASE_URL", "https://api.upstage.ai/v1")
+    extract_entities_ai(request, _rule_based_result(request.request_id))
+    assert captured["model"] == "solar-pro3"
 
     captured.clear()
     monkeypatch.setenv("TRENDSPARC_ENTITY_AI_MODEL", "gpt-4o-mini")

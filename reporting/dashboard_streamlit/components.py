@@ -40,6 +40,8 @@ from common.block_shapes import (  # noqa: F401
     _format_number,
     bar_metric_groups,
     item_bar_groups,
+    ranking_comparison_groups,
+    ranking_list_groups,
     time_bar_groups,
     clean_citation,
     has_bar_metrics,
@@ -55,6 +57,7 @@ from common.block_shapes import (  # noqa: F401
     SHARE_SUM_TOLERANCE,
     grouped_bar_series,
     competitor_panels,
+    benchmark_grid,
     has_competitor_panels,
     has_grouped_bars,
     has_landscape,
@@ -228,7 +231,9 @@ def headline_stats(synthesis: Any, purpose_id: str | None) -> list[tuple[str, in
     ]
 
 
-def render_executive_summary(summary: str, stats: list[tuple[str, int, str]]) -> None:
+def render_executive_summary(
+    summary: str, stats: list[tuple[str, int, str]], heading: str = "Executive Summary"
+) -> None:
     """Executive Summary card with a purpose-appropriate stat column."""
     cells = "".join(
         f'<div class="ts-stat {accent}"><small>{escape(label)}</small><b>{count}건</b></div>'
@@ -236,7 +241,7 @@ def render_executive_summary(summary: str, stats: list[tuple[str, int, str]]) ->
     )
     st.markdown(
         '<div class="ts-summary-grid">'
-        '<section class="ts-summary"><h2>Executive Summary</h2>'
+        f'<section class="ts-summary"><h2>{escape(heading)}</h2>'
         f'<p>{escape(summary or "분석 가능한 근거가 부족합니다.")}</p></section>'
         f'<aside class="ts-stat-col">{cells}</aside></div>',
         unsafe_allow_html=True,
@@ -325,6 +330,42 @@ def render_row_list(rows: list[tuple[str, str, str]], empty_message: str) -> str
             f"<span>{badge}{escape(confidence)}</span></div>"
         )
     return "".join(parts)
+
+
+def render_question_axis_comparison(
+    groups: list[tuple[str, list[tuple[str, str | None]]]],
+) -> None:
+    """Evidence columns for the two sides of an explicit A-vs-B question.
+
+    This is the honest fallback when both sides are evidenced but their units
+    cannot share a numeric axis.  It preserves comparison without pretending
+    unlike quantities are mathematically comparable.
+    """
+    if len(groups) != 2:
+        return
+    columns = []
+    for label, items in groups:
+        if items:
+            rows = "".join(
+                '<li>'
+                f'<span>{escape(clean_citation(text))}</span>'
+                + (
+                    f'<a class="ts-inline-evidence" href="{escape(url)}" target="_blank">↗</a>'
+                    if url else ""
+                )
+                + '</li>'
+                for text, url in items[:2]
+            )
+        else:
+            rows = '<li class="ts-empty">비교 가능한 근거가 아직 확보되지 않았습니다.</li>'
+        columns.append(
+            f'<section class="ts-axis-side"><h4>{escape(label)}</h4><ul>{rows}</ul></section>'
+        )
+    st.markdown(
+        '<div class="ts-axis-comparison">' + ''.join(columns) + '</div>'
+        '<p class="ts-axis-note">같은 단위의 공통 축이 없어 각 측에서 확인된 근거를 나란히 제시합니다.</p>',
+        unsafe_allow_html=True,
+    )
 
 
 def render_comparison_table(headers: list[str], rows: list[tuple[str, list[tuple[str, str | None]]]]) -> str:
@@ -703,6 +744,7 @@ def _metric_chart_svg(points: list[Any], title: str) -> str:
 def render_metric_bar(
     points_for_one_label: list[Any],
     grounded_claims: list[Any] | None = None,
+    show_insight: bool = True,
 ) -> None:
     """Bars for one label, either before/after over time or across subjects.
 
@@ -727,7 +769,8 @@ def render_metric_bar(
         and len(split_aggregate(points_for_one_label)[0]) >= _COLUMN_BAR_MIN_ITEMS
     ):
         render_metric_columns(points_for_one_label)
-        render_metric_insight(points_for_one_label, grounded_claims)
+        if show_insight:
+            render_metric_insight(points_for_one_label, grounded_claims)
         return
     if varies_by_subject(points_for_one_label):
         ordered = sorted(points_for_one_label, key=lambda p: abs(p.value), reverse=True)
@@ -749,7 +792,8 @@ def render_metric_bar(
         f'<div class="ts-bar-compare"><b>{escape(label)}</b>{rows}</div>',
         unsafe_allow_html=True,
     )
-    render_metric_insight(ordered, grounded_claims)
+    if show_insight:
+        render_metric_insight(ordered, grounded_claims)
 
 
 def render_swot(strengths: list[str], weaknesses: list[str], opportunities: list[str], threats: list[str]) -> str:
@@ -820,7 +864,9 @@ def action_impact_lookup(report: Any) -> dict[str, Any]:
     }
 
 
-def render_action_list(rows: list[tuple[str, str, str | None]]) -> None:
+def render_action_list(
+    rows: list[tuple[str, str, str | None]], owner: str | None = None,
+) -> None:
     """`rows` = (title, expected_impact, evidence_url) already resolved by the caller.
 
     `expected_impact` must be an impact this specific action is actually
@@ -876,9 +922,10 @@ def render_action_list(rows: list[tuple[str, str, str | None]]) -> None:
             f'<span class="action">{escape(title)}</span>'
             f"{impact_cell}{link}</div>"
         )
+    heading = f"{owner} 실행 제안" if owner else "실행 제안"
     st.markdown(
-        '<section class="ts-actions"><h3>Recommended Actions</h3>'
-        '<div class="ts-actions-head"><span></span><span></span><span>Expected Impact</span><span>Evidence</span></div>'
+        f'<section class="ts-actions"><h3>{escape(heading)}</h3>'
+        '<div class="ts-actions-head"><span></span><span></span><span>기대 효과</span><span>근거</span></div>'
         + "".join(body_parts)
         + "</section>",
         unsafe_allow_html=True,
@@ -946,6 +993,170 @@ def render_share_split(metric_points: list[Any]) -> None:
             f'<div class="ts-donut-legend">{legend}</div></div>{note}',
             unsafe_allow_html=True,
         )
+
+
+def render_composition_breakdown(metric_points: list[Any], limit: int = 8) -> None:
+    """A dense part-to-whole view for cost, channel, product, or any mix.
+
+    The source must already have named the whole through ``share_of``.  This
+    renderer changes only presentation: one stacked rail plus an exact-value
+    list.  It never guesses an "other" slice when the stated parts fall short.
+    """
+    for whole, slices in share_groups(metric_points):
+        ordered = sorted(slices, key=lambda point: point.value, reverse=True)[:limit]
+        total = sum(point.value for point in ordered)
+        segments = "".join(
+            f'<i style="width:{point.value:.2f}%;background:{_DONUT_COLORS[index % len(_DONUT_COLORS)]}" '
+            f'title="{escape(point.subject or point.label)} {_format_number(point.value)}%"></i>'
+            for index, point in enumerate(ordered)
+        )
+        rows = "".join(
+            f'<div class="ts-composition-row"><span class="num">{index:02d}</span>'
+            f'<span class="label"><i style="background:{_DONUT_COLORS[(index - 1) % len(_DONUT_COLORS)]}"></i>'
+            f'{escape(point.subject or point.label)}</span>'
+            f'<b>{escape(_format_number(point.value))}%</b></div>'
+            for index, point in enumerate(ordered, 1)
+        )
+        remainder = 100 - total
+        note = (
+            f'<p class="ts-factor-note">명시 항목 합계 {_format_number(total)}% · '
+            f'미명시 {_format_number(remainder)}%</p>' if remainder > SHARE_SUM_TOLERANCE else ""
+        )
+        st.markdown(
+            f'<section class="ts-composition"><div class="ts-block-title">{escape(whole)}</div>'
+            f'<div class="ts-composition-rail">{segments}</div>{rows}{note}</section>',
+            unsafe_allow_html=True,
+        )
+
+
+def render_ranking_list(
+    metric_points: list[Any], grounded_claims: list[Any] | None = None,
+    comparison_points: list[Any] | None = None, limit: int = 7,
+    group_limit: int | None = None,
+    show_insight: bool = True,
+    question: str = "",
+    preferred_entities: list[str] | None = None,
+) -> None:
+    """Compact exact-value ranking for long categorical comparisons."""
+    # A long list earns this compact block. Once earned, keep the other
+    # categorical series from the same evidence pool in the same card too:
+    # e.g. five platforms plus three content genres. Splitting the shorter
+    # companion into a second bar card repeats context and loses the source's
+    # own relationship between the two comparisons.
+    metric_triggers = ranking_list_groups(metric_points)
+    comparison_groups = ranking_comparison_groups(comparison_points or [])
+    if not metric_triggers and not comparison_groups:
+        return
+    def normalized(value: str) -> str:
+        return re.sub(r"[^0-9a-z가-힣]+", "", (value or "").casefold())
+
+    question_tokens = {
+        normalized(token) for token in re.findall(r"[A-Za-z0-9가-힣]+", question)
+        if len(normalized(token)) >= 2
+    }
+    preferred = {normalized(value) for value in (preferred_entities or []) if normalized(value)}
+
+    def group_score(group: list[Any]) -> tuple[int, int, int, int]:
+        items, _ = split_aggregate(group)
+        label = normalized(group[0].label if group else "")
+        subjects = [normalized(getattr(point, "subject", "") or point.period) for point in items]
+        entity_hits = sum(
+            1 for subject in subjects
+            if any(entity in subject or subject in entity for entity in preferred)
+        )
+        question_hits = sum(1 for token in question_tokens if token and token in label)
+        item_count = len(items)
+        fit = 2 if 3 <= item_count <= 5 else 1 if item_count >= 2 else 0
+        dated = sum(1 for point in items if is_time_period(point.period))
+        return entity_hits, question_hits, fit, dated
+
+    metric_groups = sorted(item_bar_groups(metric_points), key=group_score, reverse=True)
+    rendered_entity_sets: list[set[str]] = []
+    rendered_groups = 0
+    for group in metric_groups:
+        if group_limit is not None and rendered_groups >= group_limit:
+            break
+        items, total = split_aggregate(group)
+        if len(items) < 3:
+            continue
+        rendered_entity_sets.append({point.subject for point in items if point.subject})
+        ordered = sorted(items, key=lambda point: point.value, reverse=True)[:limit]
+        if len(ordered) < 2:
+            continue
+        peak = max(abs(point.value) for point in ordered) or 1
+        unit = ordered[0].unit or ""
+        rows = "".join(
+            f'<div class="ts-ranking-row"><span class="rank">{index:02d}</span>'
+            f'<span class="label">{escape(point.subject or point.period)}</span>'
+            f'<span class="track"><i style="width:{abs(point.value) / peak * 100:.1f}%"></i></span>'
+            f'<b>{escape(_format_number(point.value))}{escape(unit)}</b></div>'
+            for index, point in enumerate(ordered, 1)
+        )
+        total_note = (
+            f'<span class="ts-chart-unit">전체 {_format_number(total.value)}{escape(total.unit or unit)}</span>'
+            if total else ""
+        )
+        st.markdown(
+            f'<section class="ts-ranking"><div class="ts-chart-head"><b>{escape(ordered[0].label)}</b>'
+            f'{total_note}</div>{rows}</section>', unsafe_allow_html=True,
+        )
+        if show_insight:
+            render_metric_insight(ordered, grounded_claims)
+        rendered_groups += 1
+
+    for group in comparison_groups:
+        if group_limit is not None and rendered_groups >= group_limit:
+            break
+        entity_set = {point.entity for point in group}
+        if any(entity_set <= rendered for rendered in rendered_entity_sets):
+            continue
+
+        def numeric_value(point: Any) -> float | None:
+            match = re.search(r"-?\d+(?:\.\d+)?", point.value or "")
+            return float(match.group()) if match else None
+
+        values = [(point, numeric_value(point)) for point in group]
+        ordered = sorted(
+            values,
+            key=lambda row: row[1] if row[1] is not None else float("-inf"),
+            reverse=True,
+        )[:limit]
+        peak = max((abs(value) for _, value in ordered if value is not None), default=1) or 1
+        rows = "".join(
+            f'<div class="ts-ranking-row"><span class="rank">{index:02d}</span>'
+            f'<span class="label">{escape(point.entity)}</span>'
+            f'<span class="track"><i style="width:{abs(value) / peak * 100:.1f}%"></i></span>'
+            f'<b>{escape(point.value)}</b></div>'
+            if value is not None else
+            f'<div class="ts-ranking-row"><span class="rank">{index:02d}</span>'
+            f'<span class="label">{escape(point.entity)}</span><span class="track"></span>'
+            f'<b>{escape(point.value)}</b></div>'
+            for index, (point, value) in enumerate(ordered, 1)
+        )
+        st.markdown(
+            f'<section class="ts-ranking"><div class="ts-chart-head">'
+            f'<b>{escape(group[0].criterion)}</b></div>{rows}</section>',
+            unsafe_allow_html=True,
+        )
+        rendered_groups += 1
+
+
+def render_benchmark_table(comparison_points: list[Any], metric_points: list[Any]) -> None:
+    """Shared qualitative and numeric dimensions across countries/companies."""
+    entities, dimensions, cells = benchmark_grid(comparison_points, metric_points)
+    if len(entities) < 2 or len(dimensions) < 2:
+        return
+    header = "".join(f'<th>{escape(dimension)}</th>' for dimension in dimensions)
+    rows = "".join(
+        f'<tr><th>{escape(entity)}</th>' + "".join(
+            f'<td>{escape(cells.get((dimension, entity), "—"))}</td>' for dimension in dimensions
+        ) + '</tr>'
+        for entity in entities
+    )
+    st.markdown(
+        f'<div class="ts-benchmark-wrap"><table class="ts-benchmark"><thead><tr><th>경쟁사</th>'
+        f'{header}</tr></thead><tbody>{rows}</tbody></table></div>', unsafe_allow_html=True,
+    )
 
 
 _SERIES_COLORS = ("var(--ts-accent)", "var(--ts-navy)", "var(--ts-orange)")
@@ -1218,7 +1429,7 @@ def render_factor_list(items: list[tuple[str, str | None]]) -> None:
     )
 
 
-def render_recurring_terms(grounded_claims: list[Any]) -> None:
+def render_recurring_terms(grounded_claims: list[Any], limit: int = 8) -> None:
     """Words several separate documents used, with how many used each.
 
     A count of the evidence, not a reading of it. The number beside a term is
@@ -1227,7 +1438,7 @@ def render_recurring_terms(grounded_claims: list[Any]) -> None:
     rather than take the list on faith. No weighting, no sentiment, no
     inference about why a word recurs.
     """
-    terms = recurring_terms(grounded_claims or [])
+    terms = recurring_terms(grounded_claims or [], limit=limit)
     if not terms:
         return
     chips = "".join(
@@ -1302,7 +1513,10 @@ def render_cause_tree(grounded_claims: list[Any]) -> None:
     )
 
 
-def render_importance_bars(grounded_claims: list[Any]) -> None:
+def render_importance_bars(
+    grounded_claims: list[Any], impact_target: str | None = None, limit: int = 5,
+    compact: bool = False,
+) -> None:
     """Claims ranked by the model's stated importance.
 
     Every bar carries an "AI 판단" badge and the reason the score was given,
@@ -1311,7 +1525,7 @@ def render_importance_bars(grounded_claims: list[Any]) -> None:
     Bars are scaled against 100, not against the top row, so a set of claims
     the model thought were all middling doesn't render as one dominant driver.
     """
-    ranked = importance_ranked(grounded_claims or [])
+    ranked = importance_ranked(grounded_claims or [], limit=limit)
     if len(ranked) < 2:
         return
     # The reason is printed, not hidden behind a tooltip. A score the reader
@@ -1327,15 +1541,24 @@ def render_importance_bars(grounded_claims: list[Any]) -> None:
         + (
             f'<div class="ts-action-basis" title="{escape(clean_citation(claim.importance_basis))}">'
             f'{escape(clean_citation(claim.importance_basis))}</div>'
-            if claim.importance_basis else ""
+            if claim.importance_basis and not compact else ""
         )
         for claim in ranked
     )
-    st.markdown(
-        '<section class="ts-drivers"><div class="ts-block-title">영향도 <span class="ts-ai-badge">AI 판단</span></div>'
+    target = (
+        f'<p class="ts-driver-target"><b>영향 기준</b> {escape(impact_target)}</p>'
+        if impact_target else ""
+    )
+    note = (
+        '<p class="ts-drivers-note">AI가 근거 문서 안에서 매긴 상대적 중요도이며 측정값이 아닙니다.</p>'
+        if compact else
         '<p class="ts-drivers-note">근거 문서가 제시한 수치가 아니라 모델이 매긴 상대적 중요도입니다. '
         '각 항목 아래에 그렇게 본 이유를 함께 적었습니다.</p>'
-        + rows + "</section>",
+    )
+    st.markdown(
+        '<section class="ts-drivers"><div class="ts-block-title">질문 결론 영향도 '
+        '<span class="ts-ai-badge">AI 판단</span></div>' + target +
+        note + rows + "</section>",
         unsafe_allow_html=True,
     )
 
@@ -1389,6 +1612,7 @@ def render_kpi_row(
     metric_points: list[Any],
     limit: int = _KPI_MAX_CARDS,
     question_terms: list[str] | None = None,
+    compact: bool = False,
 ) -> None:
     """Key KPI badge row - up to `limit` distinct metrics as stat cards.
 
@@ -1467,7 +1691,11 @@ def render_kpi_row(
     # than as a short list. Two or fewer switch to the artwork's row variant -
     # full-width tinted rows, label left, figure right - and three or more
     # keep the card grid.
-    layout = "ts-kpi-row rows" if len(cards) <= _KPI_ROW_LAYOUT_MAX else "ts-kpi-row"
+    layout = (
+        "ts-kpi-row compact" if compact
+        else "ts-kpi-row rows" if len(cards) <= _KPI_ROW_LAYOUT_MAX
+        else "ts-kpi-row"
+    )
     st.markdown(f'<div class="{layout}">{"".join(cards)}</div>', unsafe_allow_html=True)
 
 
@@ -1604,13 +1832,17 @@ def render_radar(comparison_points: list[Any]) -> None:
 
 
 
-def render_metric_comparison(period: str, points: list[Any]) -> None:
+def render_metric_comparison(
+    period: str, points: list[Any], limit: int | None = None,
+) -> None:
     """Horizontal bars comparing several metrics measured in the same unit at
     the same point in time. Bar length is the real value against the largest
     in the group - not a rank-derived width."""
     if len(points) < 2:
         return
     ordered = sorted(points, key=lambda point: point.value, reverse=True)
+    if limit is not None:
+        ordered = ordered[:limit]
     unit = ordered[0].unit or ""
     largest = max(abs(point.value) for point in ordered) or 1
     rows = "".join(
@@ -1637,6 +1869,11 @@ def render_metric_comparison(period: str, points: list[Any]) -> None:
 _STATUS_LABELS = {"done": "완료", "active": "진행", "todo": "예정"}
 _HORIZONTAL_TIMELINE_MAX_STEPS = 5
 _HORIZONTAL_TIMELINE_MAX_CHARS = 22
+_TIMELINE_METHOD_RE = re.compile(
+    r"표본|조사\s*대상|응답자|대면\s*면접|실시한.{0,20}조사|"
+    r"조사.{0,50}(?:국민|명)|sample|respondents?|surveyed",
+    re.IGNORECASE,
+)
 
 
 def render_timeline(
@@ -1654,11 +1891,41 @@ def render_timeline(
     dated statement with no completion word is something that was reported,
     and calling it finished is the one reading nothing supports.
     """
-    entries = timeline_entries_with_status(
-        evidence, metric_points, reference_year, as_of_date
-    )[:limit]
+    # A timeline gets one axis. Prefer one metric definition observed at
+    # several dates; if none exists, show dated evidence events only. Mixing
+    # one-off KPIs into an event rail is what produced a sequence of survey
+    # size -> viewing hours -> usage rate with no common meaning.
+    dated_by_label: dict[str, list[Any]] = {}
+    for point in metric_points:
+        if is_time_period(point.period):
+            dated_by_label.setdefault(point.label, []).append(point)
+    series = max(
+        (points for points in dated_by_label.values() if len({p.period for p in points}) >= 2),
+        key=lambda points: len({p.period for p in points}),
+        default=None,
+    )
+    if series:
+        basis = series[0].label
+        raw_entries = timeline_entries_with_status([], series, reference_year, as_of_date)
+    else:
+        basis = "출처에 날짜가 명시된 주요 사건"
+        raw_entries = timeline_entries_with_status(evidence, [], reference_year, as_of_date)
+    entries = [entry for entry in raw_entries if not _TIMELINE_METHOD_RE.search(entry[1])]
+    deduped: list[tuple[str, str, str]] = []
+    seen_timeline: set[tuple[str, str]] = set()
+    for entry in entries:
+        key = (entry[0], re.sub(r"\W+", "", entry[1]).casefold()[:60])
+        if key in seen_timeline:
+            continue
+        seen_timeline.add(key)
+        deduped.append(entry)
+    entries = deduped[:limit]
     if not entries:
         return
+    st.markdown(
+        f'<div class="ts-chart-unit">기준 · {escape(basis)}</div>',
+        unsafe_allow_html=True,
+    )
     # The artwork has both a horizontal rail and a vertical one, and which
     # fits is a property of the data: five short stage labels read across the
     # page, but a row of full evidence sentences does not. Long text or many

@@ -12,6 +12,7 @@ from urllib.parse import urlparse
 
 from openai import OpenAI
 
+from common.ai_usage import emit_ai_usage
 from common.ai_client import openai_client_kwargs
 from common.content_quality_validator import (
     COMPARISON_COMPLETENESS_INSTRUCTION,
@@ -21,21 +22,29 @@ from common.content_quality_validator import (
 )
 from common.contracts import DocumentAnalysis, SourceDocument
 from common.errors import PipelineStageError
+from common.metric_quality import clean_dimension
 from sources.openai_retry import call_with_retry
 
 _API_KEY_ENV_VAR = "TRENDSPARC_SK_BROADBAND_ANALYZER_API_KEY"
 _FALLBACK_API_KEY_ENV_VAR = "OPENAI_API_KEY"
 _MODEL_ENV_VAR = "TRENDSPARC_SK_BROADBAND_ANALYZER_MODEL"
-# Optional - points this stage at an OpenAI-API-compatible alternative
-# provider (e.g. Upstage Solar) instead of stock OpenAI. Unset by default;
-# see common/ai_client.py.
+# Stage-local provider switch. The current Solar deployment uses an Upstage
+# base URL; removing it restores the OpenAI endpoint. Explicit model config
+# always wins, so either provider can be selected later. See common/ai_client.py.
 _BASE_URL_ENV_VAR = "TRENDSPARC_SK_BROADBAND_ANALYZER_BASE_URL"
-_DEFAULT_MODEL = "gpt-4o"
+_DEFAULT_OPENAI_MODEL = "gpt-4o"
+_DEFAULT_UPSTAGE_MODEL = "solar-pro3"
 _MAX_CONTENT_CHARS = 12000
 _PDF_CHUNK_OVERLAP_CHARS = 500
 _DEFAULT_MAX_PDF_CHUNKS = 12
 _MAX_EVIDENCE_PASSAGE_CHARS = 2_000
 _MAX_REPAIR_PASSAGES_PER_CLAIM = 3
+_DEFAULT_ANALYSIS_MAX_TOKENS = 4500
+_DENSE_ANALYSIS_MAX_TOKENS = 7000
+_DENSE_FIGURE_COUNT = 40
+_DEFAULT_REPAIR_MAX_TOKENS = 1600
+_DENSE_REPAIR_MAX_TOKENS = 2600
+_DENSE_REPAIR_CLAIM_COUNT = 8
 _MAX_PDF_CHUNKS_ENV_VAR = "TRENDSPARC_SK_BROADBAND_ANALYZER_MAX_PDF_CHUNKS"
 _STAGE = "sectors.sk_broadband.adapter.analyzer"
 
@@ -47,7 +56,7 @@ _SECTOR_PROMPT_PATH = _SECTOR_ROOT / "prompts" / "analyzer_prompt.md"
 _ANALYSIS_SCHEMA = {
     "type": "object",
     "properties": {
-        "summary": {"type": "string", "description": "질문과 관련된 핵심 사실 요약. 한국어 1~3문장."},
+        "summary": {"type": "string", "maxLength": 500, "description": "질문 관련 핵심 사실. 한국어 1~3문장."},
         "sentiment": {"type": "string", "enum": ["positive", "neutral", "negative", "mixed"]},
         "relevance_level": {
             "type": "string",
@@ -56,6 +65,7 @@ _ANALYSIS_SCHEMA = {
         },
         "relevance_reason": {
             "type": "string",
+            "maxLength": 300,
             "description": "관련성 등급을 선택한 구체적인 이유. 문서에 없는 내용을 만들지 말 것.",
         },
         "grounded_claims": {
@@ -64,19 +74,20 @@ _ANALYSIS_SCHEMA = {
             "items": {
                 "type": "object",
                 "properties": {
-                    "claim_id": {"type": "string", "description": "문서 안에서 고유한 짧은 ID, 예: c1."},
+                    "claim_id": {"type": "string", "maxLength": 80, "description": "문서 안의 짧은 고유 ID."},
                     "claim_type": {
                         "type": "string",
                         "enum": ["key_point", "business_impact", "risk", "opportunity", "strength", "weakness", "comparison", "metric", "factor", "action", "monitoring"],
                     },
-                    "claim": {"type": "string"},
+                    "claim": {"type": "string", "maxLength": 350},
                     "evidence_passage_id": {
                         "type": ["string", "null"],
+                        "maxLength": 80,
                         "description": "인용문을 복사한 evidence_passages의 passage_id.",
                     },
-                    "evidence_quote": {"type": "string", "description": "원문에서 그대로 복사한 짧은 문장 또는 구절."},
-                    "evidence_location": {"type": ["string", "null"], "description": "확인 가능한 경우 문단·절·표 위치, 아니면 null."},
-                    "as_of_date": {"type": ["string", "null"], "description": "주장의 기준 시점이 명시된 경우 원문 표현, 아니면 null."},
+                    "evidence_quote": {"type": "string", "maxLength": 500, "description": "원문에서 그대로 복사한 최소 충분 구절."},
+                    "evidence_location": {"type": ["string", "null"], "maxLength": 180, "description": "확인 가능한 문단·절·표 위치, 아니면 null."},
+                    "as_of_date": {"type": ["string", "null"], "maxLength": 80, "description": "명시된 기준 시점 원문, 아니면 null."},
                     "confidence": {"type": "string", "enum": ["low", "medium", "high"]},
                     "parent_claim_id": {
                         "type": ["string", "null"],
@@ -95,6 +106,7 @@ _ANALYSIS_SCHEMA = {
                     },
                     "importance_basis": {
                         "type": ["string", "null"],
+                        "maxLength": 240,
                         "description": "그 중요도로 본 이유. importance를 채웠으면 필수.",
                     },
                 },
@@ -104,7 +116,7 @@ _ANALYSIS_SCHEMA = {
         },
         "covered_information_needs": {
             "type": "array",
-            "items": {"type": "string"},
+            "items": {"type": "string", "maxLength": 160},
             "description": "이 문서가 질문에 관해 실제 근거를 제공하는 정보 항목.",
         },
         "metric_points": {
@@ -113,24 +125,27 @@ _ANALYSIS_SCHEMA = {
             "items": {
                 "type": "object",
                 "properties": {
-                    "label": {"type": "string", "description": "무엇을 나타내는 수치인지, 예: 'IPTV 가입자 수'"},
+                    "label": {"type": "string", "maxLength": 120, "description": "무엇을 나타내는 수치인지."},
                     "subject": {
                         "type": ["string", "null"],
+                        "maxLength": 120,
                         "description": "수치의 주체·항목(기업, 플랫폼, 연령대 등). 원문 표현을 그대로 쓰고 없으면 null.",
                     },
-                    "period": {"type": "string", "description": "문서에 명시된 시점 그대로, 예: '2023년 2분기'"},
+                    "period": {"type": "string", "maxLength": 80, "description": "문서에 명시된 시점 그대로."},
                     "value": {"type": "number"},
-                    "unit": {"type": "string", "description": "예: '만 명', '억원'. 없으면 빈 문자열."},
+                    "unit": {"type": "string", "maxLength": 40, "description": "원문 단위. 없으면 빈 문자열."},
                     "is_forecast": {
                         "type": "boolean",
                         "description": "원문이 전망·예상·목표·추정이라고 명시한 수치만 true.",
                     },
                     "share_of": {
                         "type": ["string", "null"],
+                        "maxLength": 120,
                         "description": "원문이 이 비율들의 공통 전체를 명시한 경우 그 표현. 아니면 null.",
                     },
                     "evidence_claim_id": {
                         "type": "string",
+                        "maxLength": 80,
                         "description": "이 수치 전체를 직접 인용한 claim_type=metric grounded_claim의 claim_id.",
                     },
                 },
@@ -147,11 +162,11 @@ _ANALYSIS_SCHEMA = {
             "items": {
                 "type": "object",
                 "properties": {
-                    "entity": {"type": "string", "description": "비교 대상, 예: 'KT'"},
-                    "criterion": {"type": "string", "description": "비교 기준, 예: '요금제 가격'"},
-                    "value": {"type": "string", "description": "문서에 명시된 값이나 서술, 예: '월 9,900원'"},
+                    "entity": {"type": "string", "maxLength": 100, "description": "비교 대상."},
+                    "criterion": {"type": "string", "maxLength": 160, "description": "비교 기준."},
+                    "value": {"type": "string", "maxLength": 220, "description": "문서에 명시된 값이나 서술."},
                     "level": {"type": ["string", "null"], "enum": ["low", "medium", "high", None]},
-                    "evidence_claim_id": {"type": "string", "description": "claim_type=comparison인 grounded_claim의 claim_id."},
+                    "evidence_claim_id": {"type": "string", "maxLength": 80, "description": "comparison grounded_claim의 claim_id."},
                 },
                 "required": ["entity", "criterion", "value", "level", "evidence_claim_id"],
                 "additionalProperties": False,
@@ -180,9 +195,9 @@ _QUOTE_REPAIR_SCHEMA = {
             "items": {
                 "type": "object",
                 "properties": {
-                    "claim_id": {"type": "string"},
-                    "evidence_passage_id": {"type": ["string", "null"]},
-                    "evidence_quote": {"type": ["string", "null"]},
+                    "claim_id": {"type": "string", "maxLength": 80},
+                    "evidence_passage_id": {"type": ["string", "null"], "maxLength": 80},
+                    "evidence_quote": {"type": ["string", "null"], "maxLength": 500},
                 },
                 "required": ["claim_id", "evidence_passage_id", "evidence_quote"],
                 "additionalProperties": False,
@@ -206,7 +221,11 @@ def _api_key() -> str | None:
 
 
 def _model() -> str:
-    return os.environ.get(_MODEL_ENV_VAR, _DEFAULT_MODEL)
+    configured = os.environ.get(_MODEL_ENV_VAR)
+    if configured:
+        return configured
+    base_url = os.environ.get(_BASE_URL_ENV_VAR, "").casefold()
+    return _DEFAULT_UPSTAGE_MODEL if "upstage.ai" in base_url else _DEFAULT_OPENAI_MODEL
 
 
 def _trim_content(content: str | None) -> str:
@@ -306,6 +325,29 @@ def _question_terms(question: str, information_needs: list[str]) -> list[str]:
 # other terms is exactly the figure a block needs. So a chunk is only skipped
 # when it has neither.
 _FIGURE_RE = re.compile(r"\d[\d,.]*\s*(?:%|퍼센트|명|건|원|억|조|만|시간|분|배|위|점|개)")
+
+
+def _analysis_max_tokens(content: str) -> int:
+    """Give dense tables room to finish without making every call larger.
+
+    Solar twice reached the old 4,500-token ceiling exactly on chunks with
+    66 and 106 explicit figures, producing unusable truncated JSON. Ordinary
+    prose and moderately numeric articles completed below the old ceiling.
+    This changes only the output ceiling; no source passage is removed.
+    """
+    return (
+        _DENSE_ANALYSIS_MAX_TOKENS
+        if len(_FIGURE_RE.findall(content)) >= _DENSE_FIGURE_COUNT
+        else _DEFAULT_ANALYSIS_MAX_TOKENS
+    )
+
+
+def _repair_max_tokens(failed_claim_count: int) -> int:
+    return (
+        _DENSE_REPAIR_MAX_TOKENS
+        if failed_claim_count >= _DENSE_REPAIR_CLAIM_COUNT
+        else _DEFAULT_REPAIR_MAX_TOKENS
+    )
 
 
 # A periodical is many articles bound together, and only some of them are
@@ -527,6 +569,7 @@ def _repair_failed_claim_quotes(
     ]
     if not failed_claims:
         return verified_claims
+    repair_max_tokens = _repair_max_tokens(len(failed_claims))
 
     candidates_by_claim = {
         claim["claim_id"]: _repair_passages_for_claim(claim, passages)
@@ -567,22 +610,19 @@ def _repair_failed_claim_quotes(
         ),
     }
     try:
+        repair_system_content = (
+            "You repair source citations only. Never change a claim and never "
+            "invent or paraphrase a quote."
+        )
+        repair_user_content = json.dumps(repair_input, ensure_ascii=False)
         response = call_with_retry(
             lambda: client.chat.completions.create(
                 model=_model(),
-                max_tokens=1600,
+                max_tokens=repair_max_tokens,
+                temperature=0,
                 messages=[
-                    {
-                        "role": "system",
-                        "content": (
-                            "You repair source citations only. Never change a claim and never "
-                            "invent or paraphrase a quote."
-                        ),
-                    },
-                    {
-                        "role": "user",
-                        "content": json.dumps(repair_input, ensure_ascii=False),
-                    },
+                    {"role": "system", "content": repair_system_content},
+                    {"role": "user", "content": repair_user_content},
                 ],
                 response_format={
                     "type": "json_schema",
@@ -598,7 +638,28 @@ def _repair_failed_claim_quotes(
         if getattr(message, "refusal", None):
             return verified_claims
         repairs = json.loads(message.content).get("repairs", [])
+        emit_ai_usage(
+            stage=f"{_STAGE}.quote_repair",
+            model=_model(),
+            system_content=repair_system_content,
+            user_content=repair_user_content,
+            schema=_QUOTE_REPAIR_SCHEMA,
+            requested_max_tokens=repair_max_tokens,
+            response=response,
+            counts={"failed_claims": len(failed_claims), "repairs": len(repairs)},
+        )
     except Exception as exc:  # noqa: BLE001
+        emit_ai_usage(
+            stage=f"{_STAGE}.quote_repair",
+            model=_model(),
+            system_content=locals().get("repair_system_content", ""),
+            user_content=locals().get("repair_user_content", ""),
+            schema=_QUOTE_REPAIR_SCHEMA,
+            requested_max_tokens=repair_max_tokens,
+            response=locals().get("response"),
+            outcome="failed",
+            error_type=type(exc).__name__,
+        )
         print(
             f"[{_STAGE}] quote repair failed for doc '{document.doc_id}': {exc}",
             file=sys.stderr,
@@ -695,6 +756,73 @@ def _verified_relations(claims: list[dict]) -> list[dict]:
     return resolved
 
 
+_METHODOLOGY_ONLY_MARKERS = (
+    "표본 크기", "표본수", "조사 대상", "조사기간", "조사 기간",
+    "sample size", "survey period", "methodology",
+)
+
+
+def _recover_missing_metric_claims(
+    claims: list[dict],
+    evidence_passages: list[dict],
+    question: str,
+    information_needs: list[str],
+) -> list[dict]:
+    """Recover exact numeric sentences the model omitted from claims.
+
+    A passage must share a question/information-need term and the retained
+    sentence or table row must carry a literal figure with a unit. Claim and
+    quote are identical source text, so this restores structure without
+    adding an interpretation or an unsupported fact.
+    """
+    terms = _question_terms(question, information_needs)
+    if not terms:
+        return claims
+    existing_quotes = {
+        _normalized_text(claim.get("evidence_quote") or "") for claim in claims
+    }
+    recovered = list(claims)
+    recovered_index = 0
+    for passage in evidence_passages:
+        passage_text = passage.get("text") or ""
+        lowered_passage = passage_text.casefold()
+        if not any(term in lowered_passage for term in terms):
+            continue
+        rows = re.split(r"(?<=[.!?。])\s+|\n+", passage_text)
+        for row in rows:
+            quote = row.strip()
+            normalized_quote = _normalized_text(quote)
+            if not normalized_quote or any(
+                existing and (existing in normalized_quote or normalized_quote in existing)
+                for existing in existing_quotes
+            ):
+                continue
+            if not _FIGURE_RE.search(quote):
+                continue
+            lowered = quote.casefold()
+            if (
+                any(marker in lowered for marker in _METHODOLOGY_ONLY_MARKERS)
+                and not re.search(r"%|퍼센트|억원|조원|시간|분|배", quote)
+            ):
+                continue
+            recovered_index += 1
+            recovered.append({
+                "claim_id": f"det-metric-{recovered_index}",
+                "claim_type": "metric",
+                "claim": quote,
+                "evidence_passage_id": passage.get("passage_id"),
+                "evidence_quote": quote,
+                "evidence_location": passage.get("passage_id"),
+                "as_of_date": None,
+                "confidence": "high",
+                "parent_claim_id": None,
+                "importance": None,
+                "importance_basis": None,
+            })
+            existing_quotes.add(normalized_quote)
+    return recovered
+
+
 def _number_is_in_content(value: float, content: str) -> bool:
     """Whether this exact figure appears in the text.
 
@@ -717,26 +845,58 @@ def _number_is_in_content(value: float, content: str) -> bool:
     )
 
 
+def _period_is_grounded(period: str, text: str) -> bool:
+    """Accept harmless notation differences, never an unsupported year."""
+    normalized_period = _normalized_text(period)
+    normalized_text = _normalized_text(text)
+    if normalized_period and normalized_period in normalized_text:
+        return True
+    period_years = set(re.findall(r"20\d{2}", normalized_period))
+    text_years = set(re.findall(r"20\d{2}", normalized_text))
+    if period_years:
+        return period_years <= text_years
+    return False
+
+
+def _grounded_unit(unit: str, text: str) -> str | None:
+    """Return the model unit only when the quote states an equivalent unit."""
+    if not unit:
+        return ""
+    normalized_unit = _normalized_text(unit).casefold()
+    normalized_text = _normalized_text(text).casefold()
+    if normalized_unit and normalized_unit in normalized_text:
+        return unit
+    aliases = {
+        "%": ("%", "percent", "퍼센트"),
+        "p.p.": ("%p", "%pt", "pp", "percentage point", "percent point", "퍼센트포인트"),
+        "%p": ("%p", "%pt", "pp", "percentage point", "percent point", "퍼센트포인트"),
+        "시간": ("hour", "hours", "시간"),
+        "분": ("minute", "minutes", "분"),
+        "개": ("service", "services", "item", "items", "개"),
+        "명": ("people", "persons", "respondents", "users", "명"),
+    }
+    candidates = aliases.get(normalized_unit, ())
+    return unit if any(candidate in normalized_text for candidate in candidates) else None
+
+
 def _verified_metric_points(
-    data: dict, analyzed_content: str, grounded_claims: list[dict]
+    data: dict,
+    analyzed_content: str,
+    grounded_claims: list[dict],
+    evidence_passages: list[dict] | None = None,
 ) -> list[dict]:
     verified: list[dict] = []
-    normalized_content = _normalized_text(analyzed_content)
     metric_claims = {
         claim["claim_id"]: claim
         for claim in grounded_claims
         if claim["claim_type"] == "metric"
     }
+    passage_by_id = {
+        passage["passage_id"]: passage["text"]
+        for passage in (evidence_passages or [])
+    }
     for point in data.get("metric_points", []):
-        period = _normalized_text(str(point.get("period", "")))
-        unit = _normalized_text(str(point.get("unit", "")))
-        subject = _normalized_text(str(point.get("subject") or ""))
-        share_of = _normalized_text(str(point.get("share_of") or ""))
         value = point.get("value")
-        if not period or period not in normalized_content:
-            continue
-        if unit and unit not in normalized_content:
-            continue
         if not isinstance(value, (int, float)) or not _number_is_in_content(float(value), analyzed_content):
             continue
         evidence_claim = metric_claims.get(point.get("evidence_claim_id"))
@@ -744,29 +904,308 @@ def _verified_metric_points(
             continue
         quote = evidence_claim["evidence_quote"]
         normalized_quote = _normalized_text(quote)
-        if period not in normalized_quote:
-            continue
-        if unit and unit not in normalized_quote:
-            continue
-        if subject and subject not in normalized_quote:
-            continue
-        if share_of and share_of not in normalized_quote:
-            continue
         if not _number_is_in_content(float(value), quote):
             continue
+        passage_id = (evidence_claim.get("evidence_passage_id") or "").rsplit(":", 1)[-1]
+        local_context = " ".join(
+            value for value in (quote, passage_by_id.get(passage_id, "")) if value
+        )
+        grounded_unit = _grounded_unit(str(point.get("unit", "")), quote)
+        if grounded_unit is None:
+            continue
+        grounded_period = (
+            str(point.get("period", ""))
+            if _period_is_grounded(str(point.get("period", "")), local_context)
+            else "시점 미상"
+        )
+        normalized_local = _normalized_text(local_context)
+        grounded_subject = point.get("subject") or None
+        if grounded_subject and _normalized_text(str(grounded_subject)) not in normalized_local:
+            grounded_subject = None
+        grounded_share_of = point.get("share_of") or None
+        if grounded_share_of and _normalized_text(str(grounded_share_of)) not in normalized_local:
+            grounded_share_of = None
         forecast_markers = (
             "전망", "예상", "목표", "추정", "계획", "가이던스", "예측",
             "forecast", "estimate",
         )
         verified.append({
             **point,
-            "subject": point.get("subject") or None,
-            "share_of": point.get("share_of") or None,
+            "period": grounded_period,
+            "unit": grounded_unit,
+            "subject": grounded_subject,
+            "share_of": grounded_share_of,
             "is_forecast": bool(point.get("is_forecast"))
             and any(marker in normalized_quote.casefold() for marker in forecast_markers),
             "evidence_quote": quote,
         })
     return verified
+
+
+_GROUNDED_METRIC_RE = re.compile(
+    r"(?P<value>\d[\d,]*(?:\.\d+)?)\s*"
+    r"(?P<unit>%p|%|퍼센트포인트|퍼센트|조\s*원|억\s*원|만\s*명|명|건|개|분|시간|배|점|"
+    r"hours?|minutes?|people|persons?|respondents?|users?|services?|items?)",
+    re.IGNORECASE,
+)
+_YEAR_TOKEN_RE = re.compile(r"20\d{2}\s*년?")
+_METRIC_LABEL_BOUNDARY_RE = re.compile(r"[\n\r;。!?)]|(?<!\d)\.(?!\d)|→|(?:,\s*)")
+_WEAK_METRIC_LABELS = {"약", "보다", "대비", "증가", "감소", "marking a", "at"}
+
+
+def _nearest_period(text: str, start: int, end: int) -> str:
+    after = text[end:end + 28]
+    after_match = re.match(
+        r"\s*(?:\(\s*|in\s+)(?P<year>20\d{2})\s*년?\)?",
+        after,
+        flags=re.IGNORECASE,
+    )
+    if after_match:
+        return after_match.group("year")
+    years = [match for match in _YEAR_TOKEN_RE.finditer(text[:start])]
+    if not years:
+        return "시점 미상"
+    nearest = years[-1]
+    between = text[nearest.end():start]
+    if len(between) > 90 or re.search(r"[\n\r;。!?]|(?<!\d)\.(?!\d)", between):
+        return "시점 미상"
+    return re.sub(r"\s+", "", nearest.group()).strip()
+
+
+def _metric_label_before(text: str, position: int, fallback: str) -> str:
+    prefix = text[:position]
+    fragment = _METRIC_LABEL_BOUNDARY_RE.split(prefix)[-1]
+    fragment = re.sub(r"^[\s*#|:'\"([{]+|[\s*#|:'\"([{]+$", "", fragment).strip()
+    fragment = re.sub(r"\b20\d{2}\s*년?\b", "", fragment).strip(" :-()[]")
+    fragment = re.sub(r"^\d+(?:\.\d+)?\s*%p?\s*(?:로|보다|에서)?\s*", "", fragment)
+    if fragment.endswith("전년"):
+        fragment = "전년"
+    if not fragment:
+        fragment = fallback
+    return fragment[-70:].strip()
+
+
+def _canonical_recovered_unit(unit: str) -> str:
+    compact = re.sub(r"\s+", "", unit)
+    lowered = compact.casefold()
+    if lowered in {"percent", "퍼센트"}:
+        return "%"
+    if lowered == "퍼센트포인트":
+        return "%p"
+    if lowered == "만명":
+        return "만 명"
+    if lowered.startswith("hour"):
+        return "시간"
+    if lowered.startswith("minute"):
+        return "분"
+    if lowered in {"people", "person", "persons", "respondent", "respondents", "user", "users"}:
+        return "명"
+    if lowered in {"service", "services", "item", "items"}:
+        return "개"
+    return compact.replace("만원", "만 원") if compact == "만원" else compact
+
+
+_LIST_HEADING_RE = re.compile(
+    r"(?P<label>[^,.;\n]{2,60})(?:은|는|:)[ \t]*",
+    re.IGNORECASE,
+)
+
+
+def _list_metric_contexts(quote: str, matches: list[re.Match]) -> dict[int, tuple[str, str]]:
+    """Find common-series labels and item names in a numeric list.
+
+    This is deliberately vocabulary-free.  It works for platforms, age
+    bands, companies, countries, content genres, cost components, and any
+    other source sentence shaped like ``heading: item(value), item(value)``.
+    A heading is used only when at least two figures belong to it, so an
+    ordinary prose sentence with one number keeps the conservative fallback.
+    """
+    headings = list(_LIST_HEADING_RE.finditer(quote))
+    assigned: dict[int, re.Match] = {}
+    counts: dict[int, int] = {}
+    for index, metric_match in enumerate(matches):
+        candidates = [heading for heading in headings if heading.end() <= metric_match.start()]
+        if not candidates:
+            continue
+        heading = candidates[-1]
+        # A distant heading from an earlier sentence is not a series label.
+        between = quote[heading.end():metric_match.start()]
+        if len(between) > 300 or re.search(r"[\n\r;]|(?<!\d)[.!?](?!\d)", between):
+            continue
+        heading_index = headings.index(heading)
+        assigned[index] = heading
+        counts[heading_index] = counts.get(heading_index, 0) + 1
+
+    contexts: dict[int, tuple[str, str]] = {}
+    for index, metric_match in enumerate(matches):
+        # Korean adnominal endings can look like a topic marker (for example
+        # ``먹는 방송``).  A one-value pseudo-heading must not split a real
+        # multi-item series, so choose the nearest heading that owns at least
+        # two figures rather than blindly choosing the nearest ``는`` token.
+        candidates = [
+            heading for heading in headings
+            if heading.end() <= metric_match.start()
+            and counts.get(headings.index(heading), 0) >= 2
+        ]
+        if not candidates:
+            continue
+        heading = candidates[-1]
+        between = quote[heading.end():metric_match.start()]
+        if len(between) > 300 or re.search(r"[\n\r;]|(?<!\d)[.!?](?!\d)", between):
+            continue
+        prefix = quote[heading.end():metric_match.start()]
+
+        # Values are commonly inside parentheses.  If that parenthesis also
+        # contains a clarification (e.g. ``먹방(먹는 방송, 40.6%)``), walk
+        # back to the unmatched opening parenthesis to keep ``먹방`` as the
+        # item rather than treating the clarification as another category.
+        stack: list[int] = []
+        for position, char in enumerate(prefix):
+            if char == "(":
+                stack.append(position)
+            elif char == ")" and stack:
+                stack.pop()
+        item_end = stack[-1] if stack else len(prefix)
+        item_prefix = prefix[:item_end]
+        item = re.split(r"[,;\n]", item_prefix)[-1]
+        item = re.sub(r"^(?:등(?:이고|이며|으로)?\s*)", "", item).strip(" \t:'\"()[]")
+        label = heading.group("label").strip(" \t:'\"()[]")
+        if label and item:
+            contexts[index] = (label[-70:], item[-70:])
+    return contexts
+
+
+def _recovered_metric_points(grounded_claims: list[dict]) -> list[dict]:
+    """Deterministically structure figures from already-verified quotes.
+
+    Solar can return sound `claim_type=metric` claims while leaving the
+    sibling `metric_points` array empty. The quote has already passed exact
+    source verification, so parsing literal value+unit pairs here adds no new
+    fact. It only restores the structured handoff needed by dashboard blocks.
+    """
+    recovered: list[dict] = []
+    for claim in grounded_claims:
+        if claim.get("claim_type") not in {"metric", "comparison"}:
+            continue
+        quote = claim.get("evidence_quote") or ""
+        matches = list(_GROUNDED_METRIC_RE.finditer(quote))
+        list_contexts = _list_metric_contexts(quote, matches)
+        base_label = (
+            _metric_label_before(quote, matches[0].start(), claim.get("claim") or "수치")
+            if matches else claim.get("claim") or "수치"
+        )
+        last_label: str | None = None
+        for index, match in enumerate(matches):
+            unit_text = match.group("unit").casefold()
+            next_match = matches[index + 1] if index + 1 < len(matches) else None
+            if (
+                unit_text.startswith(("hour", "시간"))
+                and next_match is not None
+                and next_match.group("unit").casefold().startswith(("minute", "분"))
+                and re.fullmatch(r"\s*(?:and\s*)?", quote[match.end():next_match.start()], re.IGNORECASE)
+            ):
+                continue
+            value = float(match.group("value").replace(",", ""))
+            metric_start = match.start()
+            if unit_text.startswith(("minute", "분")) and index > 0:
+                previous = matches[index - 1]
+                between = quote[previous.end():match.start()]
+                if (
+                    previous.group("unit").casefold().startswith(("hour", "시간"))
+                    and re.fullmatch(r"\s*(?:and\s*)?", between, re.IGNORECASE)
+                ):
+                    value += float(previous.group("value").replace(",", "")) * 60
+                    metric_start = previous.start()
+            if value.is_integer():
+                value = int(value)
+            local_label = _metric_label_before(quote, metric_start, "")
+            if local_label.casefold() in _WEAK_METRIC_LABELS or len(local_label) < 2:
+                local_label = ""
+            canonical_unit = (
+                "분"
+                if metric_start != match.start()
+                else _canonical_recovered_unit(match.group("unit"))
+            )
+            if index in list_contexts and canonical_unit != "%p":
+                label, subject = list_contexts[index]
+                last_label = label
+            elif canonical_unit == "%p":
+                label = f"{last_label or base_label} 증감폭"
+                subject = None
+            else:
+                label = local_label or last_label or base_label
+                subject = local_label or None
+                last_label = label
+            recovered.append({
+                "label": label,
+                "subject": subject,
+                "period": _nearest_period(quote, metric_start, match.end()),
+                "value": value,
+                "unit": canonical_unit,
+                "is_forecast": any(
+                    marker in quote.casefold()
+                    for marker in ("전망", "예상", "목표", "추정", "forecast", "estimate")
+                ),
+                "share_of": None,
+                "evidence_claim_id": claim["claim_id"],
+                "evidence_quote": quote,
+            })
+    return recovered
+
+
+def _merge_metric_points(verified: list[dict], recovered: list[dict]) -> list[dict]:
+    merged: list[dict] = []
+    seen: set[tuple] = set()
+    def unit_family(point: dict) -> str:
+        unit = re.sub(r"[\s.]", "", str(point.get("unit") or "")).casefold()
+        if unit in {"%p", "pp", "%pt", "퍼센트포인트"}:
+            return "%p"
+        if unit in {"percent", "퍼센트"}:
+            return "%"
+        return unit
+
+    verified_value_keys = {
+        (point.get("value"), unit_family(point), point.get("evidence_claim_id"))
+        for point in verified
+    }
+    supplements = [
+        point for point in recovered
+        if (point.get("value"), unit_family(point), point.get("evidence_claim_id"))
+        not in verified_value_keys
+    ]
+    for point in [*verified, *supplements]:
+        key = (
+            point.get("period"), point.get("value"),
+            unit_family(point),
+            point.get("evidence_claim_id"),
+        )
+        if key in seen:
+            continue
+        seen.add(key)
+        merged.append(point)
+    return merged
+
+
+def _clean_metric_dimension(value: object, *, maximum: int) -> str:
+    """Keep chart dimensions compact without changing any numeric fact.
+
+    URL/path fragments and whole prose sentences are valid evidence text but
+    invalid chart axes.  Rejecting them here removes only the broken
+    structured projection; the grounded claim and quote remain available in
+    the report/evidence layer.
+    """
+    return clean_dimension(value, maximum=maximum)
+
+
+def _displayable_metric_points(points: list[dict]) -> list[dict]:
+    cleaned: list[dict] = []
+    for point in points:
+        label = _clean_metric_dimension(point.get("label"), maximum=60)
+        if not label:
+            continue
+        subject = _clean_metric_dimension(point.get("subject"), maximum=40)
+        cleaned.append({**point, "label": label, "subject": subject or None})
+    return cleaned
 
 
 def _verified_comparison_points(data: dict, grounded_claims: list[dict]) -> list[dict]:
@@ -856,6 +1295,7 @@ def _analyze_document(
         else _trim_content(_clean_analysis_content(document.content))
     )
     evidence_passages = _split_evidence_passages(analyzed_content)
+    analysis_max_tokens = _analysis_max_tokens(analyzed_content)
     user_content = json.dumps(
         {
             "question": question,
@@ -863,19 +1303,24 @@ def _analyze_document(
             "target_block_shapes": target_block_shapes or [],
             "document": {
                 "doc_id": document.doc_id,
-                "source_id": document.source_id,
-                "reliability_tier": document.reliability_tier,
                 "title": document.title,
-                "url": document.url,
                 "published_at": document.published_at.isoformat() if document.published_at else None,
                 "evidence_passages": evidence_passages,
             },
             "analysis_instruction": (
                 "질문·required_information_needs·target_block_shapes에 직접 필요한 근거를 추출하라. "
                 "수치·시점·단위, 비교의 양쪽 대상, 순위·요인·날짜 정보를 우선하고 중복 주장은 만들지 마라. "
+                "항목 수를 줄이지 말고 각 claim·인용·이유의 문장만 최소 충분 길이로 간결하게 써라. "
+                "질문이 여러 측면을 요구할 때 문서가 그중 한 측면만 직접 뒷받침해도 partial이며, "
+                "그 근거를 추출하라. 문서 하나가 질문 전체를 답하지 못한다는 이유로 비우지 마라. "
+                "질문 일부에 직접 관련된 수치가 있으면 metric claim과 metric_points를 비우지 마라. "
+                "한 문장·표에서 같은 지표로 여러 항목을 비교하면 공통 지표명은 같은 label, "
+                "각 항목명은 subject로 분리해 모든 값을 보존하라. "
+                "share_of는 원문이 하나의 전체와 그 구성요소를 명시한 경우에만 그 전체 이름으로 채워라. "
+                "여러 기업·국가·기술을 공통 기준으로 비교한 자료는 entity와 criterion을 유지해 "
+                "항목별 comparison_points로 분리하라. "
                 f"{SWOT_COMPLETENESS_INSTRUCTION} "
                 f"{COMPARISON_COMPLETENESS_INSTRUCTION} "
-                f"{TABLE_COMPLETENESS_INSTRUCTION} "
                 f"{TABLE_COMPLETENESS_INSTRUCTION} "
                 "명시되지 않은 값은 추정하거나 계산하지 말 것. "
                 "metric_points의 모든 수치는 값·단위·시점을 함께 직접 인용한 claim_type=metric "
@@ -892,7 +1337,8 @@ def _analyze_document(
     try:
         response = call_with_retry(lambda: client.chat.completions.create(
             model=_model(),
-            max_tokens=4500,
+            max_tokens=analysis_max_tokens,
+            temperature=0,
             messages=[
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_content},
@@ -907,10 +1353,31 @@ def _analyze_document(
             },
         ))
     except Exception as exc:  # noqa: BLE001
+        emit_ai_usage(
+            stage=_STAGE,
+            model=_model(),
+            system_content=system_prompt,
+            user_content=user_content,
+            schema=_ANALYSIS_SCHEMA,
+            requested_max_tokens=analysis_max_tokens,
+            response=locals().get("response"),
+            outcome="failed",
+            error_type=type(exc).__name__,
+        )
         raise PipelineStageError(stage=_STAGE, reason=f"analysis API call failed for doc '{document.doc_id}'", detail=str(exc)) from exc
 
     message = response.choices[0].message
     if getattr(message, "refusal", None):
+        emit_ai_usage(
+            stage=_STAGE,
+            model=_model(),
+            system_content=system_prompt,
+            user_content=user_content,
+            schema=_ANALYSIS_SCHEMA,
+            requested_max_tokens=analysis_max_tokens,
+            response=response,
+            outcome="refused",
+        )
         raise PipelineStageError(stage=_STAGE, reason=f"analysis refused for doc '{document.doc_id}'", detail=message.refusal)
     try:
         data = json.loads(message.content)
@@ -921,6 +1388,12 @@ def _analyze_document(
             data.get("grounded_claims", []),
             grounded_claims,
             evidence_passages,
+        )
+        grounded_claims = _recover_missing_metric_claims(
+            grounded_claims,
+            evidence_passages,
+            question,
+            information_needs,
         )
         grounded_claims = _verified_relations(grounded_claims)
         if claim_id_prefix and evidence_location_prefix:
@@ -955,6 +1428,31 @@ def _analyze_document(
             need for need in requested_needs if need not in covered_information_needs
         ]
         action_claims = _claim_texts(grounded_claims, "action")
+        metric_points = _displayable_metric_points(
+            _merge_metric_points(
+                _verified_metric_points(
+                    data, analyzed_content, grounded_claims, evidence_passages
+                ),
+                _recovered_metric_points(grounded_claims),
+            )
+        )
+        comparison_points = _verified_comparison_points(data, grounded_claims)
+        emit_ai_usage(
+            stage=_STAGE,
+            model=_model(),
+            system_content=system_prompt,
+            user_content=user_content,
+            schema=_ANALYSIS_SCHEMA,
+            requested_max_tokens=analysis_max_tokens,
+            response=response,
+            counts={
+                "passages": len(evidence_passages),
+                "raw_claims": raw_claim_count,
+                "verified_claims": len(grounded_claims),
+                "metrics": len(metric_points),
+                "comparisons": len(comparison_points),
+            },
+        )
         return DocumentAnalysis(
             doc_id=document.doc_id,
             summary=data["summary"],
@@ -973,8 +1471,8 @@ def _analyze_document(
             opportunity=_joined_claims(grounded_claims, "opportunity"),
             strength=_joined_claims(grounded_claims, "strength"),
             weakness=_joined_claims(grounded_claims, "weakness"),
-            metric_points=_verified_metric_points(data, analyzed_content, grounded_claims),
-            comparison_points=_verified_comparison_points(data, grounded_claims),
+            metric_points=metric_points,
+            comparison_points=comparison_points,
             factors=_claim_texts(grounded_claims, "factor"),
             recommended_actions=action_claims,
             monitoring_indicators=_claim_texts(grounded_claims, "monitoring"),
@@ -983,6 +1481,17 @@ def _analyze_document(
             analysis_confidence=data.get("analysis_confidence", "low"),
         )
     except (TypeError, json.JSONDecodeError, KeyError, ValueError) as exc:
+        emit_ai_usage(
+            stage=_STAGE,
+            model=_model(),
+            system_content=system_prompt,
+            user_content=user_content,
+            schema=_ANALYSIS_SCHEMA,
+            requested_max_tokens=analysis_max_tokens,
+            response=response,
+            outcome="invalid_response",
+            error_type=type(exc).__name__,
+        )
         raise PipelineStageError(stage=_STAGE, reason=f"analysis response for doc '{document.doc_id}' did not match the expected schema", detail=str(exc)) from exc
 
 

@@ -132,3 +132,98 @@ def test_the_table_rule_says_every_row_not_a_representative_one():
     assert "시점 수만큼" in TABLE_COMPLETENESS_INSTRUCTION
     assert "대표값 하나로 요약하지 말고" in TABLE_COMPLETENESS_INSTRUCTION
     assert "각 행·항목을 개별" in TABLE_COMPLETENESS_INSTRUCTION
+
+
+def test_entity_runtime_prompt_is_compact_without_losing_search_guards():
+    """The entity call runs for every question, so repeated prose is TPM too.
+
+    Pin the collector-facing safeguards rather than the old wording: short
+    headline terms, one language form, no invented competitor, and general
+    routing must survive future attempts to shorten this prompt again.
+    """
+    from core.entity.ai_based import _COMPACT_SYSTEM_PROMPT
+
+    assert len(_COMPACT_SYSTEM_PROMPT) < 5_000
+    assert "Do not invent a named competitor" in _COMPACT_SYSTEM_PROMPT
+    assert 'sector_id="general"' in _COMPACT_SYSTEM_PROMPT
+    assert "3-6 short canonical topic terms" in _COMPACT_SYSTEM_PROMPT
+    assert "both Korean and English forms" in _COMPACT_SYSTEM_PROMPT
+
+
+def test_entity_routing_choices_do_not_send_downstream_analysis_dimensions():
+    """Entity needs aliases/topics to route and search; report metrics and
+    strategic dimensions belong downstream and used to be repeated unused."""
+    import json
+
+    from common.contracts import SectorProfile
+    from core.entity.ai_based import _sector_choices
+
+    profile = SectorProfile(
+        sector_id="test_sector",
+        display_name="Test",
+        status="active",
+        aliases=["테스트"],
+        keywords=["테스트 시장"],
+        key_metrics=["매출"],
+        strategic_dimensions=["성장성"],
+    )
+    choices, _ = _sector_choices({profile.sector_id: profile})
+    payload = json.loads(choices)[0]
+
+    assert payload["routing_aliases"] == ["테스트"]
+    assert payload["business_topics"] == ["테스트 시장"]
+    assert "key_metrics" not in payload
+    assert "strategic_dimensions" not in payload
+
+
+def test_sk_broadband_analyzer_sends_table_completeness_once_per_call():
+    text = (
+        _ROOT / "sectors" / "sk_broadband" / "adapter" / "analyzer" / "__init__.py"
+    ).read_text(encoding="utf-8")
+
+    assert text.count('f"{TABLE_COMPLETENESS_INSTRUCTION} "') == 1
+
+
+def test_broadband_analyzer_requests_block_ready_generic_axes():
+    text = (
+        _ROOT / "sectors" / "sk_broadband" / "adapter" / "analyzer" / "__init__.py"
+    ).read_text(encoding="utf-8")
+
+    assert "공통 지표명은 같은 label" in text
+    assert "각 항목명은 subject" in text
+    assert "share_of는 원문이 하나의 전체" in text
+    assert "여러 기업·국가·기술을 공통 기준" in text
+
+
+def test_solar_stages_choose_provider_appropriate_defaults(monkeypatch):
+    from core.entity import ai_based as entity_ai
+    from core.synthesis import ai_based as synthesis_ai
+    from sectors.sk_broadband.adapter import analyzer as broadband_analyzer
+
+    stages = (
+        (entity_ai, "TRENDSPARC_ENTITY_AI_MODEL", "TRENDSPARC_ENTITY_AI_BASE_URL", "gpt-4o"),
+        (synthesis_ai, "TRENDSPARC_SYNTHESIS_AI_MODEL", "TRENDSPARC_SYNTHESIS_AI_BASE_URL", "gpt-4o-mini"),
+        (
+            broadband_analyzer,
+            "TRENDSPARC_SK_BROADBAND_ANALYZER_MODEL",
+            "TRENDSPARC_SK_BROADBAND_ANALYZER_BASE_URL",
+            "gpt-4o",
+        ),
+    )
+    for module, model_env, base_env, openai_default in stages:
+        monkeypatch.delenv(model_env, raising=False)
+        monkeypatch.setenv(base_env, "https://api.upstage.ai/v1")
+        assert module._model() == "solar-pro3"
+        monkeypatch.delenv(base_env, raising=False)
+        assert module._model() == openai_default
+        monkeypatch.setenv(model_env, "explicit-model")
+        assert module._model() == "explicit-model"
+
+
+def test_report_writer_keeps_action_owner_distinct_from_source_organisations():
+    text = (_ROOT / "core" / "report_generator" / "generator.py").read_text(
+        encoding="utf-8"
+    )
+    assert "payload.target_company is the accountable actor" in text
+    assert "third-party " in text
+    assert "plans only as evidence or benchmarks" in text

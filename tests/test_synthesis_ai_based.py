@@ -194,6 +194,114 @@ def test_question_text_is_included_in_the_prompt_sent_to_the_model(monkeypatch):
     assert "SKT AI 데이터센터 투자 현황은?" in user_message
 
 
+def test_structured_claim_input_is_not_duplicated_as_legacy_points(monkeypatch):
+    monkeypatch.setenv("TRENDSPARC_SYNTHESIS_AI_API_KEY", "test-key")
+    response = _make_response(["요약"], "종합")
+    fake_openai = _FakeOpenAI(response)
+    monkeypatch.setattr(synthesis_ai_module, "OpenAI", lambda api_key: fake_openai)
+    claim = SynthesisClaim(
+        synthesis_claim_id="doc1:c1", claim_id="c1", claim_type="key_point",
+        claim="검증된 주장", evidence_quote="검증된 원문", confidence="high",
+        doc_id="doc1", source_id="source1",
+    )
+    rule_based = _rule_based_result(
+        ["Key Point: 검증된 주장 [doc_id=doc1]"], grounded_claims=[claim]
+    )
+
+    refine_synthesis_ai(rule_based, "질문")
+
+    kwargs = fake_openai.chat.completions.last_kwargs
+    payload = json.loads(kwargs["messages"][1]["content"])
+    assert payload["verified_claims"] == [{
+        "synthesis_claim_id": "C001",
+        "claim_type": "key_point",
+        "claim": "검증된 주장",
+        "doc_id": "D01",
+    }]
+    assert payload["legacy_tagged_points"] == []
+    group_schema = kwargs["response_format"]["json_schema"]["schema"]["properties"]["claim_groups"]
+    assert set(group_schema["items"]["properties"]) == {"claim_ids"}
+
+
+def test_claim_id_groups_resolve_to_verified_provenance(monkeypatch):
+    monkeypatch.setenv("TRENDSPARC_SYNTHESIS_AI_API_KEY", "test-key")
+    response = _make_response(
+        ["요약"], "종합",
+        claim_groups=[{"claim_ids": ["doc1:c1", "doc2:c1"]}],
+    )
+    monkeypatch.setattr(synthesis_ai_module, "OpenAI", lambda api_key: _FakeOpenAI(response))
+    claims = [
+        SynthesisClaim(
+            synthesis_claim_id=f"{doc_id}:c1", claim_id="c1", claim_type="key_point",
+            claim="동일 사실", evidence_quote="원문", confidence="high",
+            doc_id=doc_id, source_id=source_id,
+        )
+        for doc_id, source_id in (("doc1", "source1"), ("doc2", "source2"))
+    ]
+    rule_based = _rule_based_result(
+        ["동일 사실"], grounded_claims=claims,
+        doc_source_map={"doc1": "source1", "doc2": "source2"},
+    )
+
+    result = refine_synthesis_ai(rule_based, "질문")
+
+    assert len(result.corroborated_points) == 1
+    assert result.corroborated_points[0].claim == "동일 사실"
+    assert result.corroborated_points[0].supporting_doc_ids == ["doc1", "doc2"]
+
+
+def test_compact_model_ids_are_expanded_back_to_original_provenance(monkeypatch):
+    monkeypatch.setenv("TRENDSPARC_SYNTHESIS_AI_API_KEY", "test-key")
+    response = _make_response(
+        ["요약"], "종합",
+        claim_groups=[{"claim_ids": ["C001", "C002"]}],
+    )
+    monkeypatch.setattr(synthesis_ai_module, "OpenAI", lambda api_key: _FakeOpenAI(response))
+    claims = [
+        SynthesisClaim(
+            synthesis_claim_id=f"very-long-document-{index}:claim-{index}",
+            claim_id=f"claim-{index}", claim_type="key_point", claim="동일 사실",
+            evidence_quote="원문", confidence="high", doc_id=f"document-{index}",
+            source_id=f"source-{index}",
+        )
+        for index in (1, 2)
+    ]
+    rule_based = _rule_based_result(
+        ["동일 사실"], grounded_claims=claims,
+        doc_source_map={claim.doc_id: claim.source_id for claim in claims},
+    )
+
+    result = refine_synthesis_ai(rule_based, "질문")
+
+    assert len(result.corroborated_points) == 1
+    assert result.corroborated_points[0].supporting_doc_ids == ["document-1", "document-2"]
+
+
+def test_ungrouped_verified_claims_are_restored_as_singletons(monkeypatch):
+    monkeypatch.setenv("TRENDSPARC_SYNTHESIS_AI_API_KEY", "test-key")
+    response = _make_response(["요약"], "종합", claim_groups=[])
+    monkeypatch.setattr(synthesis_ai_module, "OpenAI", lambda api_key: _FakeOpenAI(response))
+    claims = [
+        SynthesisClaim(
+            synthesis_claim_id=f"doc{index}:c1", claim_id="c1", claim_type="key_point",
+            claim=f"서로 다른 주장 {index}", evidence_quote=f"원문 {index}", confidence="high",
+            doc_id=f"doc{index}", source_id=f"source{index}",
+        )
+        for index in (1, 2, 3)
+    ]
+    rule_based = _rule_based_result(
+        [claim.claim for claim in claims], grounded_claims=claims,
+        doc_source_map={claim.doc_id: claim.source_id for claim in claims},
+    )
+
+    result = refine_synthesis_ai(rule_based, "질문")
+
+    assert len(result.uncorroborated_points) == 3
+    assert {point.claim for point in result.uncorroborated_points} == {
+        "서로 다른 주장 1", "서로 다른 주장 2", "서로 다른 주장 3"
+    }
+
+
 def test_falls_back_to_rule_based_on_refusal(monkeypatch):
     monkeypatch.setenv("TRENDSPARC_SYNTHESIS_AI_API_KEY", "test-key")
     response = _make_response([], "", refusal="cannot help with that")

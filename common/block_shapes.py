@@ -129,7 +129,78 @@ def item_bar_groups(metric_points: list[Any]) -> list[list[Any]]:
     direction in it at all. Whichever slot ran first used to claim both.
     """
     by_label = group_metric_points_by_label(metric_points)
-    return [points for points in by_label.values() if classify_metric_shape(points) == "comparison"]
+    groups: list[list[Any]] = []
+    for points in by_label.values():
+        if classify_metric_shape(points) != "comparison":
+            continue
+        subjects = [
+            getattr(point, "subject", None)
+            or (point.period if not is_time_period(point.period) else None)
+            for point in points
+        ]
+        valid = [
+            subject for subject in subjects
+            if subject
+            and len(subject) <= 40
+            and subject.casefold().strip() != points[0].label.casefold().strip()
+            and not re.search(r"\d[\d,.]*\s*(?:%|원|명|개|건|배|시간|분)", subject)
+        ]
+        # One explicit aggregate may sit beside the items. More malformed or
+        # missing names mean several different subquestions were collapsed
+        # under one broad heading; drawing that as one ranking is false.
+        if len(valid) < 2 or len(valid) / len(points) < 0.75:
+            continue
+        groups.append(points)
+    return groups
+
+
+def ranking_list_groups(metric_points: list[Any], minimum_items: int = 4) -> list[list[Any]]:
+    """Long categorical comparisons that read better as a ranked list.
+
+    This is purely shape-based: no platform, company, country, or question
+    vocabulary is inspected. Two or three items remain an ordinary bar;
+    four or more earn the denser rank/value treatment.
+    """
+    return [
+        points for points in item_bar_groups(metric_points)
+        if len(split_aggregate(points)[0]) >= minimum_items
+    ]
+
+
+def ranking_comparison_groups(
+    comparison_points: list[Any], minimum_items: int = 3
+) -> list[list[Any]]:
+    """Explicit rank criteria encoded as ComparisonPoint rows."""
+    grouped: dict[str, list[Any]] = {}
+    for point in comparison_points or []:
+        criterion = (getattr(point, "criterion", "") or "").strip()
+        normalized = criterion.casefold()
+        if "순위" not in normalized and "rank" not in normalized and "ranking" not in normalized:
+            continue
+        grouped.setdefault(criterion, []).append(point)
+    return [
+        points for points in grouped.values()
+        if len({point.entity for point in points}) >= minimum_items
+    ]
+
+
+def comparison_points_without_rank_dimensions(comparison_points: list[Any]) -> list[Any]:
+    """Qualitative comparisons left after explicit rankings take ownership."""
+    return [
+        point for point in comparison_points
+        if "순위" not in (point.criterion or "").casefold()
+        and "rank" not in (point.criterion or "").casefold()
+        and "ranking" not in (point.criterion or "").casefold()
+    ]
+
+
+def has_ranking_list(
+    metric_points: list[Any], comparison_points: list[Any] | None = None
+) -> bool:
+    return bool(
+        ranking_list_groups(metric_points)
+        or ranking_comparison_groups(comparison_points or [])
+    )
 
 
 def grouped_bar_series(metric_points: list[Any]) -> list[tuple[str, list[str], dict[str, list[Any]]]]:
@@ -229,6 +300,66 @@ def has_level_matrix(comparison_points: list[Any]) -> bool:
     """A grid needs two of each axis - otherwise it is a list or a band."""
     entities, criteria, cells = level_matrix(comparison_points)
     return len(entities) >= 2 and len(criteria) >= 2 and len(cells) >= 4
+
+
+def benchmark_grid(
+    comparison_points: list[Any], metric_points: list[Any],
+    entity_limit: int = 6, dimension_limit: int = 7,
+) -> tuple[list[str], list[str], dict[tuple[str, str], str]]:
+    """Comparable entities x shared qualitative/numeric dimensions.
+
+    It covers companies, countries, brands and technologies without knowing
+    any of those vocabularies. Demographic subjects are excluded because
+    they have their own segment block. A missing cell stays blank rather
+    than becoming zero.
+    """
+    cells: dict[tuple[str, str], str] = {}
+    entities: list[str] = []
+    dimensions: list[str] = []
+
+    def add(entity: str | None, dimension: str | None, value: str) -> None:
+        if not entity or not dimension or is_demographic(entity):
+            return
+        if entity not in entities:
+            entities.append(entity)
+        if dimension not in dimensions:
+            dimensions.append(dimension)
+        cells.setdefault((dimension, entity), value)
+
+    def is_rank_dimension(dimension: str | None) -> bool:
+        normalized = (dimension or "").strip().casefold()
+        return "순위" in normalized or "rank" in normalized or "ranking" in normalized
+
+    for point in comparison_points or []:
+        # Rank facts belong to the ranking block. Treating the same fact as a
+        # benchmark dimension duplicates it under the competitor section and
+        # produces a sparse, misleading grid.
+        if not is_rank_dimension(point.criterion):
+            add(point.entity, point.criterion, point.value)
+    for point in metric_points or []:
+        add(
+            getattr(point, "subject", None), point.label,
+            f"{_format_number(point.value)}{point.unit or ''}",
+        )
+
+    shared_dimensions = [
+        dimension for dimension in dimensions
+        if sum((dimension, entity) in cells for entity in entities) >= 2
+    ][:dimension_limit]
+    shared_entities = [
+        entity for entity in entities
+        if sum((dimension, entity) in cells for dimension in shared_dimensions) >= 2
+    ][:entity_limit]
+    filtered = {
+        key: value for key, value in cells.items()
+        if key[0] in shared_dimensions and key[1] in shared_entities
+    }
+    return shared_entities, shared_dimensions, filtered
+
+
+def has_benchmark_grid(comparison_points: list[Any], metric_points: list[Any]) -> bool:
+    entities, dimensions, cells = benchmark_grid(comparison_points, metric_points)
+    return len(entities) >= 2 and len(dimensions) >= 2 and bool(cells)
 
 
 def has_status_levels(comparison_points: list[Any], minimum: int = 2) -> bool:
@@ -375,6 +506,31 @@ def has_competitor_panels(comparison_points: list[Any], metric_points: list[Any]
     ))
 
 
+def competitor_panels_not_covered_by_ranking(
+    comparison_points: list[Any], metric_points: list[Any]
+) -> list[tuple[str, list[tuple[str, str, str | None]], list[Any], Any | None]]:
+    """Panels whose entity has not already been claimed by a rank block."""
+    rank_entities = {
+        point.entity
+        for group in ranking_comparison_groups(comparison_points)
+        for point in group
+    }
+    if has_ranking_list(metric_points, comparison_points):
+        rank_entities |= {
+            point.subject
+            for group in item_bar_groups(metric_points)
+            if len(split_aggregate(group)[0]) >= 3
+            for point in split_aggregate(group)[0]
+            if getattr(point, "subject", None)
+        }
+    return [
+        panel for panel in competitor_panels(
+            comparison_points_of_kind(comparison_points, demographic=False), metric_points
+        )
+        if panel[0] not in rank_entities
+    ]
+
+
 def has_landscape(metric_points: list[Any]) -> bool:
     """Whether one card can carry both halves of the artwork's Landscape:
     how the market moved, and what it is made of.
@@ -399,6 +555,60 @@ def comparison_points_of_kind(comparison_points: list[Any], demographic: bool) -
         if is_demographic(point.entity) == demographic
     ]
     return order_comparison_entities(selected)
+
+
+def comparison_points_not_covered_by_ranking(
+    comparison_points: list[Any], metric_points: list[Any]
+) -> list[Any]:
+    """Drop rank-only facts already represented by a categorical metric block.
+
+    Analyzer and report generation can legitimately encode the same sourced
+    ranking once as ComparisonPoint and once as MetricPoint. Keeping both is
+    useful for validation, but rendering both creates a duplicate table.
+    Non-rank criteria and rankings without a corresponding metric series stay.
+    """
+    ranked_points = [
+        point
+        for group in item_bar_groups(metric_points)
+        if len(split_aggregate(group)[0]) >= 3
+        for point in split_aggregate(group)[0]
+        if getattr(point, "subject", None)
+    ]
+    ranked_subjects = {point.subject for point in ranked_points}
+    explicitly_ranked_entities = {
+        point.entity
+        for group in ranking_comparison_groups(comparison_points)
+        for point in group
+    }
+    ranked_values: dict[str, set[float]] = {}
+    for point in ranked_points:
+        ranked_values.setdefault(point.subject, set()).add(float(point.value))
+
+    def is_covered(point: Any) -> bool:
+        criterion = (getattr(point, "criterion", "") or "").strip().casefold()
+        is_rank = "순위" in criterion or "rank" in criterion or "ranking" in criterion
+        entity = getattr(point, "entity", None)
+        if is_rank and entity in ranked_subjects | explicitly_ranked_entities:
+            return True
+        numeric = re.search(r"-?\d+(?:\.\d+)?", getattr(point, "value", "") or "")
+        return bool(
+            numeric and entity in ranked_values
+            and any(abs(float(numeric.group()) - value) < 1e-9 for value in ranked_values[entity])
+        )
+
+    return [point for point in comparison_points if not is_covered(point)]
+
+
+def metric_points_not_covered_by_ranking(metric_points: list[Any]) -> list[Any]:
+    """Metrics left after the ranking card claims its categorical series."""
+    if not has_ranking_list(metric_points):
+        return metric_points
+    covered_labels = {
+        group[0].label
+        for group in item_bar_groups(metric_points)
+        if group and len(split_aggregate(group)[0]) >= 3
+    }
+    return [point for point in metric_points if point.label not in covered_labels]
 
 
 def has_comparison(comparison_points: list[Any], demographic: bool | None = None) -> bool:
@@ -444,12 +654,16 @@ def has_radar(comparison_points: list[Any]) -> bool:
 
 
 def metric_comparison_groups(metric_points: list[Any]) -> list[tuple[str, list[Any]]]:
-    """Periods where two or more differently-labelled metrics share a unit -
-    a genuine like-for-like item comparison, as opposed to the same metric
-    tracked over time (which is `bar_metric_groups`/`render_metric_chart`).
+    """Explicit periods with two to five top-level KPIs sharing a unit.
+
+    Merely sharing ``%`` and ``시점 미상`` does not make dozens of unrelated
+    figures comparable. Subject-bearing points belong to an item/ranking
+    series; this block is for top-level measures pinned to the same period.
     """
     by_period: dict[str, list[Any]] = {}
     for point in metric_points:
+        if not is_time_period(point.period) or getattr(point, "subject", None):
+            continue
         by_period.setdefault(point.period, []).append(point)
     groups: list[tuple[str, list[Any]]] = []
     for period, points in by_period.items():
@@ -457,8 +671,11 @@ def metric_comparison_groups(metric_points: list[Any]) -> list[tuple[str, list[A
         for point in points:
             by_unit.setdefault(point.unit or "", []).append(point)
         for unit_points in by_unit.values():
-            if len({point.label for point in unit_points}) >= 2:
-                groups.append((period, unit_points))
+            distinct: dict[str, Any] = {}
+            for point in unit_points:
+                distinct.setdefault(point.label.casefold().strip(), point)
+            if len(distinct) >= 2:
+                groups.append((period, list(distinct.values())[:5]))
     return groups
 
 
@@ -513,44 +730,36 @@ def timeline_entries(
     Undated prose is left out - a numbered list of undated statements is not
     a timeline, which is all the old registry block produced."""
     entries: list[tuple[str, str]] = []
-    # A figure only belongs on a timeline when its own label was measured at
-    # more than one point in time. Six different metrics all dated 2024 are a
-    # snapshot of one moment, and listing them in a row makes a chronology out
-    # of a cross-section - which is exactly what a reader would misread as
-    # change over time. Live-observed: 숏폼 이용률 93.2%, 소비 비율 72.1%,
-    # 광고 선호도 31% and three platform shares were drawn as a six-step
-    # timeline, all labelled 2024.
-    periods_by_label: dict[str, set[str]] = {}
+    points_by_label: dict[str, list[Any]] = {}
     for point in metric_points:
-        # `period` is free text and is not always a time. An app-churn
-        # analysis used it for the compared subject ("B tv+ 앱"), which put
-        # "B tv+ 앱 — 30일 이탈률 42%" on a timeline as though it were a date.
         if is_time_period(point.period):
-            periods_by_label.setdefault(point.label, set()).add(point.period)
-    # A chronology the dated prose already establishes. A one-off figure has
-    # a place on such a timeline - it is a moment among other moments. What it
-    # cannot do is *be* the timeline, which is what happened when six
-    # different metrics, every one of them dated 2024, were laid out as six
-    # steps of change.
-    prose_periods = {
-        period for period in (
-            _timeline_period(sentence, reference_year) for sentence in dated_items(evidence)
-        ) if period
-    }
-    for point in metric_points:
-        if not is_time_period(point.period):
-            continue
-        own_series = len(periods_by_label.get(point.label, ())) >= 2
-        if own_series or len(prose_periods) >= 2:
+            points_by_label.setdefault(point.label, []).append(point)
+    series = max(
+        (
+            points for points in points_by_label.values()
+            if len({point.period for point in points}) >= 2
+        ),
+        key=lambda points: len({point.period for point in points}),
+        default=None,
+    )
+    # One timeline, one measurement definition. If no repeated metric exists,
+    # fall back to dated events only; never insert unrelated one-off KPIs
+    # between those events merely because they have dates.
+    if series:
+        for point in series:
             entries.append((point.period, f"{point.label} {_format_number(point.value)}{point.unit or ''}"))
-    for sentence in dated_items(evidence):
-        period = _timeline_period(sentence, reference_year)
-        # A bare "2분기" with no year anywhere in the sentence can't be placed
-        # on an axis, and guessing the year would be fabrication - so the
-        # entry is skipped rather than shown out of order. This is why the
-        # observed timeline had "3분기 '24년 …" sitting after 2026 entries.
-        if period:
-            entries.append((period, clean_citation(sentence)))
+    else:
+        method_re = re.compile(
+            r"표본|조사\s*대상|응답자|대면\s*면접|실시한.{0,20}조사|"
+            r"조사.{0,50}(?:국민|명)|sample|respondents?|surveyed",
+            re.IGNORECASE,
+        )
+        for sentence in dated_items(evidence):
+            if method_re.search(sentence):
+                continue
+            period = _timeline_period(sentence, reference_year)
+            if period:
+                entries.append((period, clean_citation(sentence)))
     deduped = list(dict.fromkeys(entries))
     # Two sentences can state the same fact in different words ("2026년 1분기
     # 영업이익 5,376억원" and "1분기 영업이익이 5376억원을 기록"). Keyed on the
@@ -743,6 +952,11 @@ _TERM_STOPWORDS = frozenset({
     "수준", "부분", "상황", "내용", "결과", "필요", "이용", "제공", "서비스", "그리고",
     "하지만", "또한", "특히", "현재", "최근", "계속", "다시", "모두", "각각", "이러한",
 })
+_TERM_STOPWORDS = _TERM_STOPWORDS | {
+    "것으", "나타났", "나타났다", "기록했", "기록했다", "응답했", "응답했다",
+    # URL/domain scaffolding is not a repeated business topic.
+    "http", "https", "www", "com", "org", "net",
+}
 _TERM_RE = re.compile(r"[가-힣]{2,}|[A-Za-z]{3,}")
 def recurring_terms(
     grounded_claims: list[Any], min_documents: int = 2, limit: int = 8

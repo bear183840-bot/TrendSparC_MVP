@@ -249,6 +249,14 @@ class PlannedSource(BaseModel):
     planning_priority: Optional[Literal["core", "standard", "supporting"]] = None
 
 
+class QuestionCoverageRequirement(BaseModel):
+    """Question-derived evidence axes, with no sector/topic vocabulary."""
+
+    minimum_distinct_periods: int = 0
+    comparison_anchors: list[str] = Field(default_factory=list)
+    forecast_required: bool = False
+
+
 class WebSearchContext(BaseModel):
     """Question-level context supplied to an AI web-search stage.
 
@@ -274,6 +282,10 @@ class WebSearchContext(BaseModel):
     needs_generic_topic_round: bool = False
     report_purpose_id: Optional[str] = None
     information_needs: list[str] = Field(default_factory=list)
+    # Structural evidence explicitly requested by the question itself.  This
+    # is separate from optional dashboard-shape hints: "지난 5년" and
+    # "A vs B" are answer requirements even if a prose answer is possible.
+    question_coverage: Optional[QuestionCoverageRequirement] = None
     # Natural-language hints from block_priority_planner about which data
     # *shapes* (a 3+ period trend, a 2+ entity comparison, ...) would let the
     # final report draw a real chart/table instead of falling back to plain
@@ -810,3 +822,59 @@ class DynamicLayout(BaseModel):
     format: str
     blocks: list[DashboardBlock] = Field(default_factory=list)
     render_target: Optional[str] = None
+
+
+class BlockDeliveryStageSnapshot(BaseModel):
+    """Counts at one handoff, used only to find where evidence disappeared."""
+
+    stage: Literal["collection", "analysis", "synthesis"]
+    document_count: int = 0
+    source_count: int = 0
+    content_character_count: int = 0
+    grounded_claim_count: int = 0
+    metric_point_count: int = 0
+    comparison_point_count: int = 0
+    factor_count: int = 0
+    action_count: int = 0
+
+
+class BlockCandidateDeliveryTrace(BaseModel):
+    """Why one deterministic block candidate was or was not delivered."""
+
+    block_type: str
+    required_data_hint: str = ""
+    data_supported: bool = False
+    selected_role: Optional[Literal["lead", "companion"]] = None
+    decision_reason: str
+    evidence_claim_ids: list[str] = Field(default_factory=list)
+    supporting_doc_ids: list[str] = Field(default_factory=list)
+    supporting_source_urls: list[str] = Field(default_factory=list)
+
+
+class SlotDeliveryTrace(BaseModel):
+    slot_id: str
+    title: str
+    intent: str
+    optional: bool = False
+    collection_targeted: bool = False
+    target_block_types: list[str] = Field(default_factory=list)
+    item_count: int = 0
+    selected_block_types: list[str] = Field(default_factory=list)
+    last_resort: bool = False
+    candidates: list[BlockCandidateDeliveryTrace] = Field(default_factory=list)
+
+
+class BlockDeliveryTrace(BaseModel):
+    """Read-only audit of collection -> extraction -> synthesis -> dashboard.
+
+    This contract never feeds `resolve_slots()` and therefore cannot force a
+    planned block onto evidence that does not support it.
+    """
+
+    request_id: str
+    purpose_id: str
+    audience_id: Optional[str] = None
+    plan_source: Literal["pipeline", "reconstructed_for_diagnostics"] = "pipeline"
+    stages: list[BlockDeliveryStageSnapshot] = Field(default_factory=list)
+    slots: list[SlotDeliveryTrace] = Field(default_factory=list)
+    delivered_block_types: list[str] = Field(default_factory=list)

@@ -34,6 +34,7 @@ from reporting.dashboard_streamlit.blocks import (  # noqa: F401
     bar,
     cause_map,
     evidence,
+    insight_blocks,
     kpi_card,
     line_area,
     matrix,

@@ -1,0 +1,102 @@
+{
+  "description": "멘토 질문 9개 검증 manifest. 운영 분기나 프롬프트가 아니라 저장 실행 결과를 평가하는 개발 전용 데이터다.",
+  "cases": [
+    {
+      "case_id": "q1_brand_marketing",
+      "question": "SK브로드밴드 브랜드 이미지 개선에 맞는 연령층별 광고 매체 및 모델 추천",
+      "audience_id": "practitioner",
+      "purpose_id": "future_business",
+      "expected_elements": [
+        {"element_id": "age_media_reach", "label": "연령대별 매체 reach", "acceptable_slot_ids": ["market_shift", "segments"], "acceptable_block_types": ["grouped_bar", "item_bar", "segment_table", "table"]},
+        {"element_id": "model_image", "label": "모델별 이미지·적합성", "acceptable_slot_ids": ["segments", "capability"], "acceptable_block_types": ["segment_table", "table", "factor_list", "narrative_list"]},
+        {"element_id": "cost", "label": "확인 가능한 비용", "acceptable_slot_ids": ["market_shift", "capability"], "acceptable_block_types": ["kpi_grid", "kpi_single", "table"], "required": false}
+      ]
+    },
+    {
+      "case_id": "q2_jungang_crisis",
+      "question": "중앙그룹 회생 사태에 따른 IPTV사의 대응 방안",
+      "audience_id": "executive",
+      "purpose_id": "issue_response",
+      "expected_elements": [
+        {"element_id": "issue_overview", "label": "이슈 개요", "acceptable_slot_ids": ["problem"], "acceptable_block_types": ["timeline", "narrative_list", "matrix"]},
+        {"element_id": "channel_impact", "label": "수급·채널 영향도", "acceptable_slot_ids": ["cause", "impact"], "acceptable_block_types": ["cause_map", "cause_tree", "table", "bar", "item_bar"]},
+        {"element_id": "short_term_action", "label": "단기 리스크 회피 방안", "acceptable_slot_ids": ["recommendation"], "acceptable_block_types": ["action_list"]}
+      ]
+    },
+    {
+      "case_id": "q3_chipflation",
+      "question": "칩플레이션이 셋톱박스 업계에 미치는 영향과 IPTV사의 중장기 대응 전략",
+      "audience_id": "management",
+      "purpose_id": "issue_response",
+      "expected_elements": [
+        {"element_id": "material_trend", "label": "글로벌 원자재 동향", "acceptable_slot_ids": ["problem", "cause"], "acceptable_block_types": ["chart", "bar", "timeline", "landscape"]},
+        {"element_id": "cost_structure", "label": "원가 비중 변화", "acceptable_slot_ids": ["cause", "impact"], "acceptable_block_types": ["share_split", "grouped_bar", "bar", "table"]},
+        {"element_id": "alternative_technology", "label": "대체 기술 제언", "acceptable_slot_ids": ["options", "recommendation"], "acceptable_block_types": ["action_list", "factor_list", "table"]}
+      ]
+    },
+    {
+      "case_id": "q4_ott_ecosystem",
+      "question": "지난 5년간 OTT 생태계의 변화 추이 (국내 vs 글로벌 비교)",
+      "audience_id": "external",
+      "purpose_id": "current_status",
+      "expected_elements": [
+        {"element_id": "subscriber_share_trend", "label": "연도별 가입자·점유율 변화", "acceptable_slot_ids": ["market"], "acceptable_block_types": ["chart", "landscape", "grouped_bar"]},
+        {"element_id": "domestic_global", "label": "국내·글로벌 비교", "acceptable_slot_ids": ["ranking", "competitor", "segments"], "acceptable_block_types": ["grouped_bar", "table", "competitor_panels"]},
+        {"element_id": "issue_timeline", "label": "주요 이슈 타임라인", "acceptable_slot_ids": ["market"], "acceptable_block_types": ["timeline"]}
+      ]
+    },
+    {
+      "case_id": "q5_telco_new_business",
+      "question": "해외 주요 텔레콤 기업들의 신규 사업 추진 케이스 및 레퍼런스",
+      "audience_id": "executive",
+      "purpose_id": "future_business",
+      "expected_elements": [
+        {"element_id": "company_benchmark", "label": "주요사별 신사업 영역", "acceptable_slot_ids": ["opportunity", "capability"], "acceptable_block_types": ["competitor_panels", "level_matrix", "table"]},
+        {"element_id": "performance", "label": "성과 지표", "acceptable_slot_ids": ["market_shift", "opportunity", "capability"], "acceptable_block_types": ["kpi_grid", "item_bar", "grouped_bar", "table"]},
+        {"element_id": "implication", "label": "시사점", "acceptable_slot_ids": ["capability", "roadmap"], "acceptable_block_types": ["action_list", "factor_list", "narrative_list"]}
+      ]
+    },
+    {
+      "case_id": "q6_senior_content",
+      "question": "시니어 타겟 콘텐츠 인기 순위 및 시청 트렌드 분석",
+      "audience_id": "practitioner",
+      "purpose_id": "current_status",
+      "expected_elements": [
+        {"element_id": "content_ranking", "label": "콘텐츠 인기 순위", "acceptable_slot_ids": ["ranking"], "acceptable_block_types": ["item_bar", "grouped_bar", "table"]},
+        {"element_id": "popularity_factor", "label": "인기 요인", "acceptable_slot_ids": ["factors"], "acceptable_block_types": ["driver_bars", "factor_list"]},
+        {"element_id": "related_keywords", "label": "주요 연관 키워드", "acceptable_slot_ids": ["keywords"], "acceptable_block_types": ["recurring_terms"]}
+      ]
+    },
+    {
+      "case_id": "q7_single_household",
+      "question": "2030 1인 가구의 유선 인터넷 가입 고려 요인 및 페인 포인트",
+      "audience_id": "management",
+      "purpose_id": "root_cause",
+      "expected_elements": [
+        {"element_id": "consideration_factors", "label": "가입 고려 요인", "acceptable_slot_ids": ["cause", "drivers"], "acceptable_block_types": ["driver_bars", "factor_list", "cause_tree", "cause_map"]},
+        {"element_id": "pain_points", "label": "주요 불만·페인 포인트", "acceptable_slot_ids": ["cause", "drivers"], "acceptable_block_types": ["factor_list", "recurring_terms", "cause_tree", "cause_map"]}
+      ]
+    },
+    {
+      "case_id": "q8_long_short_form",
+      "question": "롱폼과 숏폼 미디어 소비 트렌드",
+      "audience_id": "external",
+      "purpose_id": "current_status",
+      "expected_elements": [
+        {"element_id": "format_comparison", "label": "롱폼·숏폼 이용률 비교", "acceptable_slot_ids": ["ranking", "market"], "acceptable_block_types": ["item_bar", "grouped_bar", "metric_comparison"]},
+        {"element_id": "age_comparison", "label": "연령별 이용률", "acceptable_slot_ids": ["segments"], "acceptable_block_types": ["grouped_bar", "segment_table", "item_bar"]}
+      ]
+    },
+    {
+      "case_id": "q9_sports_subscription",
+      "question": "구독 상품 내 스포츠 중계 포함에 따른 가입 유인 효과 분석",
+      "audience_id": "executive",
+      "purpose_id": "root_cause",
+      "expected_elements": [
+        {"element_id": "platform_share", "label": "스포츠 시청 플랫폼 비중", "acceptable_slot_ids": ["problem"], "acceptable_block_types": ["share_split", "item_bar", "grouped_bar"]},
+        {"element_id": "subscriber_metrics", "label": "중계 관련 가입자 데이터", "acceptable_slot_ids": ["problem"], "acceptable_block_types": ["kpi_grid", "chart", "bar"]},
+        {"element_id": "decision_factors", "label": "가격·독점·프로모션 등 가입 결정 요인", "acceptable_slot_ids": ["cause", "drivers"], "acceptable_block_types": ["driver_bars", "factor_list", "cause_tree"]}
+      ]
+    }
+  ]
+}

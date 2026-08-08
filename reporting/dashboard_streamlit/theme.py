@@ -16,7 +16,7 @@ def dashboard_css(dark: bool, accent_theme: str = "orange") -> str:
     else:
         colors = {
             "page": "#f7f7f5", "panel": "#ffffff", "panel2": "#fbfbfa",
-            "sidebar": "#d7d7d7", "ink": "#202020", "muted": "#77736e",
+            "sidebar": "#f1f1ef", "ink": "#202020", "muted": "#77736e",
             "line": "#aaa7a2", "soft": "#eeeeec", "shadow": "rgba(43,38,31,.10)",
         }
     # Values read out of the delivered SVGs rather than the spec document that
@@ -70,7 +70,7 @@ def dashboard_css(dark: bool, accent_theme: str = "orange") -> str:
     [data-testid="stToolbar"] {{ right:1rem; }}
     .block-container {{ max-width:1720px; padding:.75rem 1.6rem 1rem; }}
     [data-testid="stSidebar"] {{ background:var(--ts-sidebar); border-right:0; }}
-    [data-testid="stSidebar"] .block-container {{ padding:1.8rem 1.1rem; }}
+    [data-testid="stSidebar"] .block-container {{ padding:1rem .85rem 1.2rem; }}
     [data-testid="stSidebar"] * {{ color:var(--ts-ink); }}
     /* ...except the wordmark. The rule above sets a colour on every descendant
        directly, which beats the accent the wordmark passes down by
@@ -80,6 +80,81 @@ def dashboard_css(dark: bool, accent_theme: str = "orange") -> str:
        smaller size, and nothing else. */
     [data-testid="stSidebar"] .ts-wordmark,
     [data-testid="stSidebar"] .ts-wordmark * {{ color:var(--ts-accent); }}
+    [data-testid="stSidebar"] .ts-wordmark {{ margin:.1rem 0 .85rem; font-size:1.62rem; }}
+    /* The landing wordmark is the reference artwork. At sidebar scale the
+       webfont's compact glyph metrics pull the `e` left of the `s`; move only
+       the first line so their columns keep the same relationship as the
+       landing mark without changing that already-approved large version. */
+    [data-testid="stSidebar"] .ts-word-1 {{ margin-left:1.20em; }}
+    [data-testid="stSidebar"] div[data-testid="stButton"] {{ margin:0; }}
+    [data-testid="stSidebar"] div[data-testid="stButton"] button,
+    [data-testid="stSidebar"] div[data-testid="stDownloadButton"] button {{
+      min-height:34px; padding:.38rem .62rem; border:0; border-radius:9px;
+      background:transparent; box-shadow:none; justify-content:flex-start;
+      font-family:"Pretendard Variable",Pretendard,sans-serif; font-size:.8rem; font-weight:650;
+      transition:background .14s ease,color .14s ease,transform .14s ease; }}
+    [data-testid="stSidebar"] div[data-testid="stButton"] button:hover,
+    [data-testid="stSidebar"] div[data-testid="stDownloadButton"] button:hover {{
+      color:var(--ts-accent); background:color-mix(in srgb,var(--ts-accent) 9%,var(--ts-panel)); }}
+    [class*="st-key-sidebar_new_report"] button {{
+      min-height:42px!important; margin-bottom:.55rem; padding:.55rem .75rem!important;
+      border:1px solid color-mix(in srgb,var(--ts-accent) 52%,var(--ts-border))!important;
+      background:color-mix(in srgb,var(--ts-accent) 5%,var(--ts-panel))!important;
+      color:var(--ts-accent)!important; font-size:.86rem!important; font-weight:850!important;
+      justify-content:flex-start!important; }}
+    [class*="st-key-sidebar_new_report"] button:hover {{
+      background:color-mix(in srgb,var(--ts-accent) 12%,var(--ts-panel))!important;
+      transform:translateY(-1px); }}
+    [class*="st-key-sidebar_nav_"] button {{ font-size:.84rem!important; font-weight:750!important; }}
+    [class*="st-key-sidebar_nav_dashboard_True"] button,
+    [class*="st-key-sidebar_nav_settings_True"] button {{
+      color:var(--ts-accent)!important; font-weight:850!important;
+      background:color-mix(in srgb,var(--ts-accent) 10%,var(--ts-panel))!important; }}
+    .ts-side-divider {{ height:1px; margin:.62rem .15rem .55rem;
+      background:color-mix(in srgb,var(--ts-line) 45%,transparent); }}
+    .ts-side-heading {{ margin:0 .55rem .28rem; color:var(--ts-muted)!important;
+      font-size:.66rem; font-weight:850; letter-spacing:.08em; text-transform:uppercase; }}
+    .ts-side-subtitle {{ margin:.42rem .55rem .25rem; color:var(--ts-accent)!important;
+      font-size:.72rem; font-weight:800; }}
+    [class*="st-key-sidebar_download_"] button {{ min-height:31px!important; font-size:.77rem!important; }}
+    [class*="st-key-sidebar_download_dashboard_pdf_True"] button,
+    [class*="st-key-sidebar_download_report_pdf_True"] button,
+    [class*="st-key-sidebar_download_result_json_True"] button {{
+      color:var(--ts-accent)!important;
+      background:color-mix(in srgb,var(--ts-accent) 8%,var(--ts-panel))!important; }}
+    .ts-download-record {{ display:grid; gap:.08rem; margin:.38rem .18rem .16rem; padding:.42rem .5rem;
+      border-top:1px solid var(--ts-border); }}
+    .ts-download-record small,.ts-download-record span {{ color:var(--ts-muted)!important;
+      font-size:.61rem; line-height:1.3; }}
+    .ts-download-record b {{ color:var(--ts-ink)!important; font-size:.7rem; font-weight:750;
+      overflow:hidden; white-space:nowrap; text-overflow:ellipsis; }}
+    [class*="st-key-preview_"] button,
+    [class*="st-key-download_"] button {{ min-height:28px!important; padding:.22rem .4rem!important;
+      justify-content:center!important; border:1px solid var(--ts-border)!important;
+      font-size:.68rem!important; }}
+    [class*="st-key-sidebar_recent_"] button {{ min-height:28px!important; padding:.25rem .55rem!important;
+      font-size:.74rem!important; font-weight:600!important; }}
+    [class*="st-key-sidebar_recent_"] button [data-testid="stMarkdownContainer"] {{
+      min-width:0; width:100%; overflow:hidden; }}
+    [class*="st-key-sidebar_recent_"] button p {{ display:block; width:100%; max-width:100%; overflow:hidden;
+      white-space:nowrap; text-overflow:ellipsis; text-align:left; }}
+    [class*="st-key-sidebar_recent_"] button:hover {{ color:var(--ts-accent)!important;
+      background:color-mix(in srgb,var(--ts-accent) 8%,transparent)!important; }}
+    [class*="st-key-sidebar_recent_toggle"] button {{ color:var(--ts-accent)!important;
+      font-size:.7rem!important; font-weight:750!important; }}
+    [class*="st-key-sidebar_feature_"] button:disabled {{ min-height:29px!important;
+      opacity:.52; background:transparent!important; color:var(--ts-muted)!important; }}
+    .ts-coming-soon {{ margin:.12rem .55rem 0; text-align:right; color:var(--ts-muted)!important;
+      font-size:.61rem; font-weight:700; letter-spacing:.04em; }}
+    .ts-settings-page {{ max-width:980px; margin:1.8rem auto; }}
+    .ts-settings-page h1 {{ margin:0 0 1.2rem; color:var(--ts-ink); font-size:1.7rem; }}
+    .ts-settings-card {{ display:flex; align-items:center; justify-content:space-between; gap:1rem;
+      margin:.75rem 0; padding:1.15rem 1.25rem; border:1px solid var(--ts-border);
+      border-radius:14px; background:var(--ts-panel); }}
+    .ts-settings-card h3 {{ margin:0; color:var(--ts-ink); font-size:1rem; }}
+    .ts-settings-card p {{ margin:.22rem 0; color:var(--ts-muted); font-size:.84rem; }}
+    .ts-settings-card small {{ color:var(--ts-muted); font-size:.72rem; }}
+    .ts-settings-card > span {{ flex:none; color:var(--ts-accent); font-size:.72rem; font-weight:800; }}
     div[data-testid="stForm"] {{ max-width:1080px; margin:0 auto; border:0; background:transparent; padding:0; }}
     [class*="st-key-intake_meta_row"] div[data-testid="stHorizontalBlock"] {{ padding:.55rem 1rem;
       margin-top:.65rem; border-radius:30px; background:color-mix(in srgb,var(--ts-soft) 92%,var(--ts-panel)); }}
@@ -162,9 +237,6 @@ def dashboard_css(dark: bool, accent_theme: str = "orange") -> str:
     .ts-question-title {{ margin:1.6rem 0 0!important; font-family:"Pretendard Variable",Pretendard,sans-serif!important;
       font-size:clamp(1.5rem,2.4vw,2.35rem)!important; font-weight:600!important; letter-spacing:-.02em!important;
       color:var(--ts-ink)!important; }}
-    .ts-compose-meta {{ max-width:980px; margin:.85rem auto 0; padding:.72rem 1rem; border-radius:22px;
-      background:color-mix(in srgb,var(--ts-soft) 88%,var(--ts-panel)); color:var(--ts-muted);
-      font-size:.9rem; }}
     .ts-header-row {{ display:flex; align-items:center; gap:1.3rem; margin:0 0 .45rem; }}
     .ts-top-question {{ flex:1; min-width:0; display:flex; align-items:center; gap:1rem; margin:0; padding:.68rem 1.3rem;
       border:3px solid var(--ts-accent); border-radius:999px; color:var(--ts-accent); font-size:1.1rem;
@@ -178,29 +250,32 @@ def dashboard_css(dark: bool, accent_theme: str = "orange") -> str:
       -webkit-mask-position:center; mask-position:center; }}
     /* Meta row - reference design 1a: small caps label + value, each on its
        own hairline underline rather than a floating inline row. */
-    .ts-context-line {{ display:flex; gap:1.9rem; align-items:flex-end; margin:.35rem 1.4rem .75rem;
+    .ts-context-line {{ display:flex; gap:1.6rem; align-items:flex-end; margin:.2rem 1rem .5rem;
       color:var(--ts-ink); font-weight:750; flex-wrap:wrap; }}
     .ts-context-line span {{ display:flex; align-items:baseline; gap:.6rem; padding-bottom:.32rem;
       border-bottom:1px solid var(--ts-line); }}
     .ts-context-line span small {{ color:var(--ts-muted); font-size:.66rem; margin-right:0; font-weight:500;
       letter-spacing:.06em; }}
-    .ts-summary-grid {{ display:grid; grid-template-columns:minmax(0,1fr) 210px; gap:1.2rem; align-items:stretch; }}
+    .ts-summary-grid {{ display:grid; grid-template-columns:minmax(0,1fr) 210px; gap:1.2rem;
+      align-items:stretch; margin-bottom:.8rem; }}
     /* Analysis Summary - reference design 1a's gradient panel with a fading
        rule under the heading instead of a full-width divider. */
-    .ts-summary {{ padding:1.15rem 1.5rem 1.25rem; border-radius:10px; color:white;
+    .ts-summary {{ padding:.85rem 1.25rem .95rem; border-radius:10px; color:white;
       background:linear-gradient(135deg,var(--ts-accent),color-mix(in srgb,var(--ts-accent) 62%,#000)); }}
-    .ts-summary h2 {{ margin:0 0 .55rem; padding-bottom:.4rem; border-bottom:0; color:white;
+    .ts-summary h2 {{ margin:0 0 .4rem; padding-bottom:.3rem; border-bottom:0; color:white;
       font-size:1.18rem; font-weight:700; letter-spacing:-.01em; position:relative; }}
     .ts-summary h2::after {{ content:""; position:absolute; left:0; bottom:0; width:150px; height:1.5px;
       background:linear-gradient(90deg,rgba(255,255,255,.9),rgba(255,255,255,0)); }}
-    .ts-summary p {{ margin:0; font-size:.95rem; line-height:1.62; font-weight:600; letter-spacing:-.01em;
-      color:rgba(255,255,255,.95); display:-webkit-box; -webkit-line-clamp:3; -webkit-box-orient:vertical;
-      overflow:hidden; }}
-    .ts-signal-stack {{ display:grid; gap:.75rem; }}
-    .ts-signal {{ padding:.6rem .85rem; border-bottom:1px solid var(--ts-accent); color:var(--ts-ink); }}
-    .ts-signal small {{ color:var(--ts-muted); }} .ts-signal strong {{ float:right; color:var(--ts-orange); }}
-    .ts-summary-compact {{ min-height:112px; max-height:128px; }}
-    .ts-stat-col {{ display:flex; flex-direction:column; justify-content:center; gap:1.1rem; padding:0 .35rem; }}
+    .ts-summary p {{ margin:0; font-size:.84rem; line-height:1.42; font-weight:600; letter-spacing:-.01em;
+      color:rgba(255,255,255,.95); overflow:visible; }}
+    .ts-axis-comparison {{ display:grid; grid-template-columns:1fr 1fr; gap:.65rem; }}
+    .ts-axis-side {{ min-width:0; padding:.55rem .7rem; border:1px solid var(--ts-line);
+      border-radius:10px; background:color-mix(in srgb,var(--ts-panel) 94%,var(--ts-accent)); }}
+    .ts-axis-side h4 {{ margin:0 0 .3rem; color:var(--ts-accent); font-size:.82rem; }}
+    .ts-axis-side ul {{ margin:0; padding-left:1rem; }}
+    .ts-axis-side li {{ margin:.18rem 0; font-size:.72rem; line-height:1.3; color:var(--ts-ink); }}
+    .ts-axis-note {{ margin:.32rem 0 0; color:var(--ts-muted); font-size:.66rem; line-height:1.25; }}
+    .ts-stat-col {{ display:flex; flex-direction:column; justify-content:center; gap:.6rem; padding:0 .35rem; }}
     .ts-stat {{ display:flex; flex-direction:column; gap:.2rem; }}
     .ts-stat small {{ color:var(--ts-muted); font-size:.68rem; font-weight:700; text-transform:uppercase;
       letter-spacing:.05em; }}
@@ -213,8 +288,8 @@ def dashboard_css(dark: bool, accent_theme: str = "orange") -> str:
        keeps the empty tracks, so one card is the same compact size as four. */
     .ts-kpi-row {{ display:grid; grid-template-columns:repeat(auto-fill,minmax(190px,1fr)); gap:.75rem;
       margin-top:.65rem; }}
-    .ts-kpi-card {{ display:flex; flex-direction:column; justify-content:space-between; gap:.5rem;
-      min-height:104px; padding:.85rem 1rem;
+    .ts-kpi-card {{ display:flex; flex-direction:column; justify-content:space-between; gap:.5rem; min-width:0;
+      min-height:78px; padding:.65rem .8rem;
       border:1px solid color-mix(in srgb,var(--ts-line) 55%,transparent);
       border-radius:9px; background:var(--ts-panel); transition:border-color .15s, box-shadow .15s; }}
     /* The artwork's row variant: one tinted band per figure, label left and
@@ -229,6 +304,13 @@ def dashboard_css(dark: bool, accent_theme: str = "orange") -> str:
     .ts-kpi-row.rows .ts-kpi-card b {{ font-size:1.24rem; }}
     .ts-kpi-row.rows .ts-kpi-delta {{ margin-top:0; }}
     .ts-kpi-row.rows .ts-kpi-spark {{ display:none; }}
+    .ts-kpi-row.compact {{ grid-template-columns:1fr; margin-top:.2rem; }}
+    .ts-kpi-row.compact .ts-kpi-card {{ min-height:118px; padding:.75rem;
+      justify-content:space-between; }}
+    .ts-kpi-row.compact .ts-kpi-card > small {{ font-size:.72rem; line-height:1.3;
+      display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; }}
+    .ts-kpi-row.compact .ts-kpi-card b {{ font-size:1.12rem; white-space:normal; }}
+    .ts-kpi-row.compact .ts-kpi-spark {{ height:16px; }}
     .ts-kpi-card:hover {{ border-color:color-mix(in srgb,var(--ts-accent) 45%,var(--ts-line));
       box-shadow:0 2px 8px color-mix(in srgb,var(--ts-accent) 14%,transparent); }}
     .ts-kpi-card > small {{ display:block; color:var(--ts-muted); font-size:.78rem; font-weight:500;
@@ -237,12 +319,12 @@ def dashboard_css(dark: bool, accent_theme: str = "orange") -> str:
     .ts-kpi-card b {{ display:block; font-size:1.32rem; font-weight:800;
       color:var(--ts-ink); letter-spacing:-.02em; white-space:nowrap; }}
     .ts-kpi-delta {{ display:block; margin-top:.15rem; font-size:.72rem; font-weight:650;
-      color:var(--ts-muted); white-space:nowrap; }}
+      color:var(--ts-muted); white-space:normal; }}
     /* Shape only - the figure and its delta carry the numbers. Deliberately
        uncoloured by good/bad: whether a rise is welcome is metric-specific
        (subscribers up is good, churn up is not) and the evidence never says
        which, so the line is tinted by direction alone. */
-    .ts-kpi-spark {{ display:block; width:100%; height:26px; margin-top:.4rem; opacity:.75; }}
+    .ts-kpi-spark {{ display:block; width:100%; height:18px; margin-top:.25rem; opacity:.75; }}
     /* Evidence & Sources - reference design 1a's outlined "Link" chip. */
     .ts-source-list {{ list-style:none; margin:0; padding:0; }}
     .ts-source-list li {{ display:flex; justify-content:space-between; align-items:center; gap:.6rem;
@@ -257,7 +339,6 @@ def dashboard_css(dark: bool, accent_theme: str = "orange") -> str:
       border:1px solid var(--ts-accent); border-radius:6px;
       color:var(--ts-accent); text-decoration:none; font-weight:600; font-size:.72rem; white-space:nowrap; }}
     .ts-source-list a:hover {{ background:color-mix(in srgb,var(--ts-accent) 10%,transparent); }}
-    .ts-section-grid {{ display:grid; grid-template-columns:1.05fr 1.1fr 1.35fr; gap:.7rem; margin-top:.65rem; }}
     /* Korean has no inter-word break opportunity by default, so a track that
        shrinks below its text's natural width wraps after *every syllable* -
        the "글자가 세로로 깨지는" report. keep-all restores word-boundary
@@ -435,7 +516,6 @@ def dashboard_css(dark: bool, accent_theme: str = "orange") -> str:
        than filled with an apology, so the survivors must widen to take the
        space. minmax(0,…) let a track shrink below its text's width, which is
        what made Korean wrap one syllable per line. */
-    .ts-purpose-grid {{ grid-template-columns:repeat(auto-fit,minmax(260px,1fr)); }}
     .ts-compact-list {{ list-style:none; margin:0; padding:0; }}
     .ts-compact-list li {{ display:grid; grid-template-columns:30px minmax(0,1fr) 26px; gap:.45rem;
       align-items:start; margin:0; padding:.48rem 0; border-bottom:1px solid color-mix(in srgb,var(--ts-line) 38%,transparent);
@@ -490,12 +570,6 @@ def dashboard_css(dark: bool, accent_theme: str = "orange") -> str:
     .ts-collection-row.completed .ts-collection-icon {{ color:#087f5b; background:#dff8ee; }}
     .ts-collection-row.failed .ts-collection-icon {{ color:#c92a2a; background:#fff0f0; }}
     .ts-collection-row.running .ts-collection-icon {{ color:var(--ts-accent); background:var(--ts-panel2); }}
-    .ts-side-nav {{ display:grid; gap:.5rem; margin:3rem -.4rem 0; }}
-    .ts-nav {{ padding:.8rem 1rem; border-radius:999px; color:var(--ts-ink); font-weight:750; }}
-    .ts-nav.active {{ background:var(--ts-panel); color:var(--ts-accent); }}
-    .ts-recent {{ margin-top:12rem; color:var(--ts-muted); font-size:.78rem; }}
-    .ts-recent-item {{ padding:.55rem .65rem; border-radius:8px; color:var(--ts-ink); }}
-    .ts-recent-item.active {{ background:color-mix(in srgb,var(--ts-panel) 45%,transparent); color:var(--ts-accent); }}
     .ts-bar-list {{ display:grid; gap:.5rem; }}
     .ts-bar-row {{ display:grid; grid-template-columns:28px minmax(0,1fr) 110px; align-items:center; gap:.6rem;
       font-size:.85rem; }}
@@ -652,21 +726,46 @@ def dashboard_css(dark: bool, accent_theme: str = "orange") -> str:
     .ts-factor-list li {{ margin:5px 0; display:flex; gap:6px; align-items:baseline;
         font-size:0.9rem; }}
     .ts-factor-note {{ margin:8px 0 0; font-size:0.74rem; color:var(--ts-muted); }}
+    .ts-driver-target {{ margin:.15rem 0 .45rem; font-size:.76rem; line-height:1.35;
+      color:var(--ts-muted); display:-webkit-box; -webkit-line-clamp:2;
+      -webkit-box-orient:vertical; overflow:hidden; }}
+    .ts-driver-target b {{ color:var(--ts-ink); margin-right:.35rem; }}
     .ts-terms {{ display:flex; flex-wrap:wrap; gap:6px; }}
     .ts-term {{ display:inline-flex; align-items:center; gap:5px; padding:3px 9px;
         border:1px solid var(--ts-border); border-radius:999px; font-size:0.82rem; }}
     .ts-term b {{ color:var(--ts-accent); font-variant-numeric:tabular-nums; }}
+    .ts-ranking {{ display:grid; gap:.42rem; }}
+    .ts-ranking-row {{ display:grid; grid-template-columns:28px minmax(90px,1fr) minmax(80px,1.35fr) 72px;
+      align-items:center; gap:.55rem; padding:.34rem 0; border-top:1px solid var(--ts-border);
+      font-size:.8rem; }}
+    .ts-ranking-row .rank {{ color:var(--ts-accent); font-weight:850; font-variant-numeric:tabular-nums; }}
+    .ts-ranking-row .label {{ color:var(--ts-ink); font-weight:700; word-break:keep-all; }}
+    .ts-ranking-row .track {{ height:7px; overflow:hidden; border-radius:99px; background:var(--ts-soft); }}
+    .ts-ranking-row .track i {{ display:block; height:100%; border-radius:99px;
+      background:linear-gradient(90deg,var(--ts-accent),var(--ts-orange)); }}
+    .ts-ranking-row b {{ text-align:right; color:var(--ts-ink); font-variant-numeric:tabular-nums; }}
+    .ts-composition-rail {{ display:flex; height:14px; margin:.35rem 0 .65rem; overflow:hidden;
+      border-radius:99px; background:var(--ts-soft); }}
+    .ts-composition-rail i {{ display:block; height:100%; min-width:2px; }}
+    .ts-composition-row {{ display:grid; grid-template-columns:28px minmax(0,1fr) 64px;
+      gap:.5rem; align-items:center; padding:.3rem 0; border-top:1px solid var(--ts-border);
+      font-size:.8rem; }}
+    .ts-composition-row .num {{ color:var(--ts-muted); font-weight:800; }}
+    .ts-composition-row .label {{ display:flex; align-items:center; gap:.45rem; color:var(--ts-ink); }}
+    .ts-composition-row .label i {{ width:3px; height:14px; border-radius:2px; }}
+    .ts-composition-row b {{ text-align:right; font-variant-numeric:tabular-nums; }}
+    .ts-benchmark-wrap {{ overflow-x:auto; }}
+    .ts-benchmark {{ width:100%; border-collapse:collapse; font-size:.78rem; }}
+    .ts-benchmark th, .ts-benchmark td {{ padding:.52rem .58rem; text-align:left;
+      border-bottom:1px solid var(--ts-border); border-right:1px solid var(--ts-border); }}
+    .ts-benchmark thead th {{ color:var(--ts-muted); background:var(--ts-surface-alt);
+      font-size:.72rem; white-space:nowrap; }}
+    .ts-benchmark tbody th {{ color:var(--ts-ink); font-weight:750; min-width:110px; }}
+    .ts-benchmark td {{ color:var(--ts-ink); font-weight:650; min-width:105px; }}
     .ts-cause-tree, .ts-drivers {{ margin-top:14px; }}
     /* These two blocks carry their own heading inside a card that already has
        one, so they sit a step down the scale rather than repeating it. */
     .ts-block-title {{ margin:0 0 .7rem; font-size:.9rem; font-weight:700; color:var(--ts-ink); }}
-    .ts-cause-root .ts-inline-evidence, .ts-cause-children .ts-inline-evidence {{
-      display:inline; width:auto; height:auto; margin-left:.35rem; padding:0;
-      background:none; border:0; border-radius:0; font-size:.75rem; text-decoration:none;
-      vertical-align:baseline; }}
-    .ts-cause-root .ts-inline-evidence {{ color:#fff; opacity:.9; }}
-    .ts-cause-root .ts-evidence-link, .ts-cause-children .ts-evidence-link {{
-      display:inline; width:auto; height:auto; background:none; border:0; }}
     /* Cause tree. The artwork's elbow connectors are drawn here as borders on
        the layout boxes rather than as SVG paths, because the number of
        branches and the length of each label are both unknown until render -
@@ -712,11 +811,6 @@ def dashboard_css(dark: bool, accent_theme: str = "orange") -> str:
     .ts-cause-root {{ display:inline-block; padding:8px 18px; border-radius:999px;
         background:var(--ts-accent); color:#fff; font-size:0.88rem; font-weight:700; }}
     .ts-cause-root a {{ color:#fff; }}
-    .ts-cause-children {{ list-style:none; margin:8px 0 0; padding-left:22px;
-        border-left:1px dashed var(--ts-accent); font-size:0.82rem; }}
-    .ts-cause-children li {{ position:relative; display:inline-flex; align-items:center; gap:6px;
-        margin:5px 8px 5px 0; padding:5px 14px; border:1.5px solid var(--ts-accent);
-        border-radius:999px; color:var(--ts-ink); font-weight:600; background:var(--ts-panel); }}
     .ts-driver-row {{ display:grid; grid-template-columns:minmax(0,1fr) minmax(64px,130px) 34px auto;
         align-items:center; gap:10px; padding:7px 0; font-size:0.88rem; font-weight:700;
         color:var(--ts-ink); }}
@@ -763,7 +857,7 @@ def dashboard_css(dark: bool, accent_theme: str = "orange") -> str:
     .ts-radar-legend-item {{ display:flex; align-items:center; gap:.35rem; color:var(--ts-ink); font-size:.78rem;
       font-weight:700; }}
     .ts-radar-legend-item i {{ display:inline-block; width:.65rem; height:.65rem; border-radius:50%; }}
-    @media(max-width:1050px) {{ .ts-section-grid{{grid-template-columns:1fr}} .ts-summary-grid{{grid-template-columns:1fr}}
+    @media(max-width:1050px) {{ .ts-summary-grid{{grid-template-columns:1fr}}
       .ts-action-row{{grid-template-columns:40px 1fr}} .ts-action-row .impact,.ts-action-row .ts-evidence-link{{display:none}} }}
     @media(max-width:720px) {{ .block-container{{padding:1rem .8rem 2rem}} .ts-landing .ts-wordmark{{font-size:3.5rem}}
       .ts-context-line{{gap:.7rem;flex-wrap:wrap;margin-left:.3rem}} .ts-summary{{padding:1.2rem;border-radius:20px}} }}

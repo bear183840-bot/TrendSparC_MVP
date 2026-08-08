@@ -6,3 +6,6 @@ __pycache__/
 
 # Per-run diagnostic archives (see core/run_archive.py) - local history, not source.
 storage/requests/*.json
+
+# User-requested exports, generated lazily from archived PipelineResult files.
+outputs/

@@ -28,26 +28,28 @@ import sys
 
 from openai import OpenAI
 
+from common.ai_usage import emit_ai_usage
 from common.ai_client import openai_client_kwargs
 from common.contracts import EntityExtractionResult, SectorProfile, UserRequest
 
 _API_KEY_ENV_VAR = "TRENDSPARC_ENTITY_AI_API_KEY"
 _MODEL_ENV_VAR = "TRENDSPARC_ENTITY_AI_MODEL"
-# Optional - points this stage at an OpenAI-API-compatible alternative
-# provider (e.g. Upstage Solar) instead of stock OpenAI. Unset by default;
-# see common/ai_client.py.
+# Provider and model are intentionally stage-local. The current deployment
+# can use Upstage Solar through this OpenAI-compatible base URL, while removing
+# the URL (and optionally setting the model env var) switches back to OpenAI.
+# See common/ai_client.py.
 _BASE_URL_ENV_VAR = "TRENDSPARC_ENTITY_AI_BASE_URL"
-# gpt-4o-mini kept putting named brands/products (e.g. "OK캐쉬백", "Syrup")
-# into the generic keywords field instead of organizations/technologies, even
-# after prompt clarification (see CLAUDE.md's "Technical gotchas"). Default
-# raised to gpt-4o to see whether the larger model classifies these more
-# reliably; env var still wins for anyone who wants the cheaper model back.
-_DEFAULT_MODEL = "gpt-4o"
+_DEFAULT_OPENAI_MODEL = "gpt-4o"
+_DEFAULT_UPSTAGE_MODEL = "solar-pro3"
 _STAGE = "entity"
 
 
 def _model() -> str:
-    return os.environ.get(_MODEL_ENV_VAR, _DEFAULT_MODEL)
+    configured = os.environ.get(_MODEL_ENV_VAR)
+    if configured:
+        return configured
+    base_url = os.environ.get(_BASE_URL_ENV_VAR, "").casefold()
+    return _DEFAULT_UPSTAGE_MODEL if "upstage.ai" in base_url else _DEFAULT_OPENAI_MODEL
 
 
 def _normalize_for_matching(value: str) -> str:
@@ -223,23 +225,81 @@ guessing broadly.""".format(
     information_need_categories=", ".join(_INFORMATION_NEED_CATEGORIES),
 )
 
+# The original prompt above is retained temporarily as an audit reference for
+# prompt-regression review. Runtime calls use this equivalent, de-duplicated
+# version. Once the Solar before/after evaluation is accepted, the legacy text
+# can be removed without changing behaviour.
+_COMPACT_SYSTEM_PROMPT = """You route and normalize one TrendSparC question for evidence search.
+The input may contain typos, broken spacing, slang, banmal, filler, or several rambling
+sentences. Infer the most likely meaning supported by the text. Never ask a follow-up question,
+never rewrite the original question. Do not invent a named competitor, fact, entity, or context.
+
+Return exactly the schema fields. response_mode is report for research, analysis,
+trends, status, comparisons, causes, risks, strategy, or decision support; otherwise
+direct_answer for greetings, thanks, casual chat, personal advice, or a simple fact
+that needs no sourced report. direct_answer is short and in the user's language only
+for direct_answer, otherwise null.
+
+Routing:
+1. Choose sector_id only from REGISTERED SECTOR CHOICES. Match routing_aliases despite
+normal Korean particles, spacing, capitalization, and obvious phonetic spelling.
+2. A clear alias wins; add its canonical company/business name to organizations.
+3. Without an alias, use business_topics. Use sector_id="general" when neither clearly
+matches; never force an unrelated question into a business.
+4. "우리", "우리 회사", "우리 쪽", or "저희" may resolve through a clearly matching
+business topic or an explicitly selected UI sector, but never by guessing.
+routing_confidence is low, medium, or high.
+
+Classification:
+- primary_intent is one of {intent_categories}: current_status is the default;
+issue_response is response to an issue; future_business is future opportunity/strategy;
+root_cause asks why something happened.
+- perspective is independent: market_landscape for an explicitly requested market,
+industry, size/share, or competitive landscape; competitor_comparison for multiple
+entities or colloquial peers such as 타사/경쟁사/other companies; regulatory_policy for
+law, regulation, or policy; otherwise company_update. Naming a brand as an example does
+not make a market question company_update.
+- information_needs selects 1-4 from {information_need_categories}, describing needed
+evidence: financial results; customers/demand; product/technology; operations/supply;
+strategy/investment; competition; regulation/risk; or user sentiment.
+
+Search fields:
+- organizations: named or clearly implied companies, agencies, institutions.
+- technologies: named products, services, platforms, brands, technologies, standards.
+- keywords: 3-6 short canonical topic terms likely to appear in real headlines. Named
+entities belong above, not here. Remove greetings, laughter, hearsay, punctuation,
+particles, filler such as "요즘 어떰" and generic placeholders.
+- For a vague business-status question, useful search dimensions include business performance,
+its main customer/product KPI, recent investment or strategy, and
+competitive position. These are search dimensions, never fabricated facts.
+
+Use the question's language. For Korean questions use normal Korean-news forms, keeping
+only genuine proper names/acronyms such as NVIDIA, HBM, AI, ARPU in English. Never emit
+both Korean and English forms of the same concept because the collector combines terms
+and overly restrictive duplicate forms can return no results. Before returning, verify
+that every term is natural in a headline and supported by the question.
+
+Examples: "오케캐시백 시럽 요새 반응 어떰" resolves the registered OK캐쉬백/Syrup
+business; "하이닉스 hbm 요즘어떰" resolves SK hynix and HBM; "오늘 점심 뭐먹지"
+uses sector_id="general". Do not invent a business connection.""".format(
+    intent_categories=", ".join(_INTENT_CATEGORIES),
+    information_need_categories=", ".join(_INFORMATION_NEED_CATEGORIES),
+)
+
 def _sector_choices(profiles: dict[str, SectorProfile] | None) -> tuple[str, list[str]]:
     choices = [
         {
             "sector_id": profile.sector_id,
-            "display_name": profile.display_name,
             "canonical_name": profile.canonical_name or profile.display_name,
             "routing_aliases": profile.aliases,
             "business_topics": profile.keywords,
-            "key_metrics": profile.key_metrics,
-            "strategic_dimensions": profile.strategic_dimensions,
         }
         for profile in (profiles or {}).values()
     ]
     sector_ids = [choice["sector_id"] for choice in choices]
     if "general" not in sector_ids:
         sector_ids.append("general")
-        choices.append({"sector_id": "general", "display_name": "General"})
+        choices.append({"sector_id": "general", "canonical_name": "General"})
     return json.dumps(choices, ensure_ascii=False), sector_ids
 
 
@@ -306,7 +366,7 @@ def extract_entities_ai(
 
     try:
         sector_choices, sector_ids = _sector_choices(profiles)
-        system_content = f"{_SYSTEM_PROMPT}\n\nREGISTERED SECTOR CHOICES:\n{sector_choices}"
+        system_content = f"{_COMPACT_SYSTEM_PROMPT}\n\nREGISTERED SECTOR CHOICES:\n{sector_choices}"
         if requested_profile is not None:
             requested_canonical = requested_profile.canonical_name or requested_profile.display_name
             system_content += (
@@ -321,6 +381,7 @@ def extract_entities_ai(
         response = client.chat.completions.create(
             model=_model(),
             max_tokens=500,
+            temperature=0,
             messages=[
                 {"role": "system", "content": system_content},
                 {"role": "user", "content": request.question},
@@ -419,7 +480,7 @@ def extract_entities_ai(
                 if entity
             )
         ]
-        return EntityExtractionResult(
+        result = EntityExtractionResult(
             request_id=request.request_id,
             primary_intent=data["primary_intent"],
             perspective=ai_perspective,
@@ -435,6 +496,33 @@ def extract_entities_ai(
             needs_ai_routing=False,
             extraction_method="ai",
         )
+        emit_ai_usage(
+            stage=_STAGE,
+            model=_model(),
+            system_content=system_content,
+            user_content=request.question,
+            schema=_schema(sector_ids),
+            requested_max_tokens=500,
+            response=response,
+            counts={
+                "organizations": len(result.organizations),
+                "technologies": len(result.technologies),
+                "keywords": len(result.keywords),
+                "information_needs": len(result.information_needs),
+            },
+        )
+        return result
     except Exception as exc:  # noqa: BLE001 - AI refinement is best-effort, never fatal
+        emit_ai_usage(
+            stage=_STAGE,
+            model=_model(),
+            system_content=locals().get("system_content", _COMPACT_SYSTEM_PROMPT),
+            user_content=request.question,
+            schema=_schema(locals().get("sector_ids", ["general"])),
+            requested_max_tokens=500,
+            response=locals().get("response"),
+            outcome="failed",
+            error_type=type(exc).__name__,
+        )
         print(f"[{_STAGE}] AI-based keyword refinement failed, using rule-based result: {exc}", file=sys.stderr)
         return fallback(f"{type(exc).__name__}: {str(exc)[:240]}")
