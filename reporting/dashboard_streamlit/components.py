@@ -54,6 +54,8 @@ from common.block_shapes import (  # noqa: F401
     has_cause_tree,
     SHARE_SUM_TOLERANCE,
     grouped_bar_series,
+    competitor_panels,
+    has_competitor_panels,
     has_grouped_bars,
     has_landscape,
     has_recurring_terms,
@@ -393,21 +395,27 @@ def comparison_points_to_table(comparison_points: list[Any]) -> tuple[list[str],
 
 
 def render_metric_insight(points: list[Any], grounded_claims: list[Any] | None) -> None:
-    """The evidence sentence a plotted series was read out of, under the chart.
+    """The evidence sentence a plotted series was read out of.
 
-    Deliberately not a generated interpretation: the text is a verified claim
-    already carried by the metric, so an unlinked series simply gets nothing.
+    The artwork puts this behind a small bordered "AI Insight" control beside
+    the chart rather than printing it underneath, which is also the honest
+    shape: the sentence is context for the chart, not a caption the chart
+    can't be read without. Opened, it shows the verified claim and its source.
+
+    Deliberately not a generated interpretation - the text is a claim already
+    carried by the metric, so an unlinked series gets no control at all rather
+    than a written one.
     """
     insight = metric_insight(points, grounded_claims or [])
     if not insight:
         return
     text, url = insight
-    link = f' <a href="{escape(url)}" target="_blank">출처</a>' if url else ""
-    st.markdown(
-        f'<div class="ts-metric-insight"><span class="ts-metric-insight-tag">근거</span>'
-        f'{escape(clean_citation(text))}{link}</div>',
-        unsafe_allow_html=True,
-    )
+    with st.expander("AI Insight"):
+        link = f' <a href="{escape(url)}" target="_blank">출처 원문</a>' if url else ""
+        st.markdown(
+            f'<div class="ts-metric-insight">{escape(clean_citation(text))}{link}</div>',
+            unsafe_allow_html=True,
+        )
 
 
 def render_metric_chart(
@@ -902,6 +910,48 @@ def render_status_bar(comparison_points: list[Any]) -> None:
         for criterion, detail, level in rows
     )
     st.markdown(f'<div class="ts-status-bar">{cells}</div>', unsafe_allow_html=True)
+
+
+def render_competitor_panels(
+    comparison_points: list[Any], metric_points: list[Any]
+) -> None:
+    """One panel per named competitor, built only from what is attributable
+    to that competitor.
+
+    Three sections where the evidence has them - the criteria a document
+    graded, figures whose `subject` is this entity, and this entity's slice of
+    a stated whole - and nothing where it doesn't. The artwork's per-company
+    process rail is absent on purpose: nothing dates a claim to a competitor,
+    and building one from the report's own chronology would hand this
+    company's milestones to a rival.
+    """
+    panels = competitor_panels(comparison_points or [], metric_points or [])
+    if not panels:
+        return
+    columns = st.columns(len(panels))
+    for column, (entity, graded, figures, share) in zip(columns, panels):
+        with column:
+            rows = "".join(
+                f'<div class="ts-panel-row"><span>{escape(criterion)}</span>'
+                + (f'<b class="ts-dot {level}"></b>' if level else "")
+                + f'<span class="ts-panel-value">{escape(value)}</span></div>'
+                for criterion, value, level in graded
+            )
+            figure_rows = "".join(
+                f'<div class="ts-panel-figure"><small>{escape(point.label)}</small>'
+                f'<b>{escape(_format_number(point.value))}{escape(point.unit or "")}</b></div>'
+                for point in figures
+            )
+            share_row = (
+                f'<div class="ts-panel-share"><small>{escape(share.share_of or "구성비")}</small>'
+                f'<b>{escape(_format_number(share.value))}%</b></div>'
+                if share else ""
+            )
+            st.markdown(
+                f'<div class="ts-panel"><div class="ts-panel-name">{escape(entity)}</div>'
+                f'{rows}{figure_rows}{share_row}</div>',
+                unsafe_allow_html=True,
+            )
 
 
 def render_landscape(

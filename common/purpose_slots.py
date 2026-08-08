@@ -71,6 +71,7 @@ DESIGN_LIBRARY_BLOCKS: dict[str, tuple[str, ...]] = {
     "Matrix": ("matrix",),
     "Timeline": ("timeline",),
     "Table": ("table",),
+    "Competitor Panels": ("competitor_panels",),
     "Cause Map": ("cause_map",),
     "Root Cause Tree": ("cause_tree",),
     "Driver Bars": ("driver_bars",),
@@ -136,7 +137,8 @@ _CURRENT_STATUS: tuple[Slot, ...] = (
     Slot("metrics", "지표", "확인된 수치를 제시",
          ("kpi_grid", "chart", "kpi_single", "status_bar"), ("key_metrics",)),
     Slot("competitor", "경쟁사", "다른 주체와 견주면 어디쯤인가",
-         ("table", "radar", "share_split", "narrative_list"), ("market_status",)),
+         ("competitor_panels", "table", "radar", "share_split", "narrative_list"),
+         ("market_status",)),
     # 요인/페인포인트 questions ("가입 고려 요인", "인기 요인") answer with a
     # list, and a list is what the evidence actually holds - so this slot has
     # its own place rather than being squeezed into 시장 상황's prose
@@ -280,6 +282,11 @@ def _availability() -> dict[str, Callable[[Any, list[str]], bool]]:
             _reference_year(synthesis),
         ),
         "table": lambda synthesis, items: block_shapes.has_comparison(synthesis.comparison_points),
+        # Richer than the table wherever each competitor has several
+        # kinds of fact attached, so it is offered first in 경쟁사.
+        "competitor_panels": lambda synthesis, items: block_shapes.has_competitor_panels(
+            synthesis.comparison_points, synthesis.metric_series
+        ),
         "radar": lambda synthesis, items: block_shapes.has_radar(synthesis.comparison_points),
         "matrix": lambda synthesis, items: sum(
             1 for field in (

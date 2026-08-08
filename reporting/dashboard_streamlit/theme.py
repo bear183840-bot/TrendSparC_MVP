@@ -540,6 +540,26 @@ def dashboard_css(dark: bool, accent_theme: str = "orange") -> str:
       .ts-htimeline {{ flex-direction:column; }}
       .ts-htimeline-step:not(:last-child):after {{ display:none; }}
     }}
+    /* Competitor panel: the artwork's tinted stack, one per company. */
+    .ts-panel {{ padding:1rem 1.1rem; border-radius:12px; background:var(--ts-surface-alt); }}
+    .ts-panel-name {{ margin-bottom:.6rem; font-size:1.05rem; font-weight:800; color:var(--ts-ink);
+      word-break:keep-all; }}
+    .ts-panel-row {{ display:flex; align-items:center; gap:.4rem; padding:.4rem 0;
+      border-top:1px solid var(--ts-border); font-size:.78rem; color:var(--ts-muted); }}
+    .ts-panel-row .ts-panel-value {{ margin-left:auto; color:var(--ts-ink); font-weight:700;
+      text-align:right; word-break:keep-all; }}
+    .ts-panel-row .ts-dot {{ width:7px; height:7px; margin:0; }}
+    .ts-panel-figure, .ts-panel-share {{ display:flex; align-items:baseline;
+      justify-content:space-between; gap:.5rem; padding:.45rem 0;
+      border-top:1px solid var(--ts-border); }}
+    .ts-panel-figure small, .ts-panel-share small {{ font-size:.76rem; color:var(--ts-muted); }}
+    .ts-panel-figure b, .ts-panel-share b {{ font-size:.95rem; font-weight:800; color:var(--ts-ink); }}
+    .ts-panel-share b {{ color:var(--ts-accent); }}
+    /* AI Insight: the artwork's outlined control. Streamlit draws the
+       expander itself, so only its chrome is restyled. */
+    [data-testid="stExpander"] details {{ border:1px solid var(--ts-accent); border-radius:12px;
+      background:var(--ts-panel); }}
+    [data-testid="stExpander"] summary {{ color:var(--ts-accent); font-weight:700; }}
     .ts-landscape-head {{ margin:.2rem 0 .1rem; font-size:.9rem; font-weight:700;
       color:var(--ts-ink); }}
     .ts-status-bar {{ display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr));

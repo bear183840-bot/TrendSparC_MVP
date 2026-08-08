@@ -241,3 +241,53 @@ def test_landscape_needs_both_halves_to_stand_on_their_own():
     assert has_landscape(trend) is False
     assert has_landscape(split) is False
     assert has_landscape([*trend, *split]) is True
+
+
+# --- competitor panels: only what is attributable to one competitor ------
+
+
+def _graded_point(entity: str, criterion: str, value: str, level=None):
+    from common.contracts import ComparisonPoint
+
+    return ComparisonPoint(entity=entity, criterion=criterion, value=value, level=level)
+
+
+def test_a_competitor_needs_two_kinds_of_fact_to_earn_a_panel():
+    """One fact is a row in the comparison table, and it stays there."""
+    from common.block_shapes import competitor_panels
+
+    points = [
+        _graded_point("B tv", "AI 추천", "자체 엔진", "medium"),
+        _graded_point("B tv", "스포츠 중계", "3개 리그", "medium"),
+        _graded_point("Netflix", "AI 추천", "고도화", "high"),
+        _graded_point("Netflix", "스포츠 중계", "없음", "low"),
+        _graded_point("TVING", "AI 추천", "보통", "medium"),
+    ]
+
+    assert [entity for entity, _, _, _ in competitor_panels(points, [])] == ["B tv", "Netflix"]
+
+
+def test_a_panel_only_carries_figures_measured_for_that_competitor():
+    from common.block_shapes import competitor_panels
+
+    points = [_graded_point("B tv", "AI 추천", "자체 엔진", "medium"),
+              _graded_point("KT", "AI 추천", "고도화", "high")]
+    figures = [
+        MetricPoint(label="가입자", subject="B tv", period="2025년", value=682, unit="만명"),
+        MetricPoint(label="가입자", subject="KT", period="2025년", value=912, unit="만명"),
+        MetricPoint(label="시장 규모", period="2025년", value=5, unit="조원"),
+    ]
+
+    panels = dict((entity, figures) for entity, _, figures, _ in competitor_panels(points, figures))
+
+    assert [point.subject for point in panels["B tv"]] == ["B tv"]
+    assert [point.subject for point in panels["KT"]] == ["KT"]
+
+
+def test_one_competitor_is_not_a_panel_set():
+    from common.block_shapes import has_competitor_panels
+
+    points = [_graded_point("B tv", "AI 추천", "자체 엔진", "medium"),
+              _graded_point("B tv", "스포츠", "3개 리그", "high")]
+
+    assert has_competitor_panels(points, []) is False

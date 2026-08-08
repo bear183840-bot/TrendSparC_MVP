@@ -29,7 +29,12 @@ from pydantic import BaseModel
 
 from reporting.dashboard_streamlit.blocks.base import BlockDefinition, SlotContext
 from reporting.dashboard_streamlit.blocks.registry import register
-from common.block_shapes import has_grouped_bars, has_landscape, has_status_levels
+from common.block_shapes import (
+    has_competitor_panels,
+    has_grouped_bars,
+    has_landscape,
+    has_status_levels,
+)
 from reporting.dashboard_streamlit.components import (
     action_impact_lookup,
     clean_citation,
@@ -42,6 +47,7 @@ from reporting.dashboard_streamlit.components import (
     reference_year,
     render_action_list,
     render_cause_map,
+    render_competitor_panels,
     render_cause_tree,
     render_comparison_table,
     render_factor_list,
@@ -83,6 +89,13 @@ def _bars(groups_of):
             return None
         return lambda: [render_metric_bar(group, synthesis.grounded_claims) for group in groups]
     return build
+
+
+def _competitor_panels(context: SlotContext):
+    synthesis = context.synthesis
+    if not has_competitor_panels(synthesis.comparison_points, synthesis.metric_series):
+        return None
+    return lambda: render_competitor_panels(synthesis.comparison_points, synthesis.metric_series)
 
 
 def _landscape(context: SlotContext):
@@ -199,6 +212,7 @@ _LIVE_BLOCKS: tuple[tuple[str, Any, str], ...] = (
     ("kpi_grid", _kpi, "확인된 수치 카드 묶음."),
     ("kpi_single", _kpi, "확인된 수치 카드 하나."),
     ("timeline", _timeline, "날짜가 있는 근거를 순서대로, 진행 상태와 함께."),
+    ("competitor_panels", _competitor_panels, "경쟁사별 등급·수치·구성비를 한 패널로."),
     ("table", _table, "공통 기준을 가진 주체 간 정성 비교표."),
     ("radar", _radar, "등급이 매겨진 기준들의 레이더."),
     ("matrix", _matrix, "SWOT 사분면(2개 이상 채워졌을 때만)."),

@@ -266,6 +266,53 @@ def has_share_split(metric_points: list[Any]) -> bool:
     return bool(share_groups(metric_points))
 
 
+def competitor_panels(
+    comparison_points: list[Any], metric_points: list[Any], limit: int = 3
+) -> list[tuple[str, list[tuple[str, str, str | None]], list[Any], Any]]:
+    """Per-competitor panels: (entity, graded rows, figures, share slice).
+
+    The artwork stacks a process rail, an importance bar and a donut inside
+    each competitor's panel. Our evidence supports only what is genuinely
+    attributable to one named entity, so a panel is assembled from exactly
+    three things and no more: the criteria a document graded for that entity,
+    the figures whose `subject` is that entity, and that entity's slice of a
+    stated whole where one exists.
+
+    The process rail is deliberately absent. Nothing in the data dates a
+    claim *to a competitor*, and a per-company timeline built from the
+    report's own chronology would attribute this company's milestones to a
+    rival - which is the one thing a competitor panel must never do.
+
+    An entity with a single fact isn't a panel; it is a row in the comparison
+    table, and it stays there.
+    """
+    entities = list(dict.fromkeys(point.entity for point in comparison_points))
+    shares = {
+        point.subject: point
+        for _, slices in share_groups(metric_points)
+        for point in slices
+        if getattr(point, "subject", None)
+    }
+    panels = []
+    for entity in entities:
+        graded = [
+            (point.criterion, point.value, point.level)
+            for point in comparison_points if point.entity == entity
+        ]
+        figures = [
+            point for point in metric_points if getattr(point, "subject", None) == entity
+        ]
+        share = shares.get(entity)
+        if len(graded) + len(figures) + (1 if share else 0) < 2:
+            continue
+        panels.append((entity, graded[:4], figures[:2], share))
+    return panels if len(panels) >= 2 else []
+
+
+def has_competitor_panels(comparison_points: list[Any], metric_points: list[Any]) -> bool:
+    return bool(competitor_panels(comparison_points, metric_points))
+
+
 def has_landscape(metric_points: list[Any]) -> bool:
     """Whether one card can carry both halves of the artwork's Landscape:
     how the market moved, and what it is made of.
