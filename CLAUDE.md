@@ -1,5 +1,10 @@
 # TrendSparC_MVP
 
+> **먼저 `AGENTS.md`를 읽어라.** 이 문서는 시스템이 *무엇인지* 설명하고,
+> `AGENTS.md`는 *어떻게 판단하고 어떻게 검증하는지* - 이미 내려진 설계 결정,
+> 반복적으로 어긋났던 방식, 실행·검증 절차 - 를 설명한다. 둘이 충돌하면
+> `AGENTS.md`가 우선한다.
+
 AI Trend Intelligence platform for SK 계열사 staff (SK하이닉스 / SK텔레콤 /
 SK브로드밴드 / SK플래닛 / SK이노베이션). A user submits a question (+ optional attachments, target
 audience, target sector) → the pipeline classifies intent/entities, routes
