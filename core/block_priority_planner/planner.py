@@ -40,6 +40,7 @@ _REQUIRED_DATA_HINTS: dict[str, str] = {
     "timeline": "날짜가 명시된 근거 문장 또는 시점이 있는 수치",
     "table": "공통 평가축(criterion)을 공유하는 기업·브랜드 2개 이상",
     "segment_table": "같은 기준으로 비교된 연령대·성별 등 이용자 집단 2개 이상",
+    "level_matrix": "2개 이상 기업·브랜드를 2개 이상 공통 기준으로 high/medium/low 등급 평가",
     "competitor_panels": "경쟁사별로 등급·수치·구성비 중 2가지 이상이 확인되는 자료",
     "radar": "등급(level)이 매겨진 공통 기준 3개 이상, 엔티티 2개 이상",
     "matrix": "강점/약점/기회/위험 중 2개 이상 항목에 근거",
@@ -63,7 +64,7 @@ _REQUIRED_DATA_HINTS: dict[str, str] = {
 _SEARCHABLE_BLOCK_TYPES = frozenset({
     "chart", "landscape", "bar", "item_bar", "grouped_bar", "share_split",
     "metric_comparison", "kpi_grid", "timeline", "table", "segment_table",
-    "competitor_panels", "radar", "matrix",
+    "competitor_panels", "level_matrix", "radar", "matrix",
     "cause_tree", "driver_bars", "factor_list",
     # `status_bar` is deliberately absent: a grade is something an analyzer
     # assigns while reading, not a document shape a query can go and find.

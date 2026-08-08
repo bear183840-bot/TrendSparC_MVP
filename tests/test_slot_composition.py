@@ -197,3 +197,87 @@ def test_kpi_row_draws_as_many_cards_as_there_are_figures():
             assert ("ts-kpi-row rows" in html) == (count <= 2), count
     finally:
         components.st.markdown = original
+
+
+# --- the artwork's richer variants, used when the data reaches them -------
+
+
+def _graded(entity, criterion, value, level):
+    from common.contracts import ComparisonPoint
+
+    return ComparisonPoint(entity=entity, criterion=criterion, value=value, level=level)
+
+
+def test_level_matrix_keeps_every_grading_the_band_would_discard():
+    """status_levels keeps one row per criterion; the grid keeps them all."""
+    from common.block_shapes import has_level_matrix, level_matrix, status_levels
+
+    points = [
+        _graded("B tv", "AI 추천", "자체 엔진", "medium"),
+        _graded("Netflix", "AI 추천", "개인화 고도화", "high"),
+        _graded("B tv", "가격 경쟁력", "결합 할인", "high"),
+        _graded("Netflix", "가격 경쟁력", "단독 요금제", "low"),
+    ]
+    entities, criteria, cells = level_matrix(points)
+
+    assert entities == ["B tv", "Netflix"]
+    assert criteria == ["AI 추천", "가격 경쟁력"]
+    assert cells[("가격 경쟁력", "Netflix")] == ("low", "단독 요금제")
+    assert has_level_matrix(points)
+    # The band would have shown two of the four gradings.
+    assert len(status_levels(points)) == 2
+
+
+def test_a_single_entity_or_criterion_is_not_a_grid():
+    from common.block_shapes import has_level_matrix
+
+    one_entity = [
+        _graded("B tv", "AI 추천", "자체 엔진", "medium"),
+        _graded("B tv", "가격", "결합 할인", "high"),
+    ]
+    assert not has_level_matrix(one_entity)
+
+
+def test_level_matrix_leaves_an_ungraded_cell_blank():
+    from reporting.dashboard_streamlit import components
+
+    captured: list[str] = []
+    original = components.st.markdown
+    components.st.markdown = lambda html, **kwargs: captured.append(html)
+    try:
+        components.render_level_matrix([
+            _graded("B tv", "AI 추천", "자체 엔진", "medium"),
+            _graded("Netflix", "AI 추천", "개인화 고도화", "high"),
+            _graded("B tv", "가격 경쟁력", "결합 할인", "high"),
+        ])
+    finally:
+        components.st.markdown = original
+
+    html = "".join(captured)
+    assert "ts-level-empty" in html
+    # The grade word is always printed - colour is never the only channel.
+    assert "Medium" in html and "High" in html
+    assert "수집 필요" not in html
+
+
+def test_column_bars_carry_a_readable_axis():
+    """A column with no scale beside it can only be read against its peers."""
+    from reporting.dashboard_streamlit import components
+
+    class _Point:
+        def __init__(self, subject, value):
+            self.label, self.subject, self.value = "숏폼 이용률", subject, value
+            self.unit, self.period, self.is_forecast = "%", "2024년", False
+
+    captured: list[str] = []
+    original = components.st.markdown
+    components.st.markdown = lambda html, **kwargs: captured.append(html)
+    try:
+        components.render_metric_columns([
+            _Point("유튜브 쇼츠", 78.8), _Point("릴스", 46.2), _Point("틱톡", 22.9),
+        ])
+    finally:
+        components.st.markdown = original
+
+    html = "".join(captured)
+    assert "ts-gbar-axis" in html and "has-axis" in html

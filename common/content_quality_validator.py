@@ -86,6 +86,28 @@ def entity_kind(entity: str) -> EntityKind:
     return "entity"
 
 
+# Korean marks the subject or topic of a sentence with a particle, so the
+# phrase before the first one is what the sentence is *about*. That is the
+# only part worth classifying: "50대의 숏폼 이용 경험은 64.1%" is a statement
+# about an age bracket, while "KT는 50대 이용자 비중이 높다" is a statement
+# about a company that happens to mention one. Testing the whole sentence for
+# an age term cannot tell those apart, and would drop the second from 경쟁사.
+_SUBJECT_PARTICLE_RE = re.compile(r"^(.{1,24}?)(?:은|는|이|가|의|에서|에게|도|만)\s")
+
+
+def leading_subject_kind(text: str) -> EntityKind:
+    """What kind of thing the sentence's opening subject is.
+
+    Falls back to the first few words when no particle is found (headline-style
+    fragments, English, a bare noun phrase), which is the same span a reader
+    would take as the subject.
+    """
+    stripped = (text or "").strip().lstrip("0123456789.·-​ ")
+    match = _SUBJECT_PARTICLE_RE.match(stripped)
+    head = match.group(1) if match else " ".join(stripped.split()[:2])
+    return entity_kind(strip_particle(head.strip()))
+
+
 def is_demographic(entity: str) -> bool:
     """Whether this is a slice of people rather than a named organisation."""
     return entity_kind(entity) != "entity"

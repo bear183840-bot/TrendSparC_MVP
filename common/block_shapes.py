@@ -193,6 +193,44 @@ def status_levels(comparison_points: list[Any], limit: int = 4) -> list[tuple[st
     return rows[:limit]
 
 
+def level_matrix(
+    comparison_points: list[Any], entity_limit: int = 5, criterion_limit: int = 6
+) -> tuple[list[str], list[str], dict[tuple[str, str], tuple[str, str]]]:
+    """(entities, criteria, {(criterion, entity): (level, value)}) for a grid.
+
+    `status_levels` keeps one row per criterion and throws the rest away - it
+    was built for a single band across the top of the page. When several
+    entities were graded on the same criteria, that discards most of what the
+    documents said: five criteria x four competitors is twenty gradings shown
+    as four. This returns the whole grid so the artwork's Competitor Analysis
+    card can be drawn, and the band renderer keeps its own narrower view.
+
+    Order is the evidence's own, not alphabetical: the first entity discussed
+    is usually the subject of the question.
+    """
+    graded = [point for point in comparison_points or [] if point.level]
+    entities: list[str] = []
+    criteria: list[str] = []
+    cells: dict[tuple[str, str], tuple[str, str]] = {}
+    for point in graded:
+        if point.entity not in entities:
+            entities.append(point.entity)
+        if point.criterion not in criteria:
+            criteria.append(point.criterion)
+        cells.setdefault((point.criterion, point.entity), (point.level, point.value))
+    entities = entities[:entity_limit]
+    criteria = criteria[:criterion_limit]
+    cells = {key: value for key, value in cells.items()
+             if key[0] in criteria and key[1] in entities}
+    return entities, criteria, cells
+
+
+def has_level_matrix(comparison_points: list[Any]) -> bool:
+    """A grid needs two of each axis - otherwise it is a list or a band."""
+    entities, criteria, cells = level_matrix(comparison_points)
+    return len(entities) >= 2 and len(criteria) >= 2 and len(cells) >= 4
+
+
 def has_status_levels(comparison_points: list[Any], minimum: int = 2) -> bool:
     return len(status_levels(comparison_points)) >= minimum
 

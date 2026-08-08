@@ -31,6 +31,7 @@ from reporting.dashboard_streamlit.blocks.base import BlockDefinition, SlotConte
 from reporting.dashboard_streamlit.blocks.registry import register
 from common.block_shapes import (
     comparison_points_of_kind,
+    has_level_matrix,
     has_competitor_panels,
     has_grouped_bars,
     has_landscape,
@@ -49,6 +50,7 @@ from reporting.dashboard_streamlit.components import (
     render_action_list,
     render_cause_map,
     render_competitor_panels,
+    render_level_matrix,
     render_cause_tree,
     render_comparison_table,
     render_factor_list,
@@ -139,6 +141,13 @@ def _timeline(context: SlotContext):
     )
 
 
+def _level_matrix(context: SlotContext):
+    points = comparison_points_of_kind(context.synthesis.comparison_points, demographic=False)
+    if not has_level_matrix(points):
+        return None
+    return lambda: render_level_matrix(points)
+
+
 def _comparison_table(demographic: bool):
     """The same table, restricted to the kind of entity a section means."""
     def build(context: SlotContext):
@@ -222,6 +231,7 @@ _LIVE_BLOCKS: tuple[tuple[str, Any, str], ...] = (
     ("kpi_single", _kpi, "확인된 수치 카드 하나."),
     ("timeline", _timeline, "날짜가 있는 근거를 순서대로, 진행 상태와 함께."),
     ("competitor_panels", _competitor_panels, "경쟁사별 등급·수치·구성비를 한 패널로."),
+    ("level_matrix", _level_matrix, "기준 x 주체 등급 격자."),
     ("table", _comparison_table(demographic=False), "공통 기준을 가진 주체 간 정성 비교표."),
     ("segment_table", _comparison_table(demographic=True),
      "연령대·성별 등 이용자 집단 간 비교표."),

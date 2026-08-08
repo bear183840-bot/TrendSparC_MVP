@@ -72,6 +72,14 @@ def dashboard_css(dark: bool, accent_theme: str = "orange") -> str:
     [data-testid="stSidebar"] {{ background:var(--ts-sidebar); border-right:0; }}
     [data-testid="stSidebar"] .block-container {{ padding:1.8rem 1.1rem; }}
     [data-testid="stSidebar"] * {{ color:var(--ts-ink); }}
+    /* ...except the wordmark. The rule above sets a colour on every descendant
+       directly, which beats the accent the wordmark passes down by
+       inheritance - so the letters came out ink while the mark, which is
+       filled rather than coloured, stayed orange. That is the "same logo,
+       black text" the sidebar was showing. It is the landing wordmark at a
+       smaller size, and nothing else. */
+    [data-testid="stSidebar"] .ts-wordmark,
+    [data-testid="stSidebar"] .ts-wordmark * {{ color:var(--ts-accent); }}
     div[data-testid="stForm"] {{ max-width:1080px; margin:0 auto; border:0; background:transparent; padding:0; }}
     [class*="st-key-intake_meta_row"] div[data-testid="stHorizontalBlock"] {{ padding:.55rem 1rem;
       margin-top:.65rem; border-radius:30px; background:color-mix(in srgb,var(--ts-soft) 92%,var(--ts-panel)); }}
@@ -136,6 +144,14 @@ def dashboard_css(dark: bool, accent_theme: str = "orange") -> str:
     .ts-wordmark-text {{ font-family:"Quicksand","Pretendard Variable",Pretendard,sans-serif;
       font-size:1em; line-height:.78; font-weight:500; letter-spacing:-.01em; }}
     .ts-word-1, .ts-word-2 {{ display:block; }}
+    /* The two words are set so that the "e" of Trend and the "s" of sparC
+       share a column - that vertical seam is what the mark's stair-step
+       squares echo, and without it the second line just looks indented by an
+       arbitrary amount. Measured on the rendered page rather than from font
+       tables - the webfont's advances with -.01em tracking put "Tr" at
+       1.3806em - so Trend starts .4694em in and its "e" lands on sparC's
+       1.85em. Both values are em, so the seam holds at every size. */
+    .ts-word-1 {{ margin-left:.4694em; }}
     .ts-word-2 {{ margin-left:1.85em; }}
     .ts-mark {{ display:inline-block; width:2.7em; height:2.45em; margin-left:-.4em;
       transform:translateY(-.12em); }}
@@ -529,8 +545,35 @@ def dashboard_css(dark: bool, accent_theme: str = "orange") -> str:
       white-space:nowrap; }}
     /* Status bar: the qualitative KPI row. Each cell is led by a 2px rule in
        its grade's colour, the way the artwork marks its four standings. */
+    /* Competitor Analysis grid, per the artwork: criteria down the left,
+       entities across the top, a tinted dot and the grade word in each cell.
+       The dot alone would make the grade a colour-only signal. */
+    .ts-level-grid {{ width:100%; border-collapse:collapse; margin-top:.5rem;
+      font-size:.78rem; }}
+    .ts-level-grid th {{ padding:.42rem .5rem; text-align:left; font-weight:700;
+      color:var(--ts-ink); border-bottom:1px solid color-mix(in srgb,var(--ts-line) 40%,transparent); }}
+    .ts-level-grid thead th {{ color:var(--ts-muted); font-size:.72rem; white-space:nowrap; }}
+    .ts-level-grid tbody th {{ font-weight:600; word-break:keep-all; }}
+    .ts-level-grid td {{ padding:.42rem .5rem; white-space:nowrap; font-weight:700;
+      border-bottom:1px solid color-mix(in srgb,var(--ts-line) 26%,transparent);
+      border-left:1px solid color-mix(in srgb,var(--ts-line) 20%,transparent); }}
+    .ts-level-grid td i {{ display:inline-block; width:6px; height:6px; margin-right:.34rem;
+      border-radius:50%; background:currentColor; vertical-align:middle; }}
+    .ts-level-grid td.good {{ color:var(--ts-navy); }}
+    .ts-level-grid td.warn {{ color:var(--ts-orange); }}
+    .ts-level-grid td.bad {{ color:var(--ts-down); }}
+    .ts-level-grid td.ts-level-empty {{ color:var(--ts-muted); font-weight:500; }}
+    /* Bars stand on a labelled dashed grid, as in the artwork - without it a
+       column can only be compared to its neighbours, never read. */
+    .ts-gbar.has-axis {{ padding-left:2.6rem; }}
+    .ts-gbar-axis, .ts-gbar.has-axis > .ts-gbar-ceiling {{ bottom:1.1rem; }}
+    .ts-gbar-axis {{ position:absolute; left:0; right:0; top:0; }}
+    .ts-gbar-axis span {{ position:absolute; left:0; right:0; font-size:.62rem;
+      color:var(--ts-muted); line-height:1;
+      border-bottom:1px dashed color-mix(in srgb,var(--ts-line) 34%,transparent);
+      padding-left:.1rem; }}
     /* The stated whole, drawn where it actually sits on the plot. */
-    .ts-gbar-ceiling {{ position:absolute; left:0; right:0; top:0; height:0;
+    .ts-gbar-ceiling {{ position:absolute; left:0; right:0; height:0;
       border-top:1px dashed color-mix(in srgb,var(--ts-accent) 55%,transparent); }}
     .ts-gbar-ceiling span {{ position:absolute; right:0; top:-1.05rem; font-size:.66rem;
       font-weight:700; color:var(--ts-accent); letter-spacing:-.01em; white-space:nowrap; }}

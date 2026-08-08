@@ -60,6 +60,7 @@ from common.block_shapes import (  # noqa: F401
     has_landscape,
     has_recurring_terms,
     has_share_split,
+    level_matrix,
     split_aggregate,
     has_status_levels,
     status_levels,
@@ -534,6 +535,36 @@ def _axis_groups(by_label: dict) -> list[list[str]]:
     return [[label for label in ordered if label not in small], small]
 
 
+_BAR_AXIS_MAX_INTERVALS = 4
+
+
+def _bar_axis(peak: float) -> tuple[float, list[float]]:
+    """(axis top, ticks bottom-up) for a bar chart, which starts at zero.
+
+    A different question from the line chart's axis, which frames a range that
+    may sit far from zero. Bars are read as lengths from a zero baseline, so
+    this axis always starts at 0 and its top sits just above the tallest bar.
+    Reusing the line-chart ticks put the top gridline at 150 for a 93.2% peak,
+    leaving every bar in the bottom two thirds of the plot for no reason.
+    """
+    if peak <= 0:
+        return 1.0, [0.0, 1.0]
+    best: tuple[float, float] | None = None
+    for exponent in range(-4, 13):
+        for mantissa in _NICE_STEPS:
+            step = mantissa * (10.0 ** exponent)
+            intervals = math.ceil(peak / step - 1e-9)
+            if not 2 <= intervals <= _BAR_AXIS_MAX_INTERVALS:
+                continue
+            top = step * intervals
+            if best is None or top < best[0] - 1e-9:
+                best = (top, step)
+    if best is None:
+        return peak, [0.0, peak]
+    top, step = best
+    return top, [step * index for index in range(int(round(top / step)) + 1)]
+
+
 def _metric_chart_svg(points: list[Any], title: str) -> str:
     """Reference-style area+line chart drawn directly from evidence-stated
     MetricPoints - one polyline per label, x positions in chronological
@@ -944,19 +975,32 @@ def render_metric_columns(points_for_one_label: list[Any]) -> None:
         abs(point.value) for point in ordered
     ) else 0.0
     peak = ceiling or max(abs(point.value) for point in ordered) or 1
+    # Bars, the stated whole, and the gridlines all read against one scale.
+    axis_top, ticks = _bar_axis(peak)
     labels = metric_axis_labels(ordered)
     columns = "".join(
         f'<div class="ts-gbar-col"><div class="ts-gbar-stack">'
-        f'<i style="height:{abs(point.value) / peak * 100:.1f}%" '
+        f'<i style="height:{abs(point.value) / axis_top * 100:.1f}%" '
         f'title="{escape(_format_number(point.value))}{escape(unit)}"></i>'
         f'<b class="ts-gbar-value">{escape(_format_number(point.value))}{escape(unit)}</b></div>'
         f'<span>{escape(label)}</span></div>'
         for point, label in zip(ordered, labels)
     )
     ceiling_markup = (
-        f'<div class="ts-gbar-ceiling"><span>전체 {escape(_format_number(total.value))}'
+        f'<div class="ts-gbar-ceiling" style="bottom:{ceiling / axis_top * 100:.1f}%">'
+        f'<span>전체 {escape(_format_number(total.value))}'
         f'{escape(total.unit or unit)}</span></div>' if ceiling else ""
     )
+    # The artwork's bars stand on a dashed grid with a labelled axis, which is
+    # what lets a reader read a bar's value off the chart instead of only
+    # comparing it to its neighbours. The ticks are the same round numbers the
+    # line chart uses, so the two blocks agree on what a scale looks like.
+    axis = "".join(
+        f'<span style="bottom:{tick / axis_top * 100:.1f}%">'
+        f'{escape(_format_number(tick))}</span>'
+        for tick in ticks
+    )
+    grid = f'<div class="ts-gbar-axis">{axis}</div>' if axis else ""
     # The period belongs in the caption line, never on the axis: it is the
     # same for every bar here, so repeating it under each one says nothing
     # while competing with the labels that do.
@@ -973,8 +1017,8 @@ def render_metric_columns(points_for_one_label: list[Any]) -> None:
     st.markdown(
         f'<div class="ts-chart"><div class="ts-chart-head"><b>{escape(ordered[0].label)}</b>'
         f'{unit_note}</div>'
-        f'<div class="ts-gbar single" style="height:{_GROUPED_BAR_HEIGHT}px">'
-        f'{ceiling_markup}{columns}</div></div>',
+        f'<div class="ts-gbar single has-axis" style="height:{_GROUPED_BAR_HEIGHT}px">'
+        f'{grid}{ceiling_markup}{columns}</div></div>',
         unsafe_allow_html=True,
     )
 
@@ -1024,6 +1068,39 @@ def render_grouped_bars(metric_points: list[Any]) -> None:
 
 _STATUS_TONE = {"high": "high", "medium": "medium", "low": "low"}
 _KPI_ROW_LAYOUT_MAX = 2
+
+
+def render_level_matrix(comparison_points: list[Any]) -> None:
+    """The artwork's Competitor Analysis grid: criteria down, entities across.
+
+    Each cell is a coloured dot *and* the grade word - the colour is a second
+    channel, never the only one carrying the value, same rule the status band
+    follows. A criterion an entity was never graded on stays blank rather than
+    being filled with a middle grade.
+    """
+    entities, criteria, cells = level_matrix(comparison_points or [])
+    if len(entities) < 2 or len(criteria) < 2:
+        return
+    header = "".join(f"<th>{escape(entity)}</th>" for entity in entities)
+    rows = ""
+    for criterion in criteria:
+        body = ""
+        for entity in entities:
+            cell = cells.get((criterion, entity))
+            if cell is None:
+                body += '<td class="ts-level-empty">-</td>'
+                continue
+            level, value = cell
+            body += (
+                f'<td class="{_STATUS_TONE[level]}" title="{escape(value)}">'
+                f'<i></i>{escape(level.capitalize())}</td>'
+            )
+        rows += f"<tr><th>{escape(criterion)}</th>{body}</tr>"
+    st.markdown(
+        f'<table class="ts-level-grid"><thead><tr><th></th>{header}</tr></thead>'
+        f"<tbody>{rows}</tbody></table>",
+        unsafe_allow_html=True,
+    )
 
 
 def render_status_bar(comparison_points: list[Any]) -> None:
@@ -1280,9 +1357,22 @@ def _sparkline_svg(points: list[Any]) -> str:
     )
     rising = values[-1] >= values[0]
     stroke = "var(--ts-teal)" if rising else "var(--ts-accent)"
+    # The artwork fills under the line with a fading wash of the line's own
+    # colour. It carries no extra claim - the shape is the same shape - but it
+    # is what makes a 26px sparkline read as a trend rather than as a scratch.
+    # The tint follows direction only, never good/bad: whether a rise is
+    # welcome is metric-specific and the evidence never says which.
+    gradient_id = f"tsSpark{abs(hash(tuple(values))) % 100000}"
+    area = (
+        f'<polygon points="0,30 {coords} 100,30" fill="url(#{gradient_id})"/>'
+        if len(values) > 2 else ""
+    )
     return (
         f'<svg class="ts-kpi-spark" viewBox="0 0 100 30" preserveAspectRatio="none">'
-        f'<polyline points="{coords}" fill="none" stroke="{stroke}" stroke-width="2" '
+        f'<defs><linearGradient id="{gradient_id}" x1="0" y1="0" x2="0" y2="1">'
+        f'<stop offset="0" stop-color="{stroke}" stop-opacity=".28"/>'
+        f'<stop offset="1" stop-color="{stroke}" stop-opacity="0"/></linearGradient></defs>'
+        f'{area}<polyline points="{coords}" fill="none" stroke="{stroke}" stroke-width="2" '
         f'vector-effect="non-scaling-stroke"/></svg>'
     )
 

@@ -93,7 +93,7 @@ def test_no_slot_offers_a_block_that_answers_a_different_question():
         ("revenue_trend", "metrics", "kpi_grid"),
         ("revenue_trend", "market", "chart"),
         # matrix is claimed by the "문제" slot above, so this moves to table.
-        ("iptv_competition", "options", "table"),
+        ("iptv_competition", "options", "level_matrix"),
         ("iptv_competition", "recommendation", "action_list"),
         ("future_business", "opportunity", "matrix"),
         # timeline is claimed by "시장 변화", so this moves to action_list.
@@ -392,6 +392,9 @@ def test_jungang_fixture_fills_every_issue_response_slot():
     by_id, resolved = _resolve("jungang_group_crisis")
 
     assert by_id["impact"].block_type == "item_bar"
-    assert by_id["options"].block_type == "table"
+    # Every competitor here is graded on every criterion, so the grid shows
+    # all of it at once; the free-text table would show the same entities with
+    # less of what the documents actually said about them.
+    assert by_id["options"].block_type == "level_matrix"
     assert by_id["recommendation"].block_type == "action_list"
     assert not any(slot.is_last_resort for slot in resolved)

@@ -37,6 +37,7 @@ from typing import Any, Callable
 # resolution is a decision about evidence, so it must not depend on Streamlit
 # or on anything that imports it.
 from common import block_shapes
+from common.content_quality_validator import leading_subject_kind
 
 # Share of a purpose's slots that may reach the last resort before the report
 # as a whole is called under-evidenced. Config, not a magic number - raise it
@@ -72,6 +73,7 @@ DESIGN_LIBRARY_BLOCKS: dict[str, tuple[str, ...]] = {
     "Timeline": ("timeline",),
     "Table": ("table", "segment_table"),
     "Competitor Panels": ("competitor_panels",),
+    "Level Matrix": ("level_matrix",),
     "Cause Map": ("cause_map",),
     "Root Cause Tree": ("cause_tree",),
     "Driver Bars": ("driver_bars",),
@@ -96,6 +98,17 @@ class Slot:
     # synthesis - observed with future_business's 위험 slot, whose sections are
     # not in that purpose's plan even though synthesis.risks was populated.
     fields: tuple[str, ...] = ()
+    # Which kind of subject this slot's *prose* is about, when that is part
+    # of what the slot means. 경쟁사 asks about organisations; a sentence whose
+    # subject is an age bracket answers a different question and belongs to
+    # 이용자 구성. Left None for every slot where the distinction is not part
+    # of the heading - most of them.
+    #
+    # This exists because routing the structured comparisons was only half the
+    # fix: when 경쟁사 found no organisation data it fell to the same section's
+    # prose, and that prose was "50대의 숏폼 콘텐츠 이용 경험 비중은 64.1%".
+    # The card was correct about having no competitor table and still wrong.
+    subject: str | None = None
     # An optional slot disappears when its data isn't there, instead of
     # resolving to the last-resort placeholder. Use it for a slot that asks a
     # question only some evidence can answer (relative weighting of causes) -
@@ -158,9 +171,14 @@ _CURRENT_STATUS: tuple[Slot, ...] = (
          ("market_status", "current_situation")),
     Slot("metrics", "지표", "확인된 수치를 제시",
          ("kpi_grid", "chart", "kpi_single", "status_bar"), ("key_metrics",)),
+    # level_matrix leads: where the documents graded several competitors on
+    # several criteria, the grid shows every grading at once. table shows the
+    # same entities' free-text values, radar needs a full numeric profile -
+    # each is the richest form its own data supports, in that order.
     Slot("competitor", "경쟁사", "다른 주체와 견주면 어디쯤인가",
-         ("competitor_panels", "table", "radar", "share_split", "narrative_list"),
-         ("market_status",)),
+         ("competitor_panels", "level_matrix", "table", "radar", "share_split",
+          "narrative_list"),
+         ("market_status",), subject="organisation"),
     # 요인/페인포인트 questions ("가입 고려 요인", "인기 요인") answer with a
     # list, and a list is what the evidence actually holds - so this slot has
     # its own place rather than being squeezed into 시장 상황's prose
@@ -173,8 +191,11 @@ _CURRENT_STATUS: tuple[Slot, ...] = (
     # Age and gender breakdowns have their own place. They used to land in
     # 경쟁사 because the only question asked was "do two entities share a
     # criterion" - true of 50대 vs 60대, and wrong for that heading.
+    # Reads the same section as 경쟁사 and takes the half that slot rejects, so
+    # a demographic finding is moved rather than deleted.
     Slot("segments", "이용자 구성", "어떤 집단에서 어떻게 다른가",
-         ("grouped_bar", "segment_table", "narrative_list"), (), (), optional=True),
+         ("grouped_bar", "segment_table", "narrative_list"),
+         ("market_status",), (), subject="demographic", optional=True),
     Slot("keywords", "반복 언급", "여러 출처가 공통으로 짚은 표현",
          ("recurring_terms",), (), (), optional=True),
     # Optional because 현황파악 is a "what is happening" question. Four of the
@@ -198,7 +219,8 @@ _ISSUE_RESPONSE: tuple[Slot, ...] = (
          ("chart", "bar", "item_bar", "metric_comparison", "narrative_list"), ("impact",),
          ("business_impacts",)),
     Slot("options", "선택지", "택할 수 있는 길들의 비교",
-         ("matrix", "table", "narrative_list"), ("risk_and_opportunity", "impact")),
+         ("matrix", "level_matrix", "table", "narrative_list"),
+         ("risk_and_opportunity", "impact")),
     Slot("recommendation", "권장 조치", "무엇을 먼저 할 것인가",
          ("action_list", "narrative_list"), ("response_actions", "recommended_action"),
          ("recommended_actions",)),
@@ -303,6 +325,11 @@ def _availability() -> dict[str, Callable[[Any, list[str]], bool]]:
         # than item_bar shows, so it is offered first wherever both fit.
         "grouped_bar": lambda synthesis, items: block_shapes.has_grouped_bars(synthesis.metric_series),
         "status_bar": lambda synthesis, items: block_shapes.has_status_levels(
+            synthesis.comparison_points
+        ),
+        # Two axes of graded comparison - strictly more than the status band,
+        # which keeps one row per criterion.
+        "level_matrix": lambda synthesis, items: block_shapes.has_level_matrix(
             synthesis.comparison_points
         ),
         # Composition, not ranking - and only where the source framed the
@@ -426,6 +453,9 @@ def _consumption() -> dict[str, Callable[[Any, list[str]], set[str]]]:
         "status_bar": lambda s, i: {
             f"cmp:{entity}" for entity, _, _ in block_shapes.status_levels(s.comparison_points)
         },
+        "level_matrix": lambda s, i: {
+            f"cmp:{entity}" for entity in block_shapes.level_matrix(s.comparison_points)[0]
+        },
         "matrix": lambda s, i: {"swot"},
         "cause_tree": lambda s, i: {"claim_graph"},
         "cause_map": lambda s, i: {"claim_graph"},
@@ -476,6 +506,15 @@ def _coarse_key(candidate: str):
     return lambda synthesis, items: {candidate}
 
 
+def _items_about(items: list[str], subject: str | None) -> list[str]:
+    """Only the sentences whose subject matches what the slot is about."""
+    if not subject:
+        return items
+    if subject == "organisation":
+        return [item for item in items if leading_subject_kind(item) == "entity"]
+    return [item for item in items if leading_subject_kind(item) != "entity"]
+
+
 def _synthesis_items(synthesis: Any, fields: tuple[str, ...]) -> list[str]:
     return [
         value
@@ -509,6 +548,7 @@ def resolve_slots(purpose_id: str | None, synthesis: Any, report: Any) -> list[R
         section_id, items = _section_items(report, slot.sections)
         if not items:
             items = _synthesis_items(synthesis, slot.fields)
+        items = _items_about(items, slot.subject)
         lead = next(
             (c for c in slot.candidates if drawable(c, synthesis, items)), None
         )
