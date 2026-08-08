@@ -621,11 +621,28 @@ def _run_pipeline_stages(
 
                     progress_token = bind_collection_events(result.collection_events)
                     try:
-                        retry_raw = _call_sector_adapter_stage(
-                            result.sector_route,
-                            "collector",
-                            retry_plan,
-                        )
+                        try:
+                            retry_raw = _call_sector_adapter_stage(
+                                result.sector_route,
+                                "collector",
+                                retry_plan,
+                            )
+                        except PipelineStageError as exc:
+                            # Analysis recollection is a best-effort quality
+                            # pass.  Failure to find replacement evidence must
+                            # not erase the already validated, usable analyses
+                            # from the first pass.  Continue with an explicit
+                            # gap/limitation instead of halting the report.
+                            result.trace.append(StageTrace(
+                                stage="sector_adapter.collector.analysis_recollection",
+                                status=StageStatus.SKIPPED,
+                                reason=(
+                                    "bounded analysis recollection found no usable replacement; "
+                                    "retained prior validated evidence: " + exc.reason
+                                ),
+                                detail=exc.detail,
+                            ))
+                            break
                     finally:
                         reset_collection_events(progress_token)
                     retry_collection = _normalize_collection_output(retry_raw)

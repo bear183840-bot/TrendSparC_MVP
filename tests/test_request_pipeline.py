@@ -12,7 +12,7 @@ from common.contracts import (
     SourceDocument,
     UserRequest,
 )
-from common.errors import StageStatus
+from common.errors import PipelineStageError, StageStatus
 from core.request_pipeline.pipeline import run_pipeline
 
 
@@ -386,6 +386,64 @@ def test_pipeline_recollects_when_analyzer_leaves_fewer_than_profile_minimum(mon
         trace.stage == "sector_adapter.collector.analysis_recollection"
         for trace in result.trace
     )
+
+
+def test_failed_analysis_recollection_retains_prior_usable_evidence(monkeypatch):
+    documents = [
+        SourceDocument(
+            doc_id=f"d{index}", source_id=f"s{index}", title=f"자료 {index}",
+            url=f"https://source{index}.example/a", content="근거" * 200,
+        )
+        for index in range(1, 4)
+    ]
+    collection_calls = 0
+
+    def fake_collect(source_plan):
+        nonlocal collection_calls
+        collection_calls += 1
+        if collection_calls == 1:
+            return documents
+        raise PipelineStageError(
+            stage="collector",
+            reason="insufficient relevant evidence after bounded collection",
+        )
+
+    monkeypatch.setattr(sk_broadband_collector, "collect", fake_collect)
+    monkeypatch.setattr(sk_broadband_processor, "process", lambda values: values)
+    monkeypatch.setattr(
+        sk_broadband_validator, "validate",
+        lambda values, search_context=None: values,
+    )
+    monkeypatch.setattr(
+        sk_broadband_analyzer, "analyze",
+        lambda values, question, information_needs=None, target_block_shapes=None: [
+            DocumentAnalysis(
+                doc_id=value.doc_id,
+                relevant_to_question=True,
+                usable_for_synthesis=True,
+                key_points=["검증된 기존 근거"],
+            )
+            for value in values
+        ],
+    )
+
+    result = run_pipeline(
+        _make_request(
+            "SK브로드밴드 광고 전략은?",
+            requested_sector_id="sk_broadband",
+        ),
+        dry_run=False,
+    )
+
+    assert result.halted_at_stage is None
+    assert collection_calls == 2
+    assert {analysis.doc_id for analysis in result.document_analyses} == {"d1", "d2", "d3"}
+    retry_trace = next(
+        trace for trace in result.trace
+        if trace.stage == "sector_adapter.collector.analysis_recollection"
+    )
+    assert retry_trace.status == StageStatus.SKIPPED
+    assert "retained prior validated evidence" in retry_trace.reason
 
 
 def test_pipeline_halts_when_analyzer_still_has_fewer_than_minimum_after_recollection(monkeypatch):
