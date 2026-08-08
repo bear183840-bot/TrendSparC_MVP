@@ -35,7 +35,18 @@ from reporting.dashboard_streamlit.components import evidence_url as _evidence_u
 
 
 def _points_for_roles(result: Any, roles: set[str], limit: int = 4) -> list[tuple[str, str, str]]:
-    by_name = {source.name: source for source in (result.source_plan.planned_sources if result.source_plan else [])}
+    # registered_sources, not planned_sources: a collector running the AI
+    # search harness (sk_broadband) searches the full registry, not just the
+    # top-N select_top_sources() trims planned_sources to, so a collected
+    # document's source can legitimately sit outside that trimmed list. Using
+    # planned_sources here silently dropped such a document from every
+    # role-filtered fallback panel below - not "no signal", just unlabelled.
+    # registered_sources is always a superset (select_top_sources only narrows
+    # planned_sources), so this never changes behaviour for a sector whose
+    # collector only ever searches planned_sources in the first place.
+    plan = result.source_plan
+    sources = (plan.registered_sources or plan.planned_sources) if plan else []
+    by_name = {source.name: source for source in sources}
     rows: list[tuple[str, str, str]] = []
     for analysis in result.document_analyses or []:
         source = by_name.get(analysis.source_id)

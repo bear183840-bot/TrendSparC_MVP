@@ -238,7 +238,12 @@ def test_same_source_two_documents_does_not_count_as_corroboration(monkeypatch):
     result = refine_synthesis_ai(rule_based, "테스트 질문")
 
     assert result.corroborated_points == []
-    assert result.uncorroborated_points == ["SK브로드밴드 IPTV 가입자 감소"]
+    assert len(result.uncorroborated_points) == 1
+    assert result.uncorroborated_points[0].claim == "SK브로드밴드 IPTV 가입자 감소"
+    # Same doc/source attribution a corroborated point would carry - just
+    # below the independent-source threshold, not discarded.
+    assert result.uncorroborated_points[0].supporting_doc_ids == ["doc1", "doc2"]
+    assert result.uncorroborated_points[0].supporting_source_ids == ["전자신문"]
 
 
 def test_claim_group_with_unknown_doc_id_only_is_ignored(monkeypatch):

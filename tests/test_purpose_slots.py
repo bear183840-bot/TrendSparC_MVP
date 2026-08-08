@@ -18,7 +18,7 @@ from core.report_generator.generator import generate_report
 from core.report_planner.planner import plan_report
 from core.report_purpose.classifier import recommended_sections_for
 from core.request_pipeline.synthesis_fixture import load_synthesis_fixture
-from reporting.dashboard_streamlit.purpose_slots import (
+from common.purpose_slots import (
     DESIGN_LIBRARY_BLOCKS,
     LAST_RESORT,
     PURPOSE_SLOTS,

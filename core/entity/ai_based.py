@@ -28,11 +28,30 @@ import sys
 
 from openai import OpenAI
 
+from common.ai_client import openai_client_kwargs
 from common.contracts import EntityExtractionResult, SectorProfile, UserRequest
 
 _API_KEY_ENV_VAR = "TRENDSPARC_ENTITY_AI_API_KEY"
-_MODEL = "gpt-4o-mini"
+_MODEL_ENV_VAR = "TRENDSPARC_ENTITY_AI_MODEL"
+# Optional - points this stage at an OpenAI-API-compatible alternative
+# provider (e.g. Upstage Solar) instead of stock OpenAI. Unset by default;
+# see common/ai_client.py.
+_BASE_URL_ENV_VAR = "TRENDSPARC_ENTITY_AI_BASE_URL"
+# gpt-4o-mini kept putting named brands/products (e.g. "OK캐쉬백", "Syrup")
+# into the generic keywords field instead of organizations/technologies, even
+# after prompt clarification (see CLAUDE.md's "Technical gotchas"). Default
+# raised to gpt-4o to see whether the larger model classifies these more
+# reliably; env var still wins for anyone who wants the cheaper model back.
+_DEFAULT_MODEL = "gpt-4o"
 _STAGE = "entity"
+
+
+def _model() -> str:
+    return os.environ.get(_MODEL_ENV_VAR, _DEFAULT_MODEL)
+
+
+def _normalize_for_matching(value: str) -> str:
+    return "".join(character for character in value.casefold() if character.isalnum())
 
 _INTENT_CATEGORIES = (
     "current_status",  # 현황파악
@@ -298,9 +317,9 @@ def extract_entities_ai(
                 "\"우리\", \"우리 회사\", \"우리 쪽\", or \"저희\" to this business specifically — do not guess "
                 "a different company."
             )
-        client = OpenAI(api_key=api_key)
+        client = OpenAI(api_key=api_key, **openai_client_kwargs(_BASE_URL_ENV_VAR))
         response = client.chat.completions.create(
-            model=_MODEL,
+            model=_model(),
             max_tokens=500,
             messages=[
                 {"role": "system", "content": system_content},
@@ -324,13 +343,13 @@ def extract_entities_ai(
             ai_perspective = rule_based_result.perspective
         selected_sector_id = data.get("sector_id")
         organizations = list(data["organizations"])
-        normalized_question = "".join(character for character in request.question.casefold() if character.isalnum())
+        normalized_question = _normalize_for_matching(request.question)
         alias_matches: list[tuple[int, SectorProfile, str]] = []
         for profile in (profiles or {}).values():
             if profile.sector_id == "general":
                 continue
             for alias in profile.aliases:
-                normalized_alias = "".join(character for character in alias.casefold() if character.isalnum())
+                normalized_alias = _normalize_for_matching(alias)
                 if normalized_alias and normalized_alias in normalized_question:
                     alias_matches.append((len(normalized_alias), profile, alias))
         if alias_matches:
@@ -356,11 +375,43 @@ def extract_entities_ai(
             if requested_canonical and has_self_reference and requested_canonical not in organizations:
                 organizations.insert(0, requested_canonical)
 
-        named_entities = [*organizations, *data["technologies"]]
+        # The model still occasionally puts a named brand/product into the
+        # generic keywords list instead of organizations/technologies (e.g.
+        # "OK캐쉬백", "Syrup" for sk_planet) even when asked not to - see
+        # CLAUDE.md's "Technical gotchas". Rather than re-litigating this in
+        # the prompt again, reclassify deterministically against the routed
+        # sector's own registered `aliases` (already used above for literal
+        # alias matching against the question text) - if a keyword IS a
+        # registered alias for this sector, it is a name, not a topic term.
+        # This only catches brands the sector has already registered; an
+        # unregistered competitor name still relies on the model alone.
+        technologies = list(data["technologies"])
+        keywords_to_classify = list(data["keywords"])
+        final_profile = (profiles or {}).get(selected_sector_id)
+        if final_profile is not None:
+            canonical_name = final_profile.canonical_name or final_profile.display_name
+            normalized_canonical = _normalize_for_matching(canonical_name) if canonical_name else ""
+            normalized_aliases = {
+                _normalize_for_matching(alias) for alias in final_profile.aliases if alias
+            }
+            remaining_keywords: list[str] = []
+            for keyword in keywords_to_classify:
+                normalized_keyword = _normalize_for_matching(keyword)
+                if normalized_keyword and normalized_keyword in normalized_aliases:
+                    if normalized_canonical and normalized_keyword == normalized_canonical:
+                        if keyword not in organizations:
+                            organizations.append(keyword)
+                    elif keyword not in technologies:
+                        technologies.append(keyword)
+                    continue
+                remaining_keywords.append(keyword)
+            keywords_to_classify = remaining_keywords
+
+        named_entities = [*organizations, *technologies]
         normalized_entities = ["".join(value.casefold().split()) for value in named_entities]
         clean_keywords = [
             keyword
-            for keyword in data["keywords"]
+            for keyword in keywords_to_classify
             if not any(
                 "".join(keyword.casefold().split()) in entity
                 or entity in "".join(keyword.casefold().split())
@@ -373,7 +424,7 @@ def extract_entities_ai(
             primary_intent=data["primary_intent"],
             perspective=ai_perspective,
             organizations=list(dict.fromkeys(organizations)),
-            technologies=data["technologies"],
+            technologies=list(dict.fromkeys(technologies)),
             keywords=list(dict.fromkeys(clean_keywords)),
             information_needs=list(dict.fromkeys(data.get("information_needs", []))),
             response_mode=data.get("response_mode", "report"),

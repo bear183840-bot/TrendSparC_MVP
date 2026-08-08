@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from common.block_shapes import recurring_terms
 from common.contracts import MetricPoint, SynthesisClaim, TrendSynthesis
-from reporting.dashboard_streamlit.purpose_slots import PURPOSE_SLOTS, resolve_slots
+from common.purpose_slots import PURPOSE_SLOTS, resolve_slots
 
 
 def _claim(doc_id: str, text: str) -> SynthesisClaim:

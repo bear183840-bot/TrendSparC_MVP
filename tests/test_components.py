@@ -1,6 +1,13 @@
-from common.contracts import ComparisonPoint, GeneratedReport, GeneratedReportSection, MetricPoint
+from types import SimpleNamespace
+
+from common.contracts import ComparisonPoint, CorroboratedPoint, GeneratedReport, GeneratedReportSection, MetricPoint
 from reporting.dashboard_streamlit import components
-from reporting.dashboard_streamlit.components import prefer_audience_content, prefer_audience_content_raw
+from reporting.dashboard_streamlit.components import (
+    item_doc_id,
+    prefer_audience_content,
+    prefer_audience_content_raw,
+    uncorroborated_doc_ids,
+)
 
 
 def _report(generation_mode: str, sections: list[GeneratedReportSection]) -> GeneratedReport:
@@ -267,3 +274,44 @@ def test_render_swot_draws_only_the_quadrants_that_have_evidence():
     assert ">S</span>trength" in markup and ">O</span>pportunity" in markup
     assert "Weakness" not in markup and "Threat" not in markup
     assert "관련 데이터 수집 필요" not in markup
+
+
+# --- item_doc_id / uncorroborated_doc_ids ---
+
+
+def test_item_doc_id_extracts_the_tagged_id():
+    assert item_doc_id("근거 문장 [doc_id=news:1]") == "news:1"
+    assert item_doc_id("태그 없는 문장") is None
+
+
+def test_uncorroborated_doc_ids_flags_only_single_source_docs():
+    synthesis = SimpleNamespace(
+        corroborated_points=[
+            CorroboratedPoint(claim="교차검증됨", supporting_doc_ids=["doc1", "doc2"], supporting_source_ids=["A", "B"])
+        ],
+        uncorroborated_points=[
+            CorroboratedPoint(claim="단일 출처뿐", supporting_doc_ids=["doc3"], supporting_source_ids=["C"])
+        ],
+    )
+
+    assert uncorroborated_doc_ids(synthesis) == {"doc3"}
+
+
+def test_uncorroborated_doc_ids_excludes_a_doc_that_also_backs_a_corroborated_claim():
+    # doc2 contributed to both an uncorroborated claim and a corroborated one
+    # (it stated two different facts) - it has cross-verified backing for
+    # something, so it is not flagged.
+    synthesis = SimpleNamespace(
+        corroborated_points=[
+            CorroboratedPoint(claim="교차검증됨", supporting_doc_ids=["doc1", "doc2"], supporting_source_ids=["A", "B"])
+        ],
+        uncorroborated_points=[
+            CorroboratedPoint(claim="doc2만의 다른 주장", supporting_doc_ids=["doc2"], supporting_source_ids=["B"])
+        ],
+    )
+
+    assert uncorroborated_doc_ids(synthesis) == set()
+
+
+def test_uncorroborated_doc_ids_handles_missing_fields_gracefully():
+    assert uncorroborated_doc_ids(SimpleNamespace()) == set()

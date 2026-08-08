@@ -102,6 +102,36 @@ class ReportPurposeClassification(BaseModel):
     ] = None
 
 
+class SlotTarget(BaseModel):
+    """One purpose_slots.Slot, seen before collection instead of after it.
+
+    `priority_block_types` is that slot's own `candidates` tuple, copied
+    verbatim - not a second, independently-authored priority table. The one
+    new judgement made here is `required_data_hint`: a plain-language
+    restatement of what the top candidate's block_shapes predicate actually
+    requires (e.g. "chart" needs a label with 3+ distinct periods), handed to
+    the collector/analyzer as a target to search and extract *for*, before
+    any document has been read.
+    """
+
+    slot_id: str
+    title: str
+    priority_block_types: list[str] = Field(default_factory=list)
+    required_data_hint: str = ""
+    # False when the slot is already known to be skippable for this purpose
+    # (see purpose_slots.Slot.optional) - never fabricated from question text,
+    # see common/purpose_slots.py's `optional` docstring for why not.
+    included: bool = True
+
+
+class BlockPriorityPlan(BaseModel):
+    """block_priority_planner's output - see core/block_priority_planner/planner.py."""
+
+    request_id: str
+    purpose_id: str
+    slots: list[SlotTarget] = Field(default_factory=list)
+
+
 class SectorProfile(BaseModel):
     sector_id: str
     display_name: str
@@ -135,6 +165,16 @@ class SectorProfile(BaseModel):
     max_analysis_recollection_attempts: int = 0
     pipeline_entrypoint: Optional[str] = None
     system_prompt_path: Optional[str] = None
+    # True only for a sector whose collector searches its full registry
+    # itself (e.g. sk_broadband's AI search harness reads
+    # SourcePlan.registered_sources, not planned_sources) rather than
+    # looping over the narrowed planned_sources list. select_top_sources()'s
+    # top-N narrowing would then produce a planned_sources list nothing
+    # actually searches with, while still risking silent gaps wherever
+    # downstream code reads planned_sources instead of registered_sources by
+    # mistake - so the pipeline skips narrowing entirely for such a sector
+    # instead. Core reads this generically and never branches on a sector id.
+    skip_source_narrowing: bool = False
 
 
 class SectorRoute(BaseModel):
@@ -234,6 +274,15 @@ class WebSearchContext(BaseModel):
     needs_generic_topic_round: bool = False
     report_purpose_id: Optional[str] = None
     information_needs: list[str] = Field(default_factory=list)
+    # Natural-language hints from block_priority_planner about which data
+    # *shapes* (a 3+ period trend, a 2+ entity comparison, ...) would let the
+    # final report draw a real chart/table instead of falling back to plain
+    # bullet text - see common/purpose_slots.py. Unlike information_needs,
+    # missing entries never block the harness's sufficient=True gate (see
+    # sources/collectors/ai_search_harness.py); a report can always answer
+    # the question in prose, so this only biases which follow-up queries get
+    # tried, never halts collection.
+    target_block_shapes: list[str] = Field(default_factory=list)
     suggested_terms: list[str] = Field(default_factory=list)
     as_of_date: Optional[str] = None
     country_code: str = "KR"
@@ -307,6 +356,12 @@ class EvidenceCoverageAssessment(BaseModel):
     relevant_doc_ids: list[str]
     covered_information_needs: list[str]
     missing_information_needs: list[str]
+    # Which of WebSearchContext.target_block_shapes the scraped text so far
+    # actually supports/doesn't. Tracked the same way as information needs,
+    # but deliberately excluded from `sufficient` - see target_block_shapes'
+    # docstring on WebSearchContext.
+    covered_block_shapes: list[str] = Field(default_factory=list)
+    missing_block_shapes: list[str] = Field(default_factory=list)
     next_queries: list[str]
     reason: str
 
@@ -316,6 +371,8 @@ class WebSearchHarnessResult(BaseModel):
     sufficient: bool = False
     covered_information_needs: list[str] = Field(default_factory=list)
     missing_information_needs: list[str] = Field(default_factory=list)
+    covered_block_shapes: list[str] = Field(default_factory=list)
+    missing_block_shapes: list[str] = Field(default_factory=list)
     rounds_completed: int = 0
     scrape_call_count: int = 0
 
@@ -544,11 +601,14 @@ class SynthesisConclusion(BaseModel):
 
 
 class CorroboratedPoint(BaseModel):
-    """A claim confirmed by >= 2 documents from genuinely independent
-    registered sources (distinct source_id, not just distinct doc_id — two
-    documents from the same source don't corroborate each other). Independence
-    is verified in code from TrendSynthesis.doc_source_map, never trusted from
-    the model's own count.
+    """A claim plus the documents/sources that back it, verified in code from
+    TrendSynthesis.doc_source_map rather than trusted from the model's own
+    count. Despite the name, this shape is reused for both
+    TrendSynthesis.corroborated_points (>= 2 genuinely independent registered
+    sources — distinct source_id, not just distinct doc_id) and
+    .uncorroborated_points (exactly the same doc/source attribution, just
+    below that threshold) — the two lists differ only in which bucket a claim
+    landed in, not in what data they carry.
     """
 
     claim: str
@@ -607,8 +667,11 @@ class TrendSynthesis(BaseModel):
     # Claims that appear in only one independent source. Kept and labeled
     # explicitly rather than dropped, so a report can flag them as unverified
     # instead of silently presenting them with the same confidence as a
-    # corroborated point.
-    uncorroborated_points: list[str] = Field(default_factory=list)
+    # corroborated point. Carries the same doc/source attribution as
+    # corroborated_points (see CorroboratedPoint) so a renderer can match a
+    # displayed [doc_id=...]-tagged item back to its corroboration status —
+    # see reporting/dashboard_streamlit/components.py's uncorroborated_doc_ids().
+    uncorroborated_points: list[CorroboratedPoint] = Field(default_factory=list)
     # Conflicting claims across documents, grouped by topic. Empty unless the
     # AI refinement pass ran and found some.
     contradictions: list[Contradiction] = Field(default_factory=list)

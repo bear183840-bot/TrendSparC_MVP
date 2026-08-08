@@ -34,6 +34,7 @@ import sys
 
 from openai import OpenAI
 
+from common.ai_client import openai_client_kwargs
 from common.contracts import (
     Contradiction,
     ContradictingClaim,
@@ -43,8 +44,17 @@ from common.contracts import (
 )
 
 _API_KEY_ENV_VAR = "TRENDSPARC_SYNTHESIS_AI_API_KEY"
-_MODEL = "gpt-4o-mini"
+_MODEL_ENV_VAR = "TRENDSPARC_SYNTHESIS_AI_MODEL"
+# Optional - points this stage at an OpenAI-API-compatible alternative
+# provider (e.g. Upstage Solar) instead of stock OpenAI. Unset by default;
+# see common/ai_client.py.
+_BASE_URL_ENV_VAR = "TRENDSPARC_SYNTHESIS_AI_BASE_URL"
+_DEFAULT_MODEL = "gpt-4o-mini"
 _STAGE = "synthesis"
+
+
+def _model() -> str:
+    return os.environ.get(_MODEL_ENV_VAR, _DEFAULT_MODEL)
 # Below this many distinct source_ids, a claim group is not "corroborated" —
 # it's just the same source (or the same lone source) restating itself.
 _MIN_INDEPENDENT_SOURCES_FOR_CORROBORATION = 2
@@ -159,13 +169,20 @@ _SCHEMA = {
 
 def _split_by_corroboration(
     claim_groups: list[dict], doc_source_map: dict[str, str]
-) -> tuple[list[CorroboratedPoint], list[str]]:
+) -> tuple[list[CorroboratedPoint], list[CorroboratedPoint]]:
     """Verify each model-proposed claim group's independent-source count in
     code rather than trusting the model's own count — a group whose doc_ids
     all map to the same source_id (or map to no known doc_id at all) is not
-    corroborated, regardless of how many doc_ids it lists."""
+    corroborated, regardless of how many doc_ids it lists.
+
+    A below-threshold group is not dropped: it keeps the exact same doc/source
+    attribution as a corroborated one (see CorroboratedPoint's docstring), so
+    a renderer can later match a displayed [doc_id=...]-tagged item back to
+    "this claim only had one independent source" rather than just the claim
+    text, which the AI may have reworded from what's actually shown.
+    """
     corroborated: list[CorroboratedPoint] = []
-    uncorroborated: list[str] = []
+    uncorroborated: list[CorroboratedPoint] = []
     for group in claim_groups:
         claim = group.get("claim")
         doc_ids = group.get("doc_ids") or []
@@ -175,16 +192,15 @@ def _split_by_corroboration(
         if not known_doc_ids:
             continue  # every doc_id in this group is unknown -> hallucinated group, drop entirely
         supporting_source_ids = list(dict.fromkeys(doc_source_map[doc_id] for doc_id in known_doc_ids))
+        point = CorroboratedPoint(
+            claim=claim,
+            supporting_doc_ids=known_doc_ids,
+            supporting_source_ids=supporting_source_ids,
+        )
         if len(supporting_source_ids) >= _MIN_INDEPENDENT_SOURCES_FOR_CORROBORATION:
-            corroborated.append(
-                CorroboratedPoint(
-                    claim=claim,
-                    supporting_doc_ids=known_doc_ids,
-                    supporting_source_ids=supporting_source_ids,
-                )
-            )
+            corroborated.append(point)
         else:
-            uncorroborated.append(claim)
+            uncorroborated.append(point)
     return corroborated, uncorroborated
 
 
@@ -244,7 +260,7 @@ def refine_synthesis_ai(rule_based_result: TrendSynthesis, question: str) -> Tre
         return rule_based_result
 
     try:
-        client = OpenAI(api_key=api_key)
+        client = OpenAI(api_key=api_key, **openai_client_kwargs(_BASE_URL_ENV_VAR))
         user_content = json.dumps(
             {
                 "question": question,
@@ -263,7 +279,7 @@ def refine_synthesis_ai(rule_based_result: TrendSynthesis, question: str) -> Tre
             ensure_ascii=False,
         )
         response = client.chat.completions.create(
-            model=_MODEL,
+            model=_model(),
             max_tokens=1500,
             messages=[
                 {"role": "system", "content": _SYSTEM_PROMPT},

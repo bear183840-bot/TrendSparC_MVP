@@ -96,12 +96,6 @@ _QUESTION_SEARCH_EVENT_NAME = "OpenAI 웹검색"
 _QUESTION_HARNESS_MIN_DOCS = 5
 _QUESTION_HARNESS_MAX_DOCS = 10
 _MIN_REQUIRED_SOURCE_DOCUMENTS = 2
-# Defensive cap on top of source_planner.select_top_sources()'s 6-source
-# selection (6 sources * _MAX_RESULTS_PER_SOURCE = 12) — stops collection
-# once reached even if a future config change lets more sources or results
-# through, so the collector never hands the validator/analyzer an unbounded
-# document set.
-_MAX_COLLECTED_DOCUMENTS = 12
 # Live-verified against kofic.or.kr (2026-08-06): the listing page's static
 # HTML never contains a real, directly-usable detail-page URL. The only
 # literal "selectBoardDetail.do?..." substring on the page is a JS template
@@ -897,57 +891,31 @@ def _collect_with_question_harness(
     return documents[:_QUESTION_HARNESS_MAX_DOCS]
 
 
-def collect(source_plan: SourcePlan) -> list[SourceDocument] | SourceCollectionResult:
+def collect(source_plan: SourcePlan) -> SourceCollectionResult:
     if not source_plan.planned_sources:
         raise PipelineStageError(stage=_STAGE, reason="no sources registered for sk_broadband")
     api_key = os.environ.get(_API_KEY_ENV_VAR)
     if not api_key:
         raise PipelineStageError(stage=_STAGE, reason=f"{_API_KEY_ENV_VAR} is not configured")
-    client = Firecrawl(api_key=api_key)
     harness_key = os.environ.get(_HARNESS_API_KEY_ENV_VAR)
-    if harness_key:
-        return SourceCollectionResult(
-            documents=_collect_with_question_harness(
-                client, source_plan, api_key, harness_key
-            ),
-            collection_mode="ai_search_harness",
-            minimum_validated_documents=_QUESTION_HARNESS_MIN_DOCS,
-        )
-    total = len(source_plan.planned_sources)
-    documents: list[SourceDocument] = []
-    for index, source in enumerate(source_plan.planned_sources):
-        if not source.url:
-            continue
-        emit_collection_event(source.name, index + 1, total, "started")
-        print(f"[{index + 1}/{total}] {source.name} 수집 중...", file=sys.stderr)
-        try:
-            crawl_args = (
-                client,
-                source,
-                api_key,
-                build_source_search_terms(source, source_plan.question_keywords),
-                tuple(source_plan.planned_sources),
-            )
-            if source_plan.search_context is None:
-                source_documents = _crawl_source(*crawl_args)
-            else:
-                source_documents = _crawl_source(
-                    *crawl_args,
-                    search_context=source_plan.search_context,
-                )
-            documents.extend(source_documents)
-            emit_collection_event(
-                source.name, index + 1, total, "completed", document_count=len(source_documents)
-            )
-            print(f"[{index + 1}/{total}] {source.name} 완료 ({len(source_documents)}건)", file=sys.stderr)
-        except PipelineStageError as exc:
-            emit_collection_event(
-                source.name, index + 1, total, "failed", detail=exc.detail or exc.reason
-            )
-            print(f"[{index + 1}/{total}] {source.name} 실패: {exc.reason}", file=sys.stderr)
-        except Exception as exc:  # noqa: BLE001
-            emit_collection_event(source.name, index + 1, total, "failed", detail=str(exc))
-            print(f"[{index + 1}/{total}] {source.name} 실패: {exc}", file=sys.stderr)
-        if len(documents) >= _MAX_COLLECTED_DOCUMENTS:
-            break
-    return documents[:_MAX_COLLECTED_DOCUMENTS]
+    if not harness_key:
+        # There used to be a per-source fallback loop here for a missing
+        # harness key, calling _crawl_source() directly instead. It didn't
+        # fail - it silently degraded: KOFIC lost its AI-drafted query and
+        # fell back to a raw listing-page scrape, and every source registered
+        # with collection_method "ai_gated_search" returned zero documents
+        # outright (_crawl_source_with_ai_gated_search's query-generation step
+        # needs this same key and returns None without it, which the function
+        # then treats as "nothing found", not an error). A collector that
+        # quietly hands the rest of the pipeline a weaker document set is
+        # exactly what PipelineStageError exists to prevent, so a missing
+        # harness key now halts the stage instead.
+        raise PipelineStageError(stage=_STAGE, reason=f"{_HARNESS_API_KEY_ENV_VAR} is not configured")
+    client = Firecrawl(api_key=api_key)
+    return SourceCollectionResult(
+        documents=_collect_with_question_harness(
+            client, source_plan, api_key, harness_key
+        ),
+        collection_mode="ai_search_harness",
+        minimum_validated_documents=_QUESTION_HARNESS_MIN_DOCS,
+    )

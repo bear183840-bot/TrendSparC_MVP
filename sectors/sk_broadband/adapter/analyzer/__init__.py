@@ -12,6 +12,7 @@ from urllib.parse import urlparse
 
 from openai import OpenAI
 
+from common.ai_client import openai_client_kwargs
 from common.content_quality_validator import (
     COMPARISON_COMPLETENESS_INSTRUCTION,
     SWOT_COMPLETENESS_INSTRUCTION,
@@ -23,6 +24,10 @@ from sources.openai_retry import call_with_retry
 _API_KEY_ENV_VAR = "TRENDSPARC_SK_BROADBAND_ANALYZER_API_KEY"
 _FALLBACK_API_KEY_ENV_VAR = "OPENAI_API_KEY"
 _MODEL_ENV_VAR = "TRENDSPARC_SK_BROADBAND_ANALYZER_MODEL"
+# Optional - points this stage at an OpenAI-API-compatible alternative
+# provider (e.g. Upstage Solar) instead of stock OpenAI. Unset by default;
+# see common/ai_client.py.
+_BASE_URL_ENV_VAR = "TRENDSPARC_SK_BROADBAND_ANALYZER_BASE_URL"
 _DEFAULT_MODEL = "gpt-4o"
 _MAX_CONTENT_CHARS = 12000
 _PDF_CHUNK_OVERLAP_CHARS = 500
@@ -698,6 +703,7 @@ def _analyze_document(
     question: str,
     information_needs: list[str],
     *,
+    target_block_shapes: list[str] | None = None,
     content_override: str | None = None,
     claim_id_prefix: str | None = None,
     evidence_location_prefix: str | None = None,
@@ -712,6 +718,7 @@ def _analyze_document(
         {
             "question": question,
             "required_information_needs": information_needs,
+            "target_block_shapes": target_block_shapes or [],
             "document": {
                 "doc_id": document.doc_id,
                 "source_id": document.source_id,
@@ -730,6 +737,9 @@ def _analyze_document(
                 "comparison_points로 추출하되 명시되지 않은 값은 추정하거나 계산하지 말 것. 특히 재무제표나 "
                 "실적 표는 같은 항목이 3Q25/3Q24/2Q25처럼 여러 시점 컬럼으로 나란히 나오는 경우가 많으므로, "
                 "한 시점만 뽑지 말고 같은 label로 시점마다 별도의 metric_point를 표에 있는 시점 수만큼 전부 추출하라. "
+                "target_block_shapes에 나열된 데이터 모양은 이번 리포트에서 특히 값어치 있다 — 원문에 그에 해당하는 "
+                "표나 리스트(예: 연령대별, 연도별, 기업별로 나열된 수치)가 있으면 대표값 하나로 요약하지 말고 "
+                "각 행·항목을 개별 metric_point 또는 comparison_point로 전부 분해하라. "
                 "metric_points의 모든 수치는 값·단위·시점을 함께 직접 인용한 "
                 "claim_type=metric grounded_claim을 먼저 만들고, 그 claim_id를 "
                 "evidence_claim_id로 연결하라. "
@@ -1016,6 +1026,7 @@ def _analyze_pdf_document(
     document: SourceDocument,
     question: str,
     information_needs: list[str],
+    target_block_shapes: list[str] | None = None,
 ) -> DocumentAnalysis:
     chunks = _split_pdf_content(document.content or "")
     selected_chunks = _selected_pdf_chunks(chunks, question, information_needs)
@@ -1035,6 +1046,7 @@ def _analyze_pdf_document(
                     document,
                     question,
                     information_needs,
+                    target_block_shapes=target_block_shapes,
                     content_override=chunk,
                     claim_id_prefix=f"pdf{chunk_index}",
                     evidence_location_prefix=f"PDF 청크 {chunk_index}/{len(chunks)}",
@@ -1066,13 +1078,15 @@ def analyze(
     source_documents: list[SourceDocument],
     question: str,
     information_needs: list[str] | None = None,
+    target_block_shapes: list[str] | None = None,
 ) -> list[DocumentAnalysis]:
     api_key = _api_key()
     if not api_key:
         raise PipelineStageError(stage=_STAGE, reason=f"{_API_KEY_ENV_VAR} or {_FALLBACK_API_KEY_ENV_VAR} is not configured")
-    client = OpenAI(api_key=api_key)
+    client = OpenAI(api_key=api_key, **openai_client_kwargs(_BASE_URL_ENV_VAR))
     system_prompt = _load_system_prompt()
     needs = list(information_needs or [])
+    shapes = list(target_block_shapes or [])
     analyses = []
     for document in source_documents:
         if (
@@ -1081,11 +1095,15 @@ def analyze(
         ):
             analyses.append(
                 _analyze_pdf_document(
-                    client, system_prompt, document, question, needs
+                    client, system_prompt, document, question, needs,
+                    target_block_shapes=shapes,
                 )
             )
         else:
             analyses.append(
-                _analyze_document(client, system_prompt, document, question, needs)
+                _analyze_document(
+                    client, system_prompt, document, question, needs,
+                    target_block_shapes=shapes,
+                )
             )
     return analyses

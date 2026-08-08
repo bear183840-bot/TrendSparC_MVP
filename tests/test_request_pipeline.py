@@ -61,6 +61,36 @@ def test_dry_run_passes_every_stage_with_valid_contracts():
     assert all(trace.status != StageStatus.FAILED for trace in result.trace)
 
 
+def test_broadband_source_plan_skips_top_source_narrowing():
+    # sk_broadband's collector searches SourcePlan.registered_sources itself
+    # (the AI search harness), not the narrowed planned_sources - so
+    # select_top_sources() would compute a 6-source list nothing actually
+    # searches with, while leaving a second, smaller list around for
+    # downstream code to read by mistake. profile.json's
+    # skip_source_narrowing=True should make the pipeline leave
+    # planned_sources exactly equal to registered_sources instead.
+    request = _make_request("SK브로드밴드 IPTV 경쟁 현황은?", requested_sector_id="sk_broadband")
+    result = run_pipeline(request, dry_run=True)
+
+    plan = result.source_plan
+    assert plan is not None
+    assert len(plan.planned_sources) == len(plan.registered_sources)
+    assert len(plan.planned_sources) > 6  # the real registry is bigger than the old cap
+
+
+def test_other_sectors_still_narrow_to_six_sources():
+    # sk_hynix's collector still loops over planned_sources directly, so the
+    # narrowing this test checks for is still load-bearing there - only
+    # sk_broadband opts out via skip_source_narrowing.
+    request = _make_request("SK하이닉스 HBM 시장 전망", requested_sector_id="sk_hynix")
+    result = run_pipeline(request, dry_run=True)
+
+    plan = result.source_plan
+    assert plan is not None
+    assert len(plan.planned_sources) <= 6
+    assert len(plan.planned_sources) < len(plan.registered_sources)
+
+
 def test_no_sector_specified_falls_back_to_general():
     request = _make_request("오늘 점심 뭐 먹지")
     result = run_pipeline(request, dry_run=True)
@@ -91,7 +121,7 @@ def test_analyzer_documents_flagged_irrelevant_are_dropped_before_synthesis(monk
         SourceDocument(doc_id="d2", source_id="source", title="t2", content="c2"),
     ]
 
-    def fake_analyze(documents, question, information_needs=None):
+    def fake_analyze(documents, question, information_needs=None, target_block_shapes=None):
         assert question == "SK하이닉스 HBM 시장 전망"
         return [
             DocumentAnalysis(
@@ -133,7 +163,7 @@ def test_progress_sink_is_the_same_object_as_result_collection_events_and_receiv
     monkeypatch.setattr(
         sk_hynix_analyzer,
         "analyze",
-        lambda documents, question, information_needs=None: [
+        lambda documents, question, information_needs=None, target_block_shapes=None: [
             DocumentAnalysis(
                 doc_id="d1", summary="s", key_points=["p"], sentiment="neutral", relevant_to_question=True
             )
@@ -173,7 +203,7 @@ def test_pipeline_recollects_when_validation_leaves_fewer_than_profile_minimum(m
         validation_calls.append((list(documents), search_context))
         return [documents[0]] if len(validation_calls) == 1 else list(documents[:2])
 
-    def fake_analyze(documents, question, information_needs=None):
+    def fake_analyze(documents, question, information_needs=None, target_block_shapes=None):
         return [
             DocumentAnalysis(
                 doc_id=document.doc_id,
@@ -256,7 +286,7 @@ def test_harness_collection_contract_requires_five_validated_documents(monkeypat
     monkeypatch.setattr(
         sk_broadband_analyzer,
         "analyze",
-        lambda documents, question, information_needs=None: [
+        lambda documents, question, information_needs=None, target_block_shapes=None: [
             DocumentAnalysis(
                 doc_id=document.doc_id,
                 relevant_to_question=True,
@@ -299,7 +329,7 @@ def test_pipeline_recollects_when_analyzer_leaves_fewer_than_profile_minimum(mon
         collector_plans.append(source_plan)
         return initial if len(collector_plans) == 1 else replacements
 
-    def fake_analyze(documents, question, information_needs=None):
+    def fake_analyze(documents, question, information_needs=None, target_block_shapes=None):
         analyzer_needs.append(list(information_needs or []))
         if len(analyzer_needs) == 1:
             return [
@@ -370,7 +400,7 @@ def test_pipeline_halts_when_analyzer_still_has_fewer_than_minimum_after_recolle
         collector_calls.append(source_plan)
         return batch
 
-    def fake_analyze(documents, question, information_needs=None):
+    def fake_analyze(documents, question, information_needs=None, target_block_shapes=None):
         return [
             DocumentAnalysis(
                 doc_id=document.doc_id,

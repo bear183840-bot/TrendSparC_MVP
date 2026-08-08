@@ -31,6 +31,7 @@ from audience.adapter import adapt_for_audience
 from common.contracts import (
     AttachmentExtraction,
     AudienceAdaptation,
+    BlockPriorityPlan,
     DocumentAnalysis,
     DynamicLayout,
     EntityExtractionResult,
@@ -49,6 +50,7 @@ from common.contracts import (
 from common.content_quality_validator import needs_generic_topic_search
 from common.errors import PipelineStageError, StageStatus, StageTrace
 from core.attachments.extractor import build_question_context, extract_attachments
+from core.block_priority_planner.planner import plan_block_priorities, target_block_shapes
 from core.collection_progress import bind_collection_events, reset_collection_events
 from core.entity.ai_based import extract_entities_ai
 from core.entity.search_terms import build_search_terms
@@ -135,6 +137,7 @@ class PipelineResult(BaseModel):
     collection_events: list[SourceCollectionEvent] = Field(default_factory=list)
     source_collection: Optional[SourceCollectionResult] = None
     report_purpose: Optional[ReportPurposeClassification] = None
+    block_priority_plan: Optional[BlockPriorityPlan] = None
     # Raw documents exactly as returned by the sector collector, before the
     # processor strips boilerplate or the validator drops documents. Kept so
     # operators can audit the actual Firecrawl markdown behind a report.
@@ -249,9 +252,9 @@ def _run_pipeline_stages(
             StageTrace(stage="direct_response", status=StageStatus.OK, reason="AI classified conversational input")
         )
         for stage in (
-            "sector_router", "report_purpose", "source_planner", "sector_adapter",
-            "synthesis", "report_planner", "report_generator", "audience_adapter",
-            "layout_generator",
+            "sector_router", "report_purpose", "block_priority_planner", "source_planner",
+            "sector_adapter", "synthesis", "report_planner", "report_generator",
+            "audience_adapter", "layout_generator",
         ):
             result.trace.append(StageTrace(stage=stage, status=StageStatus.SKIPPED, reason="direct response"))
         return result
@@ -272,7 +275,7 @@ def _run_pipeline_stages(
         return result
 
     if result.sector_route.status == "unsupported":
-        for stage in ("report_purpose", "source_planner", "sector_adapter", "synthesis", "report_planner", "report_generator", "audience_adapter", "layout_generator"):
+        for stage in ("report_purpose", "block_priority_planner", "source_planner", "sector_adapter", "synthesis", "report_planner", "report_generator", "audience_adapter", "layout_generator"):
             result.trace.append(
                 StageTrace(stage=stage, status=StageStatus.SKIPPED, reason="sector route is unsupported")
             )
@@ -288,8 +291,8 @@ def _run_pipeline_stages(
         reason = f"template_only: sector '{sector_id}' report pipeline is not implemented"
         result.trace.append(StageTrace(stage="sector_adapter", status=StageStatus.TEMPLATE_ONLY, reason=reason))
         for stage in (
-            "report_purpose", "source_planner", "synthesis", "report_planner",
-            "report_generator", "audience_adapter", "layout_generator",
+            "report_purpose", "block_priority_planner", "source_planner", "synthesis",
+            "report_planner", "report_generator", "audience_adapter", "layout_generator",
         ):
             result.trace.append(StageTrace(stage=stage, status=StageStatus.SKIPPED, reason=reason))
         result.halted_at_stage = "sector_adapter"
@@ -307,6 +310,18 @@ def _run_pipeline_stages(
         result.trace.append(StageTrace(stage="report_purpose", status=StageStatus.OK))
     except PipelineStageError as exc:
         _halt("report_purpose", exc.reason, exc.detail)
+        return result
+
+    # 3.5 block_priority_planner - pure lookup against common.purpose_slots,
+    # no API call, so failure here should never actually happen in practice.
+    try:
+        _maybe_force_fail("block_priority_planner")
+        result.block_priority_plan = plan_block_priorities(
+            request.request_id, result.report_purpose.purpose_id,
+        )
+        result.trace.append(StageTrace(stage="block_priority_planner", status=StageStatus.OK))
+    except PipelineStageError as exc:
+        _halt("block_priority_planner", exc.reason, exc.detail)
         return result
 
     # 4. source_planner
@@ -332,16 +347,18 @@ def _run_pipeline_stages(
                 ),
                 report_purpose_id=result.report_purpose.purpose_id,
                 information_needs=result.entities.information_needs,
+                target_block_shapes=target_block_shapes(result.block_priority_plan),
                 suggested_terms=search_terms,
                 as_of_date=request.created_at.date().isoformat(),
                 excluded_domains=list(result.sector_route.matched_profile.blocked_scrape_domains),
             ),
         )
-        result.source_plan = select_top_sources(
-            result.source_plan,
-            result.entities.perspective,
-            result.report_purpose.purpose_id,
-        )
+        if not result.sector_route.matched_profile.skip_source_narrowing:
+            result.source_plan = select_top_sources(
+                result.source_plan,
+                result.entities.perspective,
+                result.report_purpose.purpose_id,
+            )
         result.trace.append(StageTrace(stage="source_planner", status=StageStatus.OK))
     except PipelineStageError as exc:
         _halt("source_planner", exc.reason, exc.detail)
@@ -373,6 +390,7 @@ def _run_pipeline_stages(
                     [*documents, *attachment_documents],
                     question_with_context,
                     result.source_plan.information_needs,
+                    target_block_shapes(result.block_priority_plan),
                 )
             elif role == "validator":
                 args = (documents, result.source_plan.search_context)
@@ -571,6 +589,7 @@ def _run_pipeline_stages(
                         retry_validated,
                         question_with_context,
                         retry_plan.information_needs,
+                        target_block_shapes(result.block_priority_plan),
                     )
                     retry_output = _enrich_document_analyses(retry_output, retry_validated)
                     result.trace.append(

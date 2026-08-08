@@ -31,20 +31,25 @@ _DEFAULT_AUDIENCE_ID = DEFAULT_AUDIENCE_ID
 _DEFAULT_PURPOSE_ID = "current_status"
 
 
+_CORROBORATED_POINT_FIELDS = ("corroborated_points", "uncorroborated_points")
+
+
 def _normalize(payload: dict[str, Any]) -> dict[str, Any]:
     """Accept the shorthand a hand-written fixture naturally uses.
 
-    `corroborated_points` is a list of CorroboratedPoint in the contract, but
-    a fixture written by hand states the claim as a bare string. Promoting it
-    here keeps fixtures readable without loosening the contract itself - the
-    supporting doc/source ids stay empty rather than being invented.
+    `corroborated_points`/`uncorroborated_points` are both lists of
+    CorroboratedPoint in the contract, but a fixture written by hand states
+    the claim as a bare string. Promoting it here keeps fixtures readable
+    without loosening the contract itself - the supporting doc/source ids
+    stay empty rather than being invented.
     """
     normalized = {key: value for key, value in payload.items() if not key.startswith("_")}
-    points = normalized.get("corroborated_points")
-    if isinstance(points, list):
-        normalized["corroborated_points"] = [
-            {"claim": point} if isinstance(point, str) else point for point in points
-        ]
+    for field in _CORROBORATED_POINT_FIELDS:
+        points = normalized.get(field)
+        if isinstance(points, list):
+            normalized[field] = [
+                {"claim": point} if isinstance(point, str) else point for point in points
+            ]
     return normalized
 
 

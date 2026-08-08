@@ -446,3 +446,362 @@ def test_ensure_all_actions_reachable_is_a_no_op_when_nothing_missing(monkeypatc
     after = generator_module._ensure_all_actions_reachable(report.sections, synthesis)
 
     assert [s.actions for s in after] == [s.actions for s in before]
+
+
+# --- report_generator quote repair, mirroring sk_broadband's
+# _repair_failed_claim_quotes ("B안") ---
+
+
+def _repair_synthesis():
+    analysis = DocumentAnalysis(
+        doc_id="doc:cmp",
+        summary="요약",
+        evidence=[
+            "A사 요금제 가격은 월 8,900원이다.",
+            "업계 2위 사업자의 요금제는 월 9,900원이다.",
+        ],
+    )
+    return synthesize("req_repair", "general", [analysis])
+
+
+def _repair_plan(synthesis, request_id):
+    purpose = ReportPurposeClassification(
+        request_id=request_id,
+        purpose_id="current_status",
+        display_name="현황 파악",
+        recommended_sections=["market_status"],
+    )
+    return plan_report(synthesis, "external", purpose)
+
+
+def _repair_sections_payload(plan):
+    return [
+        {
+            "section_id": section_id,
+            "title": section_id,
+            "summary": "요약",
+            "key_points": [],
+            "evidence": [],
+            "risks": [],
+            "opportunities": [],
+            "actions": [],
+            "monitoring_indicators": [],
+            "confidence": "high",
+        }
+        for section_id in plan.sections
+    ]
+
+
+class _FakeChatCompletions:
+    """Records every call and answers via `responder(payload) -> repairs list`."""
+
+    def __init__(self, responder):
+        self._responder = responder
+        self.calls: list[dict] = []
+
+    def create(self, **kwargs):
+        import json as _json
+
+        self.calls.append(kwargs)
+        payload = _json.loads(kwargs["messages"][1]["content"])
+        repairs = self._responder(payload)
+        content = _json.dumps({"repairs": repairs}, ensure_ascii=False)
+        message = type("Message", (), {"content": content, "refusal": None})()
+        choice = type("Choice", (), {"message": message})()
+        return type("Response", (), {"choices": [choice]})()
+
+
+def _repairs_selecting_by_text(item_id: str, sentence_text: str):
+    """Repairs the given item to whichever candidate carries `sentence_text`,
+    and declines every other item offered."""
+
+    def responder(payload):
+        sentence_id_by_text = {s["text"]: s["sentence_id"] for s in payload["candidate_sentences"]}
+        return [
+            {
+                "item_id": item["item_id"],
+                "sentence_id": sentence_id_by_text.get(sentence_text) if item["item_id"] == item_id else None,
+            }
+            for item in payload["items_to_repair"]
+        ]
+
+    return responder
+
+
+def test_repair_revives_a_comparison_point_with_a_paraphrased_source_sentence(monkeypatch):
+    import json
+    import openai
+
+    synthesis = _repair_synthesis()
+    plan = _repair_plan(synthesis, "req_repair")
+    target_sentence = synthesis.evidence[1]
+
+    class FakeResponses:
+        def create(self, **kwargs):
+            payload = {
+                "title": "보고서",
+                "executive_summary": "요약",
+                "sections": _repair_sections_payload(plan),
+                "limitations": [],
+                "comparison_points": [
+                    {
+                        "entity": "A사", "criterion": "요금제 가격", "value": "8,900원",
+                        "level": None, "source_sentence": synthesis.evidence[0],
+                    },
+                    {
+                        "entity": "B사", "criterion": "요금제 가격", "value": "9,900원",
+                        "level": None,
+                        # Paraphrased - not a verbatim substring of the corpus,
+                        # and "B사" itself is never mentioned in the evidence
+                        # either, so this fails both legs of the corpus check.
+                        "source_sentence": "B사 요금제 가격은 9,900원이다.",
+                    },
+                ],
+            }
+            return type("Response", (), {"output_text": json.dumps(payload, ensure_ascii=False)})()
+
+    chat = _FakeChatCompletions(_repairs_selecting_by_text("c1", target_sentence))
+
+    class FakeOpenAI:
+        def __init__(self, **kwargs):
+            self.responses = FakeResponses()
+            self.chat = type("Chat", (), {"completions": chat})()
+
+    monkeypatch.setenv("TRENDSPARC_REPORT_GENERATOR_API_KEY", "test-key")
+    monkeypatch.setattr(openai, "OpenAI", FakeOpenAI)
+
+    report = generate_report("가격 비교는?", synthesis, plan, "external")
+
+    assert len(chat.calls) == 1
+    assert {point.entity for point in report.extracted_comparison_points} == {"A사", "B사"}
+
+
+def test_repair_never_receives_structurally_invalid_failures(monkeypatch):
+    import json
+    import openai
+
+    synthesis = _repair_synthesis()
+    plan = _repair_plan(synthesis, "req_repair_structural")
+
+    class FakeResponses:
+        def create(self, **kwargs):
+            payload = {
+                "title": "보고서",
+                "executive_summary": "요약",
+                "sections": _repair_sections_payload(plan),
+                "limitations": [],
+                "action_impacts": [
+                    {
+                        # Not in synthesis.recommended_actions - structural
+                        # failure, not a quote problem, so repair must never
+                        # see it.
+                        "action": "존재하지 않는 조치를 수행한다",
+                        "expected_impact": "매출 10% 증가",
+                        "impact_value": None,
+                        "impact_unit": None,
+                        "source_sentence": "관련 없는 문장",
+                    }
+                ],
+            }
+            return type("Response", (), {"output_text": json.dumps(payload, ensure_ascii=False)})()
+
+    chat = _FakeChatCompletions(lambda payload: [])
+
+    class FakeOpenAI:
+        def __init__(self, **kwargs):
+            self.responses = FakeResponses()
+            self.chat = type("Chat", (), {"completions": chat})()
+
+    monkeypatch.setenv("TRENDSPARC_REPORT_GENERATOR_API_KEY", "test-key")
+    monkeypatch.setattr(openai, "OpenAI", FakeOpenAI)
+
+    report = generate_report("무엇을 해야 하나?", synthesis, plan, "external")
+
+    assert chat.calls == []
+    assert report.action_impacts == []
+
+
+def test_repair_ignores_a_sentence_id_outside_the_offered_candidates(monkeypatch):
+    import json
+    import openai
+
+    synthesis = _repair_synthesis()
+    plan = _repair_plan(synthesis, "req_repair_offlist")
+
+    class FakeResponses:
+        def create(self, **kwargs):
+            payload = {
+                "title": "보고서",
+                "executive_summary": "요약",
+                "sections": _repair_sections_payload(plan),
+                "limitations": [],
+                "comparison_points": [
+                    {
+                        "entity": "A사", "criterion": "요금제 가격", "value": "8,900원",
+                        "level": None, "source_sentence": synthesis.evidence[0],
+                    },
+                    {
+                        "entity": "B사", "criterion": "요금제 가격", "value": "9,900원",
+                        "level": None, "source_sentence": "B사 요금제 가격은 9,900원이다.",
+                    },
+                ],
+            }
+            return type("Response", (), {"output_text": json.dumps(payload, ensure_ascii=False)})()
+
+    def responder(payload):
+        return [
+            {"item_id": item["item_id"], "sentence_id": "S999"}
+            for item in payload["items_to_repair"]
+        ]
+
+    chat = _FakeChatCompletions(responder)
+
+    class FakeOpenAI:
+        def __init__(self, **kwargs):
+            self.responses = FakeResponses()
+            self.chat = type("Chat", (), {"completions": chat})()
+
+    monkeypatch.setenv("TRENDSPARC_REPORT_GENERATOR_API_KEY", "test-key")
+    monkeypatch.setattr(openai, "OpenAI", FakeOpenAI)
+
+    report = generate_report("가격 비교는?", synthesis, plan, "external")
+
+    assert len(chat.calls) == 1
+    assert {point.entity for point in report.extracted_comparison_points} == set()
+
+
+def test_repair_api_exception_does_not_break_report_generation(monkeypatch):
+    import json
+    import openai
+
+    synthesis = _repair_synthesis()
+    plan = _repair_plan(synthesis, "req_repair_exception")
+
+    class FakeResponses:
+        def create(self, **kwargs):
+            payload = {
+                "title": "보고서",
+                "executive_summary": "요약",
+                "sections": _repair_sections_payload(plan),
+                "limitations": [],
+                "comparison_points": [
+                    {
+                        "entity": "A사", "criterion": "요금제 가격", "value": "8,900원",
+                        "level": None, "source_sentence": synthesis.evidence[0],
+                    },
+                    {
+                        "entity": "B사", "criterion": "요금제 가격", "value": "9,900원",
+                        "level": None, "source_sentence": "B사 요금제 가격은 9,900원이다.",
+                    },
+                ],
+            }
+            return type("Response", (), {"output_text": json.dumps(payload, ensure_ascii=False)})()
+
+    class RaisingCompletions:
+        def create(self, **kwargs):
+            raise RuntimeError("repair endpoint unavailable")
+
+    class FakeOpenAI:
+        def __init__(self, **kwargs):
+            self.responses = FakeResponses()
+            self.chat = type("Chat", (), {"completions": RaisingCompletions()})()
+
+    monkeypatch.setenv("TRENDSPARC_REPORT_GENERATOR_API_KEY", "test-key")
+    monkeypatch.setattr(openai, "OpenAI", FakeOpenAI)
+
+    report = generate_report("가격 비교는?", synthesis, plan, "external")
+
+    assert report.generation_mode == "openai"
+    assert {point.entity for point in report.extracted_comparison_points} == set()
+
+
+def test_repair_is_never_called_when_nothing_failed_verification(monkeypatch):
+    import json
+    import openai
+
+    synthesis = _repair_synthesis()
+    plan = _repair_plan(synthesis, "req_repair_no_failures")
+
+    class ExplodingCompletions:
+        def create(self, **kwargs):
+            raise AssertionError("repair should not be called when nothing failed verification")
+
+    class FakeResponses:
+        def create(self, **kwargs):
+            payload = {
+                "title": "보고서",
+                "executive_summary": "요약",
+                "sections": _repair_sections_payload(plan),
+                "limitations": [],
+                "comparison_points": [
+                    {
+                        "entity": "A사", "criterion": "요금제 가격", "value": "8,900원",
+                        "level": None, "source_sentence": synthesis.evidence[0],
+                    },
+                ],
+            }
+            return type("Response", (), {"output_text": json.dumps(payload, ensure_ascii=False)})()
+
+    class FakeOpenAI:
+        def __init__(self, **kwargs):
+            self.responses = FakeResponses()
+            self.chat = type("Chat", (), {"completions": ExplodingCompletions()})()
+
+    monkeypatch.setenv("TRENDSPARC_REPORT_GENERATOR_API_KEY", "test-key")
+    monkeypatch.setattr(openai, "OpenAI", FakeOpenAI)
+
+    report = generate_report("가격은?", synthesis, plan, "external")
+
+    assert report.generation_mode == "openai"
+
+
+# --- citation repair must not launder an unsupported figure --------------
+
+
+def test_a_repaired_metric_needs_its_own_number_in_the_sentence_it_cites():
+    """The default check compares a figure's digits against the digits of the
+    *whole* corpus. A repaired item passes that for free - repair substitutes
+    a sentence taken from that same corpus - so the test degenerates into
+    "the chosen sentence contains a number". Live-reproduced before the fix:
+    999만명, present nowhere in the evidence, was rejected and then accepted
+    once its source_sentence was swapped for a real sentence about 682만명."""
+    from common.contracts import TrendSynthesis
+    from core.report_generator.generator import _metric_points_with_failures
+
+    synthesis = TrendSynthesis(
+        request_id="r", sector_id="sk_broadband",
+        evidence=["2025년 2분기 IPTV 가입자는 682만명이었다."],
+    )
+    laundered = {
+        "label": "가입자", "period": "2025년", "value": 999, "unit": "만명",
+        # A real corpus sentence - just not one that states this figure.
+        "source_sentence": "2025년 2분기 IPTV 가입자는 682만명이었다.",
+    }
+
+    verified, failures = _metric_points_with_failures(
+        [laundered], synthesis, set(), value_must_be_in_own_sentence=True
+    )
+
+    assert verified == []
+    assert len(failures) == 1
+
+
+def test_a_repaired_metric_whose_figure_is_in_its_sentence_survives():
+    from common.contracts import TrendSynthesis
+    from core.report_generator.generator import _metric_points_with_failures
+
+    synthesis = TrendSynthesis(
+        request_id="r", sector_id="sk_broadband",
+        evidence=["2025년 2분기 IPTV 가입자는 682만명이었다."],
+    )
+    genuine = {
+        "label": "가입자", "period": "2025년 2분기", "value": 682, "unit": "만명",
+        "source_sentence": "2025년 2분기 IPTV 가입자는 682만명이었다.",
+    }
+
+    verified, failures = _metric_points_with_failures(
+        [genuine], synthesis, set(), value_must_be_in_own_sentence=True
+    )
+
+    assert [point.value for point in verified] == [682.0]
+    assert failures == []

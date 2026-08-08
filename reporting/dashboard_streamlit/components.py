@@ -123,22 +123,61 @@ def prefer_audience_content_raw(report: Any, field_name: str, synthesis_values: 
 
 
 def source_lookup(result: Any) -> dict[str, Any]:
-    return {source.name: source for source in (result.source_plan.planned_sources if result.source_plan else [])}
+    # registered_sources, not planned_sources: the AI search harness
+    # (sk_broadband) searches the full registry, not just the top-N
+    # select_top_sources() trims planned_sources to, so a collected
+    # document's source can legitimately sit outside that trimmed list.
+    # registered_sources is always a superset (select_top_sources only
+    # narrows planned_sources), so this is never less complete for a sector
+    # whose collector only ever searches planned_sources in the first place.
+    plan = result.source_plan
+    sources = (plan.registered_sources or plan.planned_sources) if plan else []
+    return {source.name: source for source in sources}
 
 
 def doc_lookup(result: Any) -> dict[str, Any]:
     return {analysis.doc_id: analysis for analysis in (result.document_analyses or [])}
 
 
-def evidence_url(value: str, result: Any) -> str | None:
+def item_doc_id(value: str) -> str | None:
+    """The doc_id a `[doc_id=...]`-tagged item string carries, or None."""
     match = _DOC_ID.search(value or "")
-    if not match:
+    return match.group(1) if match else None
+
+
+def evidence_url(value: str, result: Any) -> str | None:
+    doc_id = item_doc_id(value)
+    if not doc_id:
         return None
-    analysis = doc_lookup(result).get(match.group(1))
+    analysis = doc_lookup(result).get(doc_id)
     if analysis is not None and analysis.source_url:
         return analysis.source_url
     source = source_lookup(result).get(analysis.source_id) if analysis else None
     return source.url if source else None
+
+
+def uncorroborated_doc_ids(synthesis: Any) -> set[str]:
+    """doc_ids whose only backed claims are single-source.
+
+    Matching is at the doc_id level - what a rendered item's [doc_id=...] tag
+    actually carries - not at the claim-group level, since the AI's grouping
+    is topic-level and coarser than one document, and its reworded `claim`
+    text won't reliably match what's shown on screen. A doc_id that also
+    supports at least one corroborated claim is not flagged: it does have
+    cross-verified backing for something, even if not for every claim it
+    contributed.
+    """
+    corroborated_doc_ids = {
+        doc_id
+        for point in (getattr(synthesis, "corroborated_points", None) or [])
+        for doc_id in point.supporting_doc_ids
+    }
+    single_source_doc_ids = {
+        doc_id
+        for point in (getattr(synthesis, "uncorroborated_points", None) or [])
+        for doc_id in point.supporting_doc_ids
+    }
+    return single_source_doc_ids - corroborated_doc_ids
 
 
 def render_page_header(question: str, sector: str, audience: str, purpose: str) -> None:

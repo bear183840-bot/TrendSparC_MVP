@@ -159,5 +159,6 @@
   "target_analyzed_documents": 5,
   "max_analysis_recollection_attempts": 1,
   "pipeline_entrypoint": "sectors.sk_broadband.adapter",
-  "system_prompt_path": "sectors/sk_broadband/prompts/system_prompt.md"
+  "system_prompt_path": "sectors/sk_broadband/prompts/system_prompt.md",
+  "skip_source_narrowing": true
 }
