@@ -55,6 +55,7 @@ from common.block_shapes import (  # noqa: F401
     SHARE_SUM_TOLERANCE,
     grouped_bar_series,
     has_grouped_bars,
+    has_landscape,
     has_recurring_terms,
     has_share_split,
     has_status_levels,
@@ -862,6 +863,31 @@ def render_status_bar(comparison_points: list[Any]) -> None:
         for criterion, detail, level in rows
     )
     st.markdown(f'<div class="ts-status-bar">{cells}</div>', unsafe_allow_html=True)
+
+
+def render_landscape(
+    metric_points: list[Any],
+    grounded_claims: list[Any] | None = None,
+    title: str = "시장 추세 · 구성",
+) -> None:
+    """The artwork's Landscape: the trend on the left, what the total is made
+    of on the right.
+
+    Two blocks that already stand alone, placed in one card because a reader
+    comparing "which way is it going" against "what is it made of" should not
+    have to hold one in their head while scrolling to the other. Neither half
+    is derived from the other, and if either stops qualifying the card falls
+    back to whichever half still does.
+    """
+    if not has_landscape(metric_points):
+        return
+    st.markdown(f'<div class="ts-landscape-head"><b>{escape(title)}</b></div>',
+                unsafe_allow_html=True)
+    trend, split = st.columns([1.35, 1])
+    with trend:
+        render_metric_chart(metric_points, title="추세", grounded_claims=grounded_claims)
+    with split:
+        render_share_split(metric_points)
 
 
 def render_factor_list(items: list[tuple[str, str | None]]) -> None:

@@ -266,6 +266,17 @@ def has_share_split(metric_points: list[Any]) -> bool:
     return bool(share_groups(metric_points))
 
 
+def has_landscape(metric_points: list[Any]) -> bool:
+    """Whether one card can carry both halves of the artwork's Landscape:
+    how the market moved, and what it is made of.
+
+    Both halves have to stand on their own first - a trend that earns a line
+    and a split that earns a donut - because this block only places them side
+    by side. It never derives one from the other.
+    """
+    return has_timeseries(metric_points) and has_share_split(metric_points)
+
+
 def has_comparison(comparison_points: list[Any]) -> bool:
     """True only when 2+ entities share a real common criterion - two
     entities that each only state a *different* metric (no overlap) don't

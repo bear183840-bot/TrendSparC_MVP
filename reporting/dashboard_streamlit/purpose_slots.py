@@ -58,7 +58,7 @@ LAST_RESORT = "no_data"
 # is the plain bullet card every slot falls back to before "정보 없음".
 DESIGN_LIBRARY_BLOCKS: dict[str, tuple[str, ...]] = {
     "KPI Card": ("kpi_grid", "kpi_single"),
-    "Line / Area": ("chart",),
+    "Line / Area": ("chart", "landscape"),
     "Bar": ("bar", "item_bar", "grouped_bar", "metric_comparison"),
     "KPI Status Bar": ("status_bar",),
     "Share Split": ("share_split",),
@@ -125,7 +125,7 @@ _CURRENT_STATUS: tuple[Slot, ...] = (
          ("share_split", "grouped_bar", "item_bar", "metric_comparison", "table", "narrative_list"),
          ("key_metrics", "market_status"), (), optional=True),
     Slot("market", "시장 상황", "시장이 어느 방향으로 움직이는가",
-         ("chart", "bar", "item_bar", "timeline", "narrative_list"),
+         ("landscape", "chart", "bar", "item_bar", "timeline", "narrative_list"),
          ("market_status", "current_situation")),
     Slot("metrics", "지표", "확인된 수치를 제시",
          ("kpi_grid", "chart", "kpi_single", "status_bar"), ("key_metrics",)),
@@ -171,7 +171,8 @@ _ISSUE_RESPONSE: tuple[Slot, ...] = (
 
 _FUTURE_BUSINESS: tuple[Slot, ...] = (
     Slot("market_shift", "시장 변화", "시장이 어떻게 바뀌고 있는가",
-         ("chart", "bar", "item_bar", "timeline", "narrative_list"), ("trend", "market_status")),
+         ("landscape", "chart", "bar", "item_bar", "timeline", "narrative_list"),
+         ("trend", "market_status")),
     Slot("opportunity", "기회", "어디에 기회가 있는가",
          ("matrix", "bar", "item_bar", "narrative_list"), ("opportunity",)),
     # No `sections`: there is no planned section about required capability, and
@@ -243,6 +244,9 @@ def _availability() -> dict[str, Callable[[Any, list[str]], bool]]:
     it a good idea here" - that judgement is the slot's candidate order.
     """
     return {
+        # Offered ahead of `chart` wherever both fit: it is the same trend
+        # plus the composition, never a substitute for either.
+        "landscape": lambda synthesis, items: block_shapes.has_landscape(synthesis.metric_series),
         "chart": lambda synthesis, items: block_shapes.has_timeseries(synthesis.metric_series),
         # Two block ids over one renderer: `bar` is a movement between two
         # points in time, `item_bar` is a ranking across items. They read the

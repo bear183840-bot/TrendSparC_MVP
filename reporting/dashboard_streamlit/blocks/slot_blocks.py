@@ -29,7 +29,7 @@ from pydantic import BaseModel
 
 from reporting.dashboard_streamlit.blocks.base import BlockDefinition, SlotContext
 from reporting.dashboard_streamlit.blocks.registry import register
-from common.block_shapes import has_grouped_bars, has_status_levels
+from common.block_shapes import has_grouped_bars, has_landscape, has_status_levels
 from reporting.dashboard_streamlit.components import (
     action_impact_lookup,
     clean_citation,
@@ -48,6 +48,7 @@ from reporting.dashboard_streamlit.components import (
     render_grouped_bars,
     render_importance_bars,
     render_kpi_row,
+    render_landscape,
     render_metric_bar,
     render_metric_chart,
     render_metric_comparison,
@@ -82,6 +83,13 @@ def _bars(groups_of):
             return None
         return lambda: [render_metric_bar(group, synthesis.grounded_claims) for group in groups]
     return build
+
+
+def _landscape(context: SlotContext):
+    synthesis = context.synthesis
+    if not has_landscape(synthesis.metric_series):
+        return None
+    return lambda: render_landscape(synthesis.metric_series, synthesis.grounded_claims)
 
 
 def _grouped_bars(context: SlotContext):
@@ -181,6 +189,7 @@ def _action_list(context: SlotContext):
 
 
 _LIVE_BLOCKS: tuple[tuple[str, Any, str], ...] = (
+    ("landscape", _landscape, "추세선과 구성비 도넛을 한 카드에 나란히."),
     ("chart", _chart, "시점이 3개 이상인 지표의 추이선."),
     ("bar", _bars(time_bar_groups), "두 시점 사이의 변화를 막대 두 개로."),
     ("item_bar", _bars(item_bar_groups), "항목 간 순위 비교 막대."),

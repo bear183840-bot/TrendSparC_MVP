@@ -537,6 +537,8 @@ def dashboard_css(dark: bool, accent_theme: str = "orange") -> str:
       .ts-htimeline {{ flex-direction:column; }}
       .ts-htimeline-step:not(:last-child):after {{ display:none; }}
     }}
+    .ts-landscape-head {{ margin:.2rem 0 .1rem; font-size:.9rem; font-weight:700;
+      color:var(--ts-ink); }}
     .ts-status-bar {{ display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr));
       gap:1.1rem; margin-top:.65rem; padding:1rem 1.15rem; border:1px solid var(--ts-border);
       border-radius:10px; background:var(--ts-panel); }}
