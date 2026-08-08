@@ -8,12 +8,10 @@ from common.content_quality_validator import (
     extract_metric_points_from_evidence,
     filter_shared_comparison_axis,
     group_metric_points_by_label,
-    has_question_topic_overlap,
     is_duplicate_statement,
     parse_korean_amount,
     period_sort_key,
     rank_by_relevance,
-    requirement_supported_by_text,
     select_chartable_series,
 )
 
@@ -55,28 +53,6 @@ class TestRankByRelevance:
         result = rank_by_relevance(["채널 순위", "IPTV 가입자 수"], ["가입자"])
         assert set(result) == {"채널 순위", "IPTV 가입자 수"}
         assert len(result) == 2
-
-
-class TestAnswerRequirementEvidenceLink:
-    def test_parallel_segment_evidence_supports_matching_requirement(self):
-        requirement = "연령대별 광고 매체 추천"
-        claims = [
-            "10대는 틱톡과 게임 앱 광고를 활용하고 20대는 인스타그램과 유튜브 매체를 추천한다."
-        ]
-        assert requirement_supported_by_text(requirement, claims)
-
-    def test_same_company_background_does_not_satisfy_different_deliverable(self):
-        requirement = "브랜드 이미지에 적합한 광고 모델 추천"
-        claims = ["SK브로드밴드 IPTV 가입자는 전년 대비 감소했다."]
-        assert not requirement_supported_by_text(requirement, claims)
-
-    def test_metric_residue_with_no_question_topic_is_rejected(self):
-        question = "브랜드 이미지 개선을 위한 광고 매체 추천"
-        assert has_question_topic_overlap(question, "온라인 광고 비중은 60%다")
-        assert not has_question_topic_overlap(question, "폴리실리콘 가격은 15% 올랐다")
-
-    def test_short_question_is_not_overfiltered(self):
-        assert has_question_topic_overlap("실적은?", "가입자는 3% 증가했다")
 
 
 class TestClassifyMetricShape:

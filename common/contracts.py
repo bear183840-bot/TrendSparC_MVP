@@ -59,13 +59,6 @@ class EntityExtractionResult(BaseModel):
     # Evidence categories required to answer the question. These are shared
     # across sectors and matched against registry-owned source capabilities.
     information_needs: list[str] = Field(default_factory=list)
-    # Concrete deliverables explicitly requested by the question.  Unlike
-    # ``information_needs`` (broad registry/source categories), these retain
-    # the user's own analytical axes all the way through collection and
-    # analysis: e.g. a comparison AND a recommendation remain two separately
-    # auditable requirements.  They are topic-agnostic free text because the
-    # set of possible business questions is open-ended.
-    answer_requirements: list[str] = Field(default_factory=list)
     # Conversational questions do not enter the report pipeline. Report-worthy
     # questions without an SK-sector match continue through the general route.
     response_mode: Optional[Literal["report", "direct_answer"]] = None
@@ -452,12 +445,6 @@ class ComparisonPoint(BaseModel):
     criterion: str
     value: str
     level: Optional[Literal["low", "medium", "high"]] = None
-    # True only when deterministic post-processing recognized 3+ verified
-    # claims from one document as a repeated subject × shared-criterion list.
-    # The value stays the original claim verbatim; no relationship or score is
-    # inferred.  This flag lets synthesis accept a factor/key-point claim as
-    # provenance without weakening the ordinary comparison-claim contract.
-    derived_from_parallel_claim: bool = False
     comparison_id: Optional[str] = None
     evidence_claim_id: Optional[str] = None
     evidence_synthesis_claim_id: Optional[str] = None

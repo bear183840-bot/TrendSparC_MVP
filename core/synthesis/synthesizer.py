@@ -20,7 +20,6 @@ from common.contracts import (
     TrendSynthesis,
 )
 from core.sector_router.affiliates import drop_other_affiliates_metrics
-from common.metric_quality import display_metric_points
 
 
 def _append_text(highlights: list[str], label: str, value: str | None, doc_id: str) -> None:
@@ -162,19 +161,10 @@ def synthesize(
                 for claim in analysis.grounded_claims
                 if claim.claim_type == "comparison"
             }
-            parallel_claim_ids = {
-                claim.claim_id
-                for claim in analysis.grounded_claims
-                if claim.claim_type in {"factor", "key_point"}
-            }
             analysis_comparisons = [
                 point
                 for point in analysis.comparison_points
                 if point.evidence_claim_id in comparison_claim_ids
-                or (
-                    point.derived_from_parallel_claim
-                    and point.evidence_claim_id in parallel_claim_ids
-                )
             ]
         else:
             # Backward-compatible path for sector analyzers that have not yet
@@ -289,10 +279,6 @@ def synthesize(
     # than showing the identical number twice in one KPI row/chart.
     metric_series = dedupe_structured_across_sections([metric_series])[0]
     metric_series = drop_other_affiliates_metrics(metric_series, sector_id)
-    # Regex recovery reads verified evidence, but evidence can contain copied
-    # navigation URLs or a whole prose fragment before the number. Keep those
-    # claims for audit while excluding only their broken chart dimensions.
-    metric_series = display_metric_points(metric_series)
     conclusions = [
         SynthesisConclusion(
             conclusion_id=f"rule:{claim.synthesis_claim_id}",

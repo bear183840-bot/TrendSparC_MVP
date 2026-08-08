@@ -102,21 +102,10 @@ def leading_subject_kind(text: str) -> EntityKind:
     fragments, English, a bare noun phrase), which is the same span a reader
     would take as the subject.
     """
-    return entity_kind(leading_subject(text) or "")
-
-
-def leading_subject(text: str) -> str | None:
-    """The explicit opening subject/topic, without its Korean particle."""
-    stripped = (text or "").strip()
-    # Remove a real list marker (``1. ``, ``2) ``, ``· ``), never bare
-    # leading digits: those are the meaning-bearing part of subjects such as
-    # 10대, 1인 가구, 5G, and 2025년.
-    stripped = re.sub(r"^(?:\d{1,3}[.)]\s+|[·•\-–—]\s+)", "", stripped)
+    stripped = (text or "").strip().lstrip("0123456789.·-​ ")
     match = _SUBJECT_PARTICLE_RE.match(stripped)
-    if not match:
-        return None
-    subject = strip_particle(match.group(1).strip())
-    return subject or None
+    head = match.group(1) if match else " ".join(stripped.split()[:2])
+    return entity_kind(strip_particle(head.strip()))
 
 
 def is_demographic(entity: str) -> bool:
@@ -377,66 +366,6 @@ COMPARISON_COMPLETENESS_INSTRUCTION = (
     "가장 흔합니다. 표가 아니라 산문 속 비교(\"A는 31.7%로 B(25.6%)를 앞섰다\")도 동일하게 "
     "적용됩니다."
 )
-
-# Repeated subject × criterion structures are comparisons even when the
-# source never says that one subject wins.  Flattening these into prose is
-# irreversible: later stages cannot honestly reconstruct which value belonged
-# to which age, company, country, product, platform, or other subject.
-PARALLEL_STRUCTURE_COMPLETENESS_INSTRUCTION = (
-    "명시적인 우열 표현이 없어도 같은 문장·표·목록이 여러 주체(연령대, 지역, "
-    "기업, 국가, 제품, 플랫폼 등)를 동일한 기준으로 나란히 설명하면 병렬 구조 "
-    "전체를 comparison claim과 comparison_points로 보존하라. entity는 주체, "
-    "criterion은 공통 질문/속성, value는 원문이 말한 값이나 설명이다. 일부 항목만 "
-    "골라내지 마라."
-)
-
-
-_REQUIREMENT_STOPWORDS = {
-    "관련", "근거", "대한", "위한", "통한", "질문", "정보", "자료", "분석",
-    "확인", "제시", "파악", "해당", "그리고", "또는", "with", "about", "for",
-    "the", "and", "evidence", "analysis",
-}
-
-
-def requirement_supported_by_text(requirement: str, texts: list[str]) -> bool:
-    """Conservative lexical proof that evidence addresses a concrete ask.
-
-    The analyzer still makes the semantic judgment. This second check only
-    prevents a document from claiming every requirement merely because it is
-    about the same company or industry. No topic or sector vocabulary is used.
-    """
-    tokens = []
-    for raw in re.findall(r"[가-힣A-Za-z0-9]+", requirement.casefold()):
-        token = strip_particle(raw)
-        if len(token) >= 2 and token not in _REQUIREMENT_STOPWORDS:
-            tokens.append(token)
-    tokens = list(dict.fromkeys(tokens))
-    if not tokens:
-        return False
-    corpus = " ".join(texts).casefold()
-    matched = sum(token in corpus for token in tokens)
-    threshold = len(tokens) if len(tokens) <= 2 else max(2, (len(tokens) + 1) // 2)
-    return matched >= threshold
-
-
-def has_question_topic_overlap(question: str, text: str) -> bool:
-    """Whether a structured fact shares at least one substantive ask token.
-
-    This is a narrow garbage guard, not a relevance ranker. It is used only
-    after an analyzer already selected a fact, to remove embedded related-link
-    residue that has zero lexical connection to a sufficiently specific
-    question. Short/vague questions are left untouched.
-    """
-    tokens = []
-    for raw in re.findall(r"[가-힣A-Za-z0-9]+", question.casefold()):
-        token = strip_particle(raw)
-        if len(token) >= 2 and token not in _REQUIREMENT_STOPWORDS:
-            tokens.append(token)
-    tokens = list(dict.fromkeys(tokens))
-    if len(tokens) < 3:
-        return True
-    corpus = text.casefold()
-    return any(token in corpus for token in tokens)
 
 
 def rank_by_relevance(items: list[str], question_terms: list[str]) -> list[str]:

@@ -27,7 +27,6 @@ def _make_response(
     perspective="company_update",
     sector_id="general",
     routing_confidence="medium",
-    answer_requirements=None,
 ):
     message = types.SimpleNamespace(
         content=json.dumps(
@@ -39,7 +38,6 @@ def _make_response(
                 "keywords": keywords,
                 "sector_id": sector_id,
                 "routing_confidence": routing_confidence,
-                "answer_requirements": answer_requirements or ["질문에 직접 답하는 근거"],
             }
         ),
         refusal=refusal,
@@ -103,7 +101,6 @@ def test_uses_ai_output_when_api_key_configured(monkeypatch):
     assert result.keywords == ["메모리 시장", "수요 전망"]
     assert result.sector_id == "general"
     assert result.routing_confidence == "medium"
-    assert result.answer_requirements == ["질문에 직접 답하는 근거"]
     assert result.extraction_method == "ai"
 
 

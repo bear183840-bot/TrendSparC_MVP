@@ -34,39 +34,6 @@ def _search_data(results):
     return types.SimpleNamespace(web=results)
 
 
-def test_parallel_grounded_claims_recover_a_complete_comparison_structure():
-    claims = [
-        {
-            "claim_id": f"c{index}",
-            "claim_type": "factor",
-            "claim": sentence,
-            "evidence_quote": sentence,
-        }
-        for index, sentence in enumerate([
-            "10대는 짧은 영상 광고로 참여를 유도한다.",
-            "20대는 소셜 영상 광고로 신뢰를 높인다.",
-            "30대는 검색 광고로 지역 노출을 높인다.",
-            "40대는 뉴스 광고로 관심사를 공략한다.",
-        ], 1)
-    ]
-
-    points = analyzer_module._parallel_claim_comparison_points(claims)
-
-    assert [point["entity"] for point in points] == ["10대", "20대", "30대", "40대"]
-    assert len({point["criterion"] for point in points}) == 1
-    assert all(point["derived_from_parallel_claim"] for point in points)
-    assert [point["value"] for point in points] == [claim["claim"] for claim in claims]
-
-
-def test_parallel_recovery_refuses_unrelated_subject_sentences():
-    claims = [
-        {"claim_id": "a", "claim_type": "key_point", "claim": "A사는 가입자가 늘었다."},
-        {"claim_id": "b", "claim_type": "key_point", "claim": "B사는 공장을 건설했다."},
-        {"claim_id": "c", "claim_type": "key_point", "claim": "C사는 규제를 검토했다."},
-    ]
-    assert analyzer_module._parallel_claim_comparison_points(claims) == []
-
-
 class _FastClient:
     def __init__(self, results):
         self._results = results

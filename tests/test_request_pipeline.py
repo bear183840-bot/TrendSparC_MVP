@@ -38,11 +38,7 @@ def test_dry_run_passes_every_stage_with_valid_contracts():
     assert result.source_plan.search_context.question == request.question
     assert result.source_plan.search_context.perspective == result.entities.perspective
     assert result.source_plan.search_context.report_purpose_id == "future_business"
-    assert result.source_plan.search_context.information_needs == list(dict.fromkeys([
-        *result.entities.information_needs,
-        *result.entities.answer_requirements,
-    ]))
-    assert result.entities.answer_requirements
+    assert result.source_plan.search_context.information_needs == result.entities.information_needs
     assert result.source_plan.search_context.suggested_terms == result.source_plan.question_keywords
     assert result.source_plan.search_context.country_code == "KR"
     assert result.synthesis is not None
@@ -291,12 +287,11 @@ def test_harness_collection_contract_requires_five_validated_documents(monkeypat
         sk_broadband_analyzer,
         "analyze",
         lambda documents, question, information_needs=None, target_block_shapes=None: [
-                DocumentAnalysis(
-                    doc_id=document.doc_id,
-                    relevant_to_question=True,
-                    usable_for_synthesis=True,
-                    covered_information_needs=list(information_needs or []),
-                )
+            DocumentAnalysis(
+                doc_id=document.doc_id,
+                relevant_to_question=True,
+                usable_for_synthesis=True,
+            )
             for document in documents
         ],
     )
@@ -371,8 +366,7 @@ def test_pipeline_recollects_when_analyzer_leaves_fewer_than_profile_minimum(mon
 
     assert result.halted_at_stage is None
     assert len(collector_plans) == 2
-    assert analyzer_needs[0] == analyzer_needs[1]
-    assert analyzer_needs[0] == collector_plans[0].search_context.information_needs
+    assert analyzer_needs[0] == analyzer_needs[1] == collector_plans[0].information_needs
     assert set(collector_plans[1].search_context.excluded_urls) == {
         "https://one.example/a",
         "https://bad.example/a",

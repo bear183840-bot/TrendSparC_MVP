@@ -16,13 +16,8 @@ from common.ai_usage import emit_ai_usage
 from common.ai_client import openai_client_kwargs
 from common.content_quality_validator import (
     COMPARISON_COMPLETENESS_INSTRUCTION,
-    PARALLEL_STRUCTURE_COMPLETENESS_INSTRUCTION,
     SWOT_COMPLETENESS_INSTRUCTION,
     TABLE_COMPLETENESS_INSTRUCTION,
-    requirement_supported_by_text,
-    entity_kind,
-    has_question_topic_overlap,
-    leading_subject,
     strip_particle,
 )
 from common.contracts import DocumentAnalysis, SourceDocument
@@ -52,11 +47,6 @@ _DENSE_REPAIR_MAX_TOKENS = 2600
 _DENSE_REPAIR_CLAIM_COUNT = 8
 _MAX_PDF_CHUNKS_ENV_VAR = "TRENDSPARC_SK_BROADBAND_ANALYZER_MAX_PDF_CHUNKS"
 _STAGE = "sectors.sk_broadband.adapter.analyzer"
-_BROAD_INFORMATION_NEEDS = {
-    "financial_performance", "customer_market", "product_technology",
-    "operations_supply", "strategy_investment", "competition",
-    "regulation_risk", "user_sentiment",
-}
 
 _SECTOR_ROOT = Path(__file__).resolve().parent.parent.parent
 _PROJECT_ROOT = _SECTOR_ROOT.parent.parent
@@ -954,7 +944,7 @@ def _verified_metric_points(
 
 _GROUNDED_METRIC_RE = re.compile(
     r"(?P<value>\d[\d,]*(?:\.\d+)?)\s*"
-    r"(?P<unit>%p|%|퍼센트포인트|퍼센트|조\s*원|억\s*원|만(?:\s*명)?|명|건|개|분|시간|배|점|"
+    r"(?P<unit>%p|%|퍼센트포인트|퍼센트|조\s*원|억\s*원|만\s*명|명|건|개|분|시간|배|점|"
     r"hours?|minutes?|people|persons?|respondents?|users?|services?|items?)",
     re.IGNORECASE,
 )
@@ -1003,8 +993,6 @@ def _canonical_recovered_unit(unit: str) -> str:
     if lowered == "퍼센트포인트":
         return "%p"
     if lowered == "만명":
-        return "만 명"
-    if lowered == "만":
         return "만 명"
     if lowered.startswith("hour"):
         return "시간"
@@ -1109,12 +1097,6 @@ def _recovered_metric_points(grounded_claims: list[dict]) -> list[dict]:
         last_label: str | None = None
         for index, match in enumerate(matches):
             unit_text = match.group("unit").casefold()
-            # ``680만3000명`` is one Korean amount.  The regex also sees the
-            # trailing ``3000명``; treating that suffix as a separate metric
-            # produced false 3,000-person KPIs.  Keep the leading 680만 point
-            # and skip only the embedded suffix.
-            if unit_text == "명" and re.search(r"\d[\d,]*만\s*$", quote[:match.start()]):
-                continue
             next_match = matches[index + 1] if index + 1 < len(matches) else None
             if (
                 unit_text.startswith(("hour", "시간"))
@@ -1237,75 +1219,6 @@ def _verified_comparison_points(data: dict, grounded_claims: list[dict]) -> list
     ]
 
 
-_PARALLEL_TOKEN_STOPWORDS = {
-    "통해", "위해", "대한", "활용", "중심", "관련", "따라", "동시에",
-    "있다", "했다", "한다", "하세요", "나타났다", "높다", "낮다",
-}
-
-
-def _parallel_claim_comparison_points(grounded_claims: list[dict]) -> list[dict]:
-    """Recover an explicit repeated-subject list Solar left as prose claims.
-
-    Three subjects and one shared content token are required.  Every table
-    value remains the verified claim verbatim, and every point references
-    that claim, so this creates structure but never a new business fact.
-    """
-    candidates: list[tuple[str, dict, set[str]]] = []
-    for claim in grounded_claims:
-        if claim.get("claim_type") not in {"factor", "key_point"}:
-            continue
-        text = str(claim.get("claim") or "").strip()
-        subject = leading_subject(text)
-        if not subject:
-            continue
-        tokens = {
-            strip_particle(token.casefold())
-            for token in re.findall(r"[가-힣A-Za-z0-9]+", text)
-            if len(strip_particle(token.casefold())) >= 2
-            and strip_particle(token.casefold()) not in _PARALLEL_TOKEN_STOPWORDS
-        }
-        tokens.discard(subject.casefold())
-        candidates.append((subject, claim, tokens))
-
-    # Keep only one coherent entity kind.  A document listing several ages
-    # and several companies contains two different comparisons, not one table.
-    by_kind: dict[str, list[tuple[str, dict, set[str]]]] = {}
-    for item in candidates:
-        by_kind.setdefault(entity_kind(item[0]), []).append(item)
-
-    recovered: list[dict] = []
-    for kind, items in by_kind.items():
-        distinct = list(dict.fromkeys(subject for subject, _, _ in items))
-        if len(distinct) < 3:
-            continue
-        # Repeated claims about the same subject are ordinary narrative depth,
-        # not rows in a parallel list.  A real list gives each row its own
-        # subject once.
-        if len(distinct) != len(items):
-            continue
-        shared = set.intersection(*(tokens for _, _, tokens in items)) if items else set()
-        shared -= _PARALLEL_TOKEN_STOPWORDS
-        if not shared:
-            continue
-        # Named entities are the broad fallback kind (companies, people,
-        # products, dates). Require two shared content terms before treating
-        # them as a comparison; demographic kinds are already precise enough
-        # that one shared criterion is sufficient.
-        if kind == "entity" and len(shared) < 2:
-            continue
-        criterion = " · ".join(sorted(shared, key=lambda value: (len(value), value))[:3])
-        for subject, claim, _ in items:
-            recovered.append({
-                "entity": subject,
-                "criterion": criterion,
-                "value": claim["claim"],
-                "level": None,
-                "derived_from_parallel_claim": True,
-                "evidence_claim_id": claim["claim_id"],
-            })
-    return recovered
-
-
 def _claim_texts(grounded_claims: list[dict], claim_type: str) -> list[str]:
     return [claim["claim"] for claim in grounded_claims if claim["claim_type"] == claim_type]
 
@@ -1406,7 +1319,6 @@ def _analyze_document(
                 "share_of는 원문이 하나의 전체와 그 구성요소를 명시한 경우에만 그 전체 이름으로 채워라. "
                 "여러 기업·국가·기술을 공통 기준으로 비교한 자료는 entity와 criterion을 유지해 "
                 "항목별 comparison_points로 분리하라. "
-                f"{PARALLEL_STRUCTURE_COMPLETENESS_INSTRUCTION} "
                 f"{SWOT_COMPLETENESS_INSTRUCTION} "
                 f"{COMPARISON_COMPLETENESS_INSTRUCTION} "
                 f"{TABLE_COMPLETENESS_INSTRUCTION} "
@@ -1417,9 +1329,7 @@ def _analyze_document(
                 "evidence_quote는 반드시 입력 document.evidence_passages 중 하나에서 짧게 그대로 "
                 "복사하고 그 passage_id를 evidence_passage_id에 기록하라. "
                 "블록에 필요한 서로 다른 근거는 임의 개수 제한 없이 보존하라. "
-                "covered_information_needs는 입력 목록에 있는 문자열만 그대로 선택하되, 해당 항목을 "
-                "직접 뒷받침하는 grounded_claim을 실제로 추출한 경우에만 선택하라. 업종이나 회사가 "
-                "같다는 이유만으로 질문의 구체 요구사항을 충족했다고 표시하지 마라."
+                "covered_information_needs는 입력 목록에 있는 문자열만 그대로 선택하라."
             ),
         },
         ensure_ascii=False,
@@ -1511,18 +1421,8 @@ def _analyze_document(
             usable_for_synthesis = True
         requested_needs = list(dict.fromkeys(information_needs))
         reported_covered = set(data.get("covered_information_needs", []))
-        claim_texts_for_coverage = [
-            text
-            for claim in grounded_claims
-            for text in (claim.get("claim", ""), claim.get("evidence_quote", ""))
-            if text
-        ]
         covered_information_needs = [
-            need for need in requested_needs
-            if need in reported_covered and (
-                need in _BROAD_INFORMATION_NEEDS
-                or requirement_supported_by_text(need, claim_texts_for_coverage)
-            )
+            need for need in requested_needs if need in reported_covered
         ] if grounded_claims else []
         missing_information_needs = [
             need for need in requested_needs if need not in covered_information_needs
@@ -1536,18 +1436,7 @@ def _analyze_document(
                 _recovered_metric_points(grounded_claims),
             )
         )
-        metric_points = [
-            point for point in metric_points
-            if has_question_topic_overlap(
-                question,
-                " ".join(str(point.get(field) or "") for field in (
-                    "label", "subject", "evidence_quote",
-                )),
-            )
-        ]
         comparison_points = _verified_comparison_points(data, grounded_claims)
-        if not comparison_points:
-            comparison_points = _parallel_claim_comparison_points(grounded_claims)
         emit_ai_usage(
             stage=_STAGE,
             model=_model(),
