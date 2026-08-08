@@ -134,7 +134,16 @@ def plan_block_priorities(request_id: str, purpose_id: str) -> BlockPriorityPlan
                 slot_id=slot.slot_id,
                 title=slot.title,
                 priority_block_types=list(slot.candidates),
-                required_data_hint=" / ".join(_hint_for(b) for b in fresh) if included else "",
+                # Carry the actual block id with its contract.  A prose-only
+                # hint tells a collector what to look for, but leaves the
+                # analyzer guessing whether the same figures are meant for a
+                # grouped bar, a share split, or another compatible shape.
+                # This stays question-agnostic: the ids come from the
+                # purpose slot table, never from words in the question.
+                required_data_hint=" / ".join(
+                    f"block_type={block_type}; required_data={_hint_for(block_type)}"
+                    for block_type in fresh
+                ) if included else "",
                 included=included,
             )
         )
@@ -149,7 +158,7 @@ def target_block_shapes(plan: BlockPriorityPlan | None) -> list[str]:
     if plan is None:
         return []
     return [
-        f"{slot.title}: {slot.required_data_hint}"
+        f"slot_id={slot.slot_id}; title={slot.title}; {slot.required_data_hint}"
         for slot in plan.slots
         if slot.included and slot.required_data_hint
     ]

@@ -161,9 +161,10 @@ def _share_split(context: SlotContext):
 
 
 def _factor_list(context: SlotContext):
-    # Every item, not the summary card's first four: a question asking which
-    # factors is asking for the set.
-    rows = [(value, evidence_url(value, context.result)) for value in context.items[:8]]
+    # Keep the complete grounded set.  Source/analyzer/synthesis all preserve
+    # these factors, so imposing a new display-layer cap here would silently
+    # discard information precisely while building the final block.
+    rows = [(value, evidence_url(value, context.result)) for value in context.items]
     return (lambda: render_factor_list(rows)) if rows else None
 
 

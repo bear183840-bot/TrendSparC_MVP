@@ -104,6 +104,16 @@ def test_a_short_list_stays_prose_rather_than_claiming_a_card():
     assert by_id["factors"].block_type == "narrative_list"
 
 
+def test_factor_claims_reach_the_factor_block_without_audience_item_limits():
+    factors = [f"근거로 확인된 요인 {index}" for index in range(1, 7)]
+    synthesis = _synthesis(factors=factors)
+
+    by_id = {slot.slot.slot_id: slot for slot in resolve_slots("current_status", synthesis, None)}
+
+    assert by_id["factors"].block_type == "factor_list"
+    assert by_id["factors"].items == factors
+
+
 def test_the_factor_card_keeps_every_item_not_the_first_four(monkeypatch):
     from reporting.dashboard_streamlit import components
 
@@ -115,6 +125,28 @@ def test_the_factor_card_keeps_every_item_not_the_first_four(monkeypatch):
 
     assert "요인 6" in body
     assert "순서는 우열이 아닙니다" in body
+
+
+def test_factor_slot_renderer_does_not_reintroduce_a_display_cap(monkeypatch):
+    from reporting.dashboard_streamlit.blocks import slot_blocks
+
+    captured: list[list[tuple[str, str | None]]] = []
+    monkeypatch.setattr(slot_blocks, "render_factor_list", lambda rows: captured.append(rows))
+    synthesis = _synthesis(factors=[f"요인 {index}" for index in range(1, 13)])
+    context = slot_blocks.SlotContext(
+        result=type("Result", (), {"synthesis": synthesis})(),
+        synthesis=synthesis,
+        items=synthesis.factors,
+        risks=[],
+        opportunities=[],
+        strengths=[],
+        weaknesses=[],
+    )
+
+    renderer = slot_blocks._factor_list(context)
+    assert renderer is not None
+    renderer()
+    assert [value for value, _ in captured[0]] == synthesis.factors
 
 
 def test_the_new_slots_are_all_optional():

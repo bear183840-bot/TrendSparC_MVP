@@ -1316,6 +1316,9 @@ def test_broadband_analyzer_uses_structured_schema(monkeypatch):
     assert result[0].recommended_actions == ["Review: 경쟁사 OTT 번들링 전략 비교"]
     schema = fake_openai.chat.completions.last_kwargs["response_format"]["json_schema"]["schema"]
     assert schema["additionalProperties"] is False
+    metric_schema = schema["properties"]["metric_points"]["items"]
+    assert {"subject", "share_of", "is_forecast"} <= set(metric_schema["properties"])
+    assert {"subject", "share_of", "is_forecast"} <= set(metric_schema["required"])
     assert "relevant_to_question" not in schema["properties"]
     assert "risk" not in schema["properties"]
     assert "recommended_actions" not in schema["properties"]
@@ -1326,6 +1329,25 @@ def test_broadband_analyzer_uses_structured_schema(monkeypatch):
     ]
     assert "content" not in user_payload["document"]
     assert user_payload["document"]["evidence_passages"][0]["passage_id"] == "P001"
+
+
+def test_broadband_analyzer_uses_compact_stage_specific_prompt():
+    prompt = analyzer_module._load_system_prompt()
+
+    assert len(prompt) < 5_000
+    assert "You are not writing" in prompt
+    assert "audience/profiles" not in prompt
+    assert "SK Broadband analyzer scope" in prompt
+
+
+def test_broadband_analyzer_only_removes_unmistakable_web_chrome():
+    article_paragraphs = [f"검증 가능한 본문 문단 {index}" for index in range(20)]
+    content = "\n\n".join(article_paragraphs) + "\n\n많이 본 뉴스\n\n추천 목록"
+
+    cleaned = analyzer_module._clean_analysis_content(content)
+
+    assert all(paragraph in cleaned for paragraph in article_paragraphs)
+    assert "추천 목록" not in cleaned
 
 
 def test_broadband_analyzer_chunks_any_long_pdf_and_merges_one_document(monkeypatch):
@@ -1399,6 +1421,41 @@ def test_broadband_analyzer_chunks_any_long_pdf_and_merges_one_document(monkeypa
     assert results[0].metric_points[0].evidence_claim_id == "pdf2:c1"
     assert results[0].metric_points[0].evidence_quote == later_quote
     assert results[0].source_url == document.url
+
+
+def test_broadband_analyzer_chunks_long_web_documents_without_dropping_late_body(monkeypatch):
+    monkeypatch.setenv("TRENDSPARC_SK_BROADBAND_ANALYZER_API_KEY", "test-key")
+    early_quote = "첫 번째 본문 근거가 있다."
+    late_quote = "문서 후반부에도 별개의 핵심 요인이 있다."
+    document = SourceDocument(
+        doc_id="web:long",
+        source_id="분석 보고서",
+        title="긴 분석 본문",
+        url="https://example.com/long",
+        content=early_quote + ("가" * 11_900) + "\n\n" + late_quote + ("나" * 1_000),
+        media_type="text/html",
+        reliability_tier="analyst_media",
+    )
+    first_response = _make_response(grounded_claims=[{
+        "claim_id": "c1", "claim_type": "key_point", "claim": early_quote,
+        "evidence_quote": early_quote, "evidence_location": "본문 앞부분",
+        "as_of_date": None, "confidence": "high",
+    }])
+    second_response = _make_response(grounded_claims=[{
+        "claim_id": "c1", "claim_type": "factor", "claim": late_quote,
+        "evidence_quote": late_quote, "evidence_location": "본문 후반부",
+        "as_of_date": None, "confidence": "high",
+    }])
+    fake_openai = _SequenceFakeOpenAI([first_response, second_response])
+    monkeypatch.setattr(analyzer_module, "OpenAI", lambda api_key: fake_openai)
+    monkeypatch.setattr(analyzer_module, "_load_system_prompt", lambda: "system prompt")
+
+    result = analyze([document], "수집 문서의 핵심 근거를 구조화하라")[0]
+
+    assert len(fake_openai.chat.completions.calls) == 2
+    assert [claim.claim_id for claim in result.grounded_claims] == ["part1:c1", "part2:c1"]
+    assert result.factors == [late_quote]
+    assert result.grounded_claims[1].evidence_location.startswith("문서 청크 2/2")
 
 
 def test_broadband_analyzer_rejects_claim_quote_not_found_in_source(monkeypatch):
@@ -1581,16 +1638,22 @@ def test_broadband_analyzer_keeps_only_metrics_found_in_source(monkeypatch):
         metric_points=[
             {
                 "label": "IPTV 가입자",
+                "subject": "IPTV",
                 "period": "2025년",
                 "value": 100,
                 "unit": "만 명",
+                "is_forecast": False,
+                "share_of": None,
                 "evidence_claim_id": "metric1",
             },
             {
                 "label": "매출",
+                "subject": None,
                 "period": "2024년",
                 "value": 999,
                 "unit": "억원",
+                "is_forecast": False,
+                "share_of": None,
                 "evidence_claim_id": "metric1",
             },
         ]
@@ -1604,6 +1667,7 @@ def test_broadband_analyzer_keeps_only_metrics_found_in_source(monkeypatch):
     assert len(result.metric_points) == 1
     assert result.metric_points[0].period == "2025년"
     assert result.metric_points[0].value == 100
+    assert result.metric_points[0].subject == "IPTV"
     assert result.metric_points[0].evidence_claim_id == "metric1"
     assert result.metric_points[0].evidence_quote == "2025년 IPTV 가입자는 100만 명이다."
 

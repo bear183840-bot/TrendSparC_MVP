@@ -27,6 +27,25 @@ _QUARTER_RE = re.compile(r"([1-4])\s*(?:Q|분기)", re.I)
 _TIMELINE_DATE_RE = re.compile(r"(20\d{2}\s*년(?:\s*\d{1,2}\s*월)?|[1-4]\s*분기|\d{1,2}\s*월\s*\d{1,2}\s*일)")
 
 
+# Korean particles glue onto the noun, so "근거를" and "근거가" are different
+# strings for any literal match. Trimming a trailing particle is not
+# morphology - it is the one rule that stops the same noun being read as two
+# words - so it only applies when a real stem is left behind.
+_PARTICLES = ("으로서", "으로써", "에서는", "에게서", "으로", "에서", "에게", "부터",
+              "까지", "이라", "라는", "이나", "과의", "와의", "의", "은", "는", "이",
+              "가", "을", "를", "과", "와", "에", "도", "로", "만", "보다")
+
+
+def strip_particle(token: str) -> str:
+    """`token` without its trailing Korean particle, where one is attached."""
+    if not re.fullmatch(r"[가-힣]+", token):
+        return token
+    for particle in _PARTICLES:
+        if token.endswith(particle) and len(token) - len(particle) >= 2:
+            return token[: -len(particle)]
+    return token
+
+
 def dated_items(items: list[str]) -> list[str]:
     """Items that contain a concrete date/period marker (year, quarter, or
     month-day) - the shared way to tell genuinely time-anchored content
@@ -234,6 +253,19 @@ SWOT_COMPLETENESS_INSTRUCTION = (
 # "비교 서술이 있으면 추출하라". Live-observed on "TV는 31.7%를 기록해
 # 유튜브(25.6%)를 앞서며 1위" - only 25.6% was captured and the 1st-place
 # figure the sentence was actually about was dropped.
+# A table is not a fact; it is many facts printed together. Live-observed
+# twice: a results table laid out as 3Q25/3Q24/2Q25 columns came back as one
+# representative figure, so the three-period trend it described could never be
+# charted, and a per-age list arrived as a single summary sentence. The loss
+# happens at extraction, where no later stage can recover it - synthesis and
+# the report writer can only pass along what the analyzer structured.
+TABLE_COMPLETENESS_INSTRUCTION = (
+    "실적표·통계표처럼 같은 항목이 여러 시점 컬럼으로 나란히 나오면 한 시점만 뽑지 말고, "
+    "같은 label로 표에 있는 시점 수만큼 별도의 metric_point를 전부 만들어라. "
+    "연령대별·연도별·기업별·플랫폼별로 나열된 수치나 순위도 대표값 하나로 요약하지 말고 "
+    "각 행·항목을 개별 metric_point 또는 comparison_point로 전부 분해하라."
+)
+
 COMPARISON_COMPLETENESS_INSTRUCTION = (
     "비교 문장에 여러 대상이 등장하면 언급된 대상을 하나도 빠뜨리지 말고 전부 "
     "comparison_points로 만드세요. 한 문장이 A와 B를 비교하면 A와 B 둘 다 별도 항목입니다. "

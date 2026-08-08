@@ -26,6 +26,7 @@ from common.content_quality_validator import (
     group_metric_points_by_label,
     is_duplicate_statement,
     is_time_period,
+    strip_particle,
     period_sort_key,
 )
 
@@ -625,25 +626,6 @@ _TERM_STOPWORDS = frozenset({
     "하지만", "또한", "특히", "현재", "최근", "계속", "다시", "모두", "각각", "이러한",
 })
 _TERM_RE = re.compile(r"[가-힣]{2,}|[A-Za-z]{3,}")
-# Korean particles glue onto the noun, so a plain word split reads "요금" and
-# "요금과" as two different terms and neither reaches the two-document
-# threshold. Trimming a trailing particle is not morphology - it is the one
-# rule that stops the same noun being counted twice - so it only applies when
-# a real stem is left behind.
-_PARTICLES = ("으로서", "으로써", "에서는", "에게서", "으로", "에서", "에게", "부터",
-              "까지", "이라", "라는", "이나", "과의", "와의", "의", "은", "는", "이",
-              "가", "을", "를", "과", "와", "에", "도", "로", "만", "보다")
-
-
-def _strip_particle(token: str) -> str:
-    if not re.fullmatch(r"[가-힣]+", token):
-        return token
-    for particle in _PARTICLES:
-        if token.endswith(particle) and len(token) - len(particle) >= 2:
-            return token[: -len(particle)]
-    return token
-
-
 def recurring_terms(
     grounded_claims: list[Any], min_documents: int = 2, limit: int = 8
 ) -> list[tuple[str, int, Any]]:
@@ -667,7 +649,7 @@ def recurring_terms(
         text = f"{getattr(claim, 'claim', '')} {getattr(claim, 'evidence_quote', '')}"
         for term in {
             stem for token in _TERM_RE.findall(text)
-            if (stem := _strip_particle(token)) not in _TERM_STOPWORDS and len(stem) >= 2
+            if (stem := strip_particle(token)) not in _TERM_STOPWORDS and len(stem) >= 2
         }:
             docs_by_term.setdefault(term, set()).add(doc_id)
             claim_by_term.setdefault(term, claim)

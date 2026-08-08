@@ -146,8 +146,8 @@ _CURRENT_STATUS: tuple[Slot, ...] = (
     # unordered one where the analyzer managed to score it.
     Slot("factors", "요인", "무엇이 그것을 좌우하는가",
          ("driver_bars", "factor_list", "narrative_list"),
-         ("current_situation", "market_status"),
-         ("risks", "weaknesses", "opportunities"), optional=True),
+         (),
+         ("factors", "risks", "weaknesses", "opportunities"), optional=True),
     Slot("keywords", "반복 언급", "여러 출처가 공통으로 짚은 표현",
          ("recurring_terms",), (), (), optional=True),
     # Optional because 현황파악 is a "what is happening" question. Four of the

@@ -123,7 +123,7 @@ def _run_from_fixture(args: argparse.Namespace):
 def _resume_from_saved_run(args: argparse.Namespace):
     """Restart a saved run at the analyzer, over documents it already has."""
     from core.request_pipeline.pipeline import PipelineResult, run_pipeline_from_documents
-    from core.run_archive import ARCHIVE_DIR
+    from core.run_archive import ARCHIVE_DIR, archive_run
 
     saved = PipelineResult.model_validate_json(args.resume_from.read_text(encoding="utf-8"))
     question = args.question
@@ -139,7 +139,12 @@ def _resume_from_saved_run(args: argparse.Namespace):
         f"| audience={audience} | 검색·스크레이핑 생략",
         file=sys.stderr,
     )
-    return run_pipeline_from_documents(saved, question, audience, force_fail_stage=args.force_fail_stage)
+    result = run_pipeline_from_documents(saved, question, audience, force_fail_stage=args.force_fail_stage)
+    # A resumed run is a run: it belongs in the archive so it can be reopened
+    # from the dashboard like any other, rather than existing only as a file
+    # someone has to remember to upload.
+    archive_run(result, question, audience)
+    return result
 
 
 def main() -> int:

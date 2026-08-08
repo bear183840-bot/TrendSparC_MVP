@@ -1,0 +1,11 @@
+[resume] longform_shortform.json | 5 documents | audience=external | 검색·스크레이핑 생략
+[analyzer] PDF '한국콘텐츠진흥원(KOCCA):6a617729ddf39e2f' split into 7 chunk(s); analyzing 7
+[analyzer] PDF chunk 2/7 failed for '한국콘텐츠진흥원(KOCCA):6a617729ddf39e2f': analysis response for doc '한국콘텐츠진흥원(KOCCA):6a617729ddf39e2f' did not match the expected schema
+[analyzer] PDF chunk 4/7 failed for '한국콘텐츠진흥원(KOCCA):6a617729ddf39e2f': analysis response for doc '한국콘텐츠진흥원(KOCCA):6a617729ddf39e2f' did not match the expected schema
+[analyzer] doc 'm.kcc.go.kr:c0004284e6806b64' could not be analysed: analysis response for doc 'm.kcc.go.kr:c0004284e6806b64' did not match the expected schema
+[analyzer] 4 of 5 documents analysed; 1 skipped
+[synthesis] AI-based synthesis refinement failed, using rule-based result: Unterminated string starting at: line 61 column 19 (char 3063)
+[report_generator] request trimmed to fit the token budget: highlights -16, key_points -8, grounded_claims -16, evidence -12
+[report_generator] request is 20544 chars against a 14000 budget even after trimming; sending as is
+[report_generator] recovered 8 metric(s) and 0 comparison(s) from evidence prose that the rule-based extractors missed
+[save-result] C:\Users\bear1\Desktop\TrendSparC_MVP\runs\longform_v3.json

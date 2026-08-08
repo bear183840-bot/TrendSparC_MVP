@@ -115,5 +115,15 @@ def test_target_block_shapes_flattens_only_included_slots_with_a_hint():
             assert any(target.title in shape for shape in shapes)
 
 
+def test_target_block_shapes_carry_machine_readable_block_ids_and_contracts():
+    """Collector and analyzer must know which final block each field feeds;
+    prose hints alone leave structurally similar metrics ambiguous."""
+    shapes = target_block_shapes(plan_block_priorities("req1", "current_status"))
+    ranking = next(shape for shape in shapes if "slot_id=ranking" in shape)
+
+    assert "block_type=share_split; required_data=" in ranking
+    assert "block_type=grouped_bar; required_data=" in ranking
+
+
 def test_target_block_shapes_handles_none_plan():
     assert target_block_shapes(None) == []

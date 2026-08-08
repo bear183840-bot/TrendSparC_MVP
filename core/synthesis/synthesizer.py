@@ -70,6 +70,7 @@ def synthesize(
     weaknesses: list[str] = []
     metric_series: list = []
     comparison_points: list = []
+    factors: list[str] = []
     recommended_actions: list[str] = []
     monitoring_indicators: list[str] = []
     evidence: list[str] = []
@@ -146,6 +147,7 @@ def synthesize(
             analysis_opportunities = _grounded_values(analysis, "opportunity")
             analysis_strengths = _grounded_values(analysis, "strength")
             analysis_weaknesses = _grounded_values(analysis, "weakness")
+            analysis_factors = _grounded_values(analysis, "factor")
             analysis_actions = _grounded_values(analysis, "action")
             analysis_monitoring = _grounded_values(analysis, "monitoring")
             analysis_evidence = [claim.evidence_quote for claim in analysis.grounded_claims]
@@ -175,6 +177,7 @@ def synthesize(
             analysis_opportunities = [analysis.opportunity] if analysis.opportunity else []
             analysis_strengths = [analysis.strength] if analysis.strength else []
             analysis_weaknesses = [analysis.weakness] if analysis.weakness else []
+            analysis_factors = analysis.factors
             analysis_actions = analysis.recommended_actions
             analysis_monitoring = analysis.monitoring_indicators
             analysis_evidence = analysis.evidence
@@ -187,6 +190,7 @@ def synthesize(
         _append_items(highlights, "Opportunity", analysis_opportunities, analysis.doc_id)
         _append_items(highlights, "Strength", analysis_strengths, analysis.doc_id)
         _append_items(highlights, "Weakness", analysis_weaknesses, analysis.doc_id)
+        _append_items(highlights, "Factor", analysis_factors, analysis.doc_id)
         _append_items(highlights, "Action", analysis_actions, analysis.doc_id)
         _append_items(highlights, "Monitoring", analysis_monitoring, analysis.doc_id)
         key_points.extend(_tag(value, analysis.doc_id) for value in analysis_key_points if value)
@@ -195,6 +199,7 @@ def synthesize(
         opportunities.extend(_tag(v, analysis.doc_id) for v in analysis_opportunities if v)
         strengths.extend(_tag(v, analysis.doc_id) for v in analysis_strengths if v)
         weaknesses.extend(_tag(v, analysis.doc_id) for v in analysis_weaknesses if v)
+        factors.extend(_tag(v, analysis.doc_id) for v in analysis_factors if v)
         verified_claim_ids = {claim.claim_id for claim in analysis.grounded_claims}
         for metric_index, point in enumerate(analysis.metric_points, 1):
             evidence_claim_id = (
@@ -301,6 +306,7 @@ def synthesize(
         weaknesses=weaknesses,
         metric_series=metric_series,
         comparison_points=comparison_points,
+        factors=factors,
         recommended_actions=recommended_actions,
         monitoring_indicators=monitoring_indicators,
         evidence=evidence,

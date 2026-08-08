@@ -55,8 +55,8 @@ _SECTION_GROUPS = {
 _CLAIM_TYPES_BY_SECTION = {
     "overview": {"key_point", "business_impact"},
     "key_points": {"key_point"},
-    "current_situation": {"key_point", "business_impact", "comparison", "metric"},
-    "market_status": {"key_point", "business_impact", "comparison", "metric"},
+    "current_situation": {"key_point", "business_impact", "comparison", "metric", "factor"},
+    "market_status": {"key_point", "business_impact", "comparison", "metric", "factor"},
     "near_term_outlook": {"opportunity", "monitoring", "key_point"},
     "issue": {"risk", "weakness", "key_point"},
     "problem": {"risk", "weakness", "key_point"},

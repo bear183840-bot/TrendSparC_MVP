@@ -454,6 +454,7 @@ class GroundedClaim(BaseModel):
         "weakness",
         "comparison",
         "metric",
+        "factor",
         "action",
         "monitoring",
     ]
@@ -503,6 +504,7 @@ class DocumentAnalysis(BaseModel):
     # the default and correct state for most documents.
     metric_points: list[MetricPoint] = Field(default_factory=list)
     comparison_points: list[ComparisonPoint] = Field(default_factory=list)
+    factors: list[str] = Field(default_factory=list)
     recommended_actions: list[str] = Field(default_factory=list)
     monitoring_indicators: list[str] = Field(default_factory=list)
     evidence: list[str] = Field(default_factory=list)
@@ -566,6 +568,7 @@ class SynthesisClaim(BaseModel):
         "weakness",
         "comparison",
         "metric",
+        "factor",
         "action",
         "monitoring",
     ]
@@ -632,6 +635,7 @@ class TrendSynthesis(BaseModel):
     weaknesses: list[str] = Field(default_factory=list)
     metric_series: list[MetricPoint] = Field(default_factory=list)
     comparison_points: list[ComparisonPoint] = Field(default_factory=list)
+    factors: list[str] = Field(default_factory=list)
     recommended_actions: list[str] = Field(default_factory=list)
     monitoring_indicators: list[str] = Field(default_factory=list)
     evidence: list[str] = Field(default_factory=list)

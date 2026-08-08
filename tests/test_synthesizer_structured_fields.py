@@ -139,6 +139,13 @@ def test_synthesis_prefers_grounded_claims_over_conflicting_legacy_fields():
                 evidence_quote="A 요금은 B보다 낮다",
                 confidence="high",
             ),
+            GroundedClaim(
+                claim_id="c5",
+                claim_type="factor",
+                claim="검증된 선택 요인",
+                evidence_quote="선택 요인에 대한 원문 근거",
+                confidence="high",
+            ),
         ],
         comparison_points=[
             ComparisonPoint(
@@ -166,7 +173,8 @@ def test_synthesis_prefers_grounded_claims_over_conflicting_legacy_fields():
     assert synthesis.recommended_actions == ["검증된 액션 [doc_id=doc:grounded]"]
     assert [point.entity for point in synthesis.comparison_points] == ["A"]
     assert all("검증되지 않은" not in value for value in synthesis.highlights)
-    assert len(synthesis.grounded_claims) == 4
+    assert synthesis.factors == ["검증된 선택 요인 [doc_id=doc:grounded]"]
+    assert len(synthesis.grounded_claims) == 5
     assert synthesis.grounded_claims[0].synthesis_claim_id == "doc:grounded:c1"
     assert synthesis.grounded_claims[0].source_url == "https://example.com/grounded"
     assert synthesis.grounded_claims[0].reliability_tier == "analyst_media"

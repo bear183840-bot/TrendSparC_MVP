@@ -14,6 +14,7 @@ import pytest
 from common.content_quality_validator import (
     COMPARISON_COMPLETENESS_INSTRUCTION,
     SWOT_COMPLETENESS_INSTRUCTION,
+    TABLE_COMPLETENESS_INSTRUCTION,
 )
 
 _ROOT = Path(__file__).resolve().parent.parent
@@ -61,10 +62,39 @@ def test_comparison_instruction_asks_for_every_mentioned_item():
 
 @pytest.mark.parametrize("path", _ANALYZERS, ids=lambda p: p.parts[-4])
 def test_every_sector_analyzer_gets_both_completeness_instructions(path):
+    """Both rules, in every analyzer that calls a model.
+
+    This used to skip when `SWOT_COMPLETENESS_INSTRUCTION` was absent, on the
+    theory that such an analyzer was still a stub. That made the check
+    self-defeating: removing the import removed the test with it, and both
+    rules were once dropped from the live analyzer without a single failure.
+    A stub is now identified by having no model call at all.
+    """
     text = path.read_text(encoding="utf-8")
-    if "SWOT_COMPLETENESS_INSTRUCTION" not in text:
-        pytest.skip("sector analyzer is still a stub")
+    # `general` is the deliberately unimplemented fallback (see CLAUDE.md); it
+    # answers without a sector prompt at all. Everything that loads one is a
+    # real analyzer and has to carry both rules.
+    if "_SECTOR_PROMPT_PATH" not in text:
+        pytest.skip("fallback analyzer: no sector prompt to attach the rules to")
+    assert "SWOT_COMPLETENESS_INSTRUCTION" in text, (
+        "the analyzer sends a sector prompt but not the SWOT completeness rule"
+    )
     assert "COMPARISON_COMPLETENESS_INSTRUCTION" in text
+
+
+@pytest.mark.parametrize("path", _ANALYZERS, ids=lambda p: p.parts[-4])
+def test_every_sector_analyzer_keeps_table_rows_as_separate_points(path):
+    """A table printed with several period columns has to arrive as several
+    metric points, and a per-age/per-company list as several comparisons.
+
+    Without this, a results table came back as one representative figure and
+    the trend it described could never be charted - the loss happens at
+    extraction, where no later stage can recover it.
+    """
+    text = path.read_text(encoding="utf-8")
+    if "_SECTOR_PROMPT_PATH" not in text:
+        pytest.skip("fallback analyzer: no sector prompt to attach the rules to")
+    assert "TABLE_COMPLETENESS_INSTRUCTION" in text
 
 
 def test_sector_prompt_accepts_research_that_never_names_the_company():
@@ -94,3 +124,11 @@ def test_global_output_order_does_not_claim_to_set_section_order():
 
     assert "보고 목적(purpose)" in text
     assert "섹션 순서를 4단으로 되돌리지 마세요" in text
+
+
+def test_the_table_rule_says_every_row_not_a_representative_one():
+    """The wording matters: "대표값 하나로 요약하지 말고" is the whole rule.
+    A table arriving as one figure is a loss no later stage can undo."""
+    assert "시점 수만큼" in TABLE_COMPLETENESS_INSTRUCTION
+    assert "대표값 하나로 요약하지 말고" in TABLE_COMPLETENESS_INSTRUCTION
+    assert "각 행·항목을 개별" in TABLE_COMPLETENESS_INSTRUCTION

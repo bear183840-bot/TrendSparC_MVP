@@ -16,6 +16,8 @@ from common.ai_client import openai_client_kwargs
 from common.content_quality_validator import (
     COMPARISON_COMPLETENESS_INSTRUCTION,
     SWOT_COMPLETENESS_INSTRUCTION,
+    TABLE_COMPLETENESS_INSTRUCTION,
+    strip_particle,
 )
 from common.contracts import DocumentAnalysis, SourceDocument
 from common.errors import PipelineStageError
@@ -39,8 +41,8 @@ _STAGE = "sectors.sk_broadband.adapter.analyzer"
 
 _SECTOR_ROOT = Path(__file__).resolve().parent.parent.parent
 _PROJECT_ROOT = _SECTOR_ROOT.parent.parent
-_GLOBAL_PROMPT_PATH = _PROJECT_ROOT / "prompts" / "global_system_prompt.md"
-_SECTOR_PROMPT_PATH = _SECTOR_ROOT / "prompts" / "system_prompt.md"
+_GLOBAL_PROMPT_PATH = _PROJECT_ROOT / "prompts" / "analyzer_system_prompt.md"
+_SECTOR_PROMPT_PATH = _SECTOR_ROOT / "prompts" / "analyzer_prompt.md"
 
 _ANALYSIS_SCHEMA = {
     "type": "object",
@@ -65,7 +67,7 @@ _ANALYSIS_SCHEMA = {
                     "claim_id": {"type": "string", "description": "문서 안에서 고유한 짧은 ID, 예: c1."},
                     "claim_type": {
                         "type": "string",
-                        "enum": ["key_point", "business_impact", "risk", "opportunity", "strength", "weakness", "comparison", "metric", "action", "monitoring"],
+                        "enum": ["key_point", "business_impact", "risk", "opportunity", "strength", "weakness", "comparison", "metric", "factor", "action", "monitoring"],
                     },
                     "claim": {"type": "string"},
                     "evidence_passage_id": {
@@ -112,15 +114,30 @@ _ANALYSIS_SCHEMA = {
                 "type": "object",
                 "properties": {
                     "label": {"type": "string", "description": "무엇을 나타내는 수치인지, 예: 'IPTV 가입자 수'"},
+                    "subject": {
+                        "type": ["string", "null"],
+                        "description": "수치의 주체·항목(기업, 플랫폼, 연령대 등). 원문 표현을 그대로 쓰고 없으면 null.",
+                    },
                     "period": {"type": "string", "description": "문서에 명시된 시점 그대로, 예: '2023년 2분기'"},
                     "value": {"type": "number"},
                     "unit": {"type": "string", "description": "예: '만 명', '억원'. 없으면 빈 문자열."},
+                    "is_forecast": {
+                        "type": "boolean",
+                        "description": "원문이 전망·예상·목표·추정이라고 명시한 수치만 true.",
+                    },
+                    "share_of": {
+                        "type": ["string", "null"],
+                        "description": "원문이 이 비율들의 공통 전체를 명시한 경우 그 표현. 아니면 null.",
+                    },
                     "evidence_claim_id": {
                         "type": "string",
                         "description": "이 수치 전체를 직접 인용한 claim_type=metric grounded_claim의 claim_id.",
                     },
                 },
-                "required": ["label", "period", "value", "unit", "evidence_claim_id"],
+                "required": [
+                    "label", "subject", "period", "value", "unit", "is_forecast",
+                    "share_of", "evidence_claim_id",
+                ],
                 "additionalProperties": False,
             },
         },
@@ -200,6 +217,32 @@ def _trim_content(content: str | None) -> str:
     return content[:_MAX_CONTENT_CHARS] + "\n\n[본문이 길어 분석 입력에서 일부가 생략되었습니다.]"
 
 
+_WEB_FOOTER_RE = re.compile(
+    r"(?im)^\s*(?:#{1,6}\s*)?(?:"
+    r"무단\s*전재(?:\s*및\s*재배포)?\s*금지|"
+    r"copyright\b.*all rights reserved|"
+    r"관련\s*기사|추천\s*기사|많이\s*본\s*뉴스|오늘\s*많이\s*본\s*뉴스|뉴스\s*브리핑"
+    r")[ \t]*$"
+)
+_WEB_NOISE_RE = re.compile(
+    r"(?i)(?:ERR_BLOCKED_BY_CLIENT|This page has been blocked by an extension|"
+    r"Base64-Image-Removed|^\s*Reload\s*$|^\s*ad[\w.-]*\.(?:com|kr)\s*$)"
+)
+
+
+def _clean_analysis_content(content: str | None) -> str:
+    """Remove only unmistakable web chrome; never rank or drop article prose."""
+    if not content:
+        return ""
+    text = content.replace("\r\n", "\n").replace("\r", "\n")
+    footer = _WEB_FOOTER_RE.search(text)
+    if footer:
+        text = text[:footer.start()]
+    return "\n".join(
+        line for line in text.splitlines() if not _WEB_NOISE_RE.search(line)
+    ).strip()
+
+
 def _is_pdf_document(document: SourceDocument) -> bool:
     if (document.media_type or "").split(";", 1)[0].strip().lower() == "application/pdf":
         return True
@@ -244,8 +287,90 @@ def _split_pdf_content(content: str) -> list[str]:
 
 
 def _question_terms(question: str, information_needs: list[str]) -> list[str]:
+    """Question and information-need words, as stems.
+
+    Stemmed because these are matched against document text by substring, and
+    Korean attaches particles to both sides: a question asking about "근거를"
+    would otherwise never match a document saying "근거가". The chunk side
+    needs no stemming - "근거" is a substring of "근거가" either way.
+    """
     text = " ".join([question, *information_needs]).lower()
-    return list(dict.fromkeys(re.findall(r"[가-힣a-z0-9]{2,}", text)))
+    tokens = re.findall(r"[가-힣a-z0-9]{2,}", text)
+    return list(dict.fromkeys(
+        stem for token in tokens if len(stem := strip_particle(token)) >= 2
+    ))
+
+
+# A statistic is worth reading even in a chunk that names none of the
+# question's words - "전체의 62.5%" in a paragraph about the same topic in
+# other terms is exactly the figure a block needs. So a chunk is only skipped
+# when it has neither.
+_FIGURE_RE = re.compile(r"\d[\d,.]*\s*(?:%|퍼센트|명|건|원|억|조|만|시간|분|배|위|점|개)")
+
+
+# A periodical is many articles bound together, and only some of them are
+# about the question. Measured on a live 100-page KOCCA issue: the two chunks
+# carrying the actual 숏폼/롱폼 analysis matched question terms 125 and 104
+# times, while the PD interviews and drama columns matched 27, 21, 19 and 15.
+# *Distinct* terms didn't separate them at all (6-9 everywhere, since the whole
+# magazine is about broadcasting) - frequency did.
+#
+# So the cut is relative to the best chunk in the same document, never an
+# absolute count, and it only applies to documents long enough to be a
+# collection rather than an article. The top three always survive regardless.
+_PERIODICAL_MIN_CHUNKS = 4
+_PERIODICAL_KEEP_RATIO = 0.25
+_PERIODICAL_ALWAYS_KEEP = 3
+
+
+def _term_hits(chunk: str, terms: list[str]) -> int:
+    lowered = chunk.lower()
+    return sum(lowered.count(term) for term in terms)
+
+
+def _periodical_chunks(
+    candidates: list[tuple[int, str]], terms: list[str]
+) -> list[tuple[int, str]]:
+    """The chunks of a long collection that are plausibly about the question.
+
+    Not a quality judgement on prose - a rule about which *articles* in a
+    bound volume are on topic. Applied only to documents of
+    `_PERIODICAL_MIN_CHUNKS` or more; an ordinary page or report keeps every
+    chunk it has.
+    """
+    if len(candidates) < _PERIODICAL_MIN_CHUNKS or not terms:
+        return candidates
+    scored = [(index, chunk, _term_hits(chunk, terms)) for index, chunk in candidates]
+    best = max(score for _, _, score in scored)
+    if best <= 0:
+        return candidates
+    cutoff = best * _PERIODICAL_KEEP_RATIO
+    ranked = sorted(scored, key=lambda item: -item[2])
+    keep = {index for index, _, _ in ranked[:_PERIODICAL_ALWAYS_KEEP]}
+    keep.update(index for index, _, score in scored if score >= cutoff)
+    return [(index, chunk) for index, chunk, _ in scored if index in keep]
+
+
+def _chunk_can_answer(chunk: str, terms: list[str]) -> bool:
+    """Whether a chunk could contribute anything to this question.
+
+    Deliberately generous, and deliberately not a ranking. Anything holding a
+    question term or any figure at all is kept; only a chunk with neither is
+    skipped. That is what makes this safe to apply before the model sees it -
+    the material being dropped cannot contain an answer or a number, so no
+    later stage loses a possibility it would otherwise have had.
+
+    This exists because a single collected document can be a whole magazine
+    issue. One live run scraped a 100-page KOCCA periodical: seven chunks
+    analysed, seven model calls spent, and the only claim returned was about a
+    dancer in a survival show. The relevant pages were two.
+    """
+    if not terms:
+        return True
+    lowered = chunk.lower()
+    if any(term in lowered for term in terms):
+        return True
+    return bool(_FIGURE_RE.search(chunk))
 
 
 def _selected_pdf_chunks(
@@ -605,6 +730,8 @@ def _verified_metric_points(
     for point in data.get("metric_points", []):
         period = _normalized_text(str(point.get("period", "")))
         unit = _normalized_text(str(point.get("unit", "")))
+        subject = _normalized_text(str(point.get("subject") or ""))
+        share_of = _normalized_text(str(point.get("share_of") or ""))
         value = point.get("value")
         if not period or period not in normalized_content:
             continue
@@ -621,9 +748,24 @@ def _verified_metric_points(
             continue
         if unit and unit not in normalized_quote:
             continue
+        if subject and subject not in normalized_quote:
+            continue
+        if share_of and share_of not in normalized_quote:
+            continue
         if not _number_is_in_content(float(value), quote):
             continue
-        verified.append({**point, "evidence_quote": quote})
+        forecast_markers = (
+            "전망", "예상", "목표", "추정", "계획", "가이던스", "예측",
+            "forecast", "estimate",
+        )
+        verified.append({
+            **point,
+            "subject": point.get("subject") or None,
+            "share_of": point.get("share_of") or None,
+            "is_forecast": bool(point.get("is_forecast"))
+            and any(marker in normalized_quote.casefold() for marker in forecast_markers),
+            "evidence_quote": quote,
+        })
     return verified
 
 
@@ -711,7 +853,7 @@ def _analyze_document(
     analyzed_content = (
         content_override
         if content_override is not None
-        else _trim_content(document.content)
+        else _trim_content(_clean_analysis_content(document.content))
     )
     evidence_passages = _split_evidence_passages(analyzed_content)
     user_content = json.dumps(
@@ -729,28 +871,20 @@ def _analyze_document(
                 "evidence_passages": evidence_passages,
             },
             "analysis_instruction": (
-                "질문에 직접 관련된 사실만 사용해 SK Broadband 전략기획 관점의 시장 변화, 영향, "
-                "Risk, Opportunity, Strength, Weakness, Action 신호를 추출하라. "
+                "질문·required_information_needs·target_block_shapes에 직접 필요한 근거를 추출하라. "
+                "수치·시점·단위, 비교의 양쪽 대상, 순위·요인·날짜 정보를 우선하고 중복 주장은 만들지 마라. "
                 f"{SWOT_COMPLETENESS_INSTRUCTION} "
                 f"{COMPARISON_COMPLETENESS_INSTRUCTION} "
-                "문서에 수치와 시점이 함께 명시되어 있으면 metric_points로, 대상 간 비교 서술이 있으면 "
-                "comparison_points로 추출하되 명시되지 않은 값은 추정하거나 계산하지 말 것. 특히 재무제표나 "
-                "실적 표는 같은 항목이 3Q25/3Q24/2Q25처럼 여러 시점 컬럼으로 나란히 나오는 경우가 많으므로, "
-                "한 시점만 뽑지 말고 같은 label로 시점마다 별도의 metric_point를 표에 있는 시점 수만큼 전부 추출하라. "
-                "target_block_shapes에 나열된 데이터 모양은 이번 리포트에서 특히 값어치 있다 — 원문에 그에 해당하는 "
-                "표나 리스트(예: 연령대별, 연도별, 기업별로 나열된 수치)가 있으면 대표값 하나로 요약하지 말고 "
-                "각 행·항목을 개별 metric_point 또는 comparison_point로 전부 분해하라. "
-                "metric_points의 모든 수치는 값·단위·시점을 함께 직접 인용한 "
-                "claim_type=metric grounded_claim을 먼저 만들고, 그 claim_id를 "
-                "evidence_claim_id로 연결하라. "
-                "관련성은 direct/partial/background/irrelevant 중 하나로 분류하고 이유를 적어라. 질문에 답하는 모든 "
-                "핵심 주장은 grounded_claims에 넣고, evidence_quote는 반드시 입력 document.evidence_passages 중 하나에서 "
-                "짧게 그대로 복사하고 그 passage_id를 evidence_passage_id에 기록하라. "
-                "각 claim에는 용도에 맞는 claim_type을 지정하라. 위험·기회·비교·액션 등 전략 판단은 반드시 "
-                "별도 grounded_claim으로 만들어라. comparison_points는 "
-                "claim_type=comparison인 claim_id를 evidence_claim_id로 참조해야 한다. 문서가 충족한 정보는 반드시 "
-                "required_information_needs에 주어진 문자열 중에서만 covered_information_needs로 선택하라. "
-                "부족 항목은 코드가 동일한 기준 목록에서 계산한다."
+                f"{TABLE_COMPLETENESS_INSTRUCTION} "
+                f"{TABLE_COMPLETENESS_INSTRUCTION} "
+                "명시되지 않은 값은 추정하거나 계산하지 말 것. "
+                "metric_points의 모든 수치는 값·단위·시점을 함께 직접 인용한 claim_type=metric "
+                "grounded_claim을 먼저 만들고 그 claim_id를 evidence_claim_id로 연결하라. "
+                "comparison_points는 claim_type=comparison인 claim_id를 참조해야 한다. "
+                "evidence_quote는 반드시 입력 document.evidence_passages 중 하나에서 짧게 그대로 "
+                "복사하고 그 passage_id를 evidence_passage_id에 기록하라. "
+                "블록에 필요한 서로 다른 근거는 임의 개수 제한 없이 보존하라. "
+                "covered_information_needs는 입력 목록에 있는 문자열만 그대로 선택하라."
             ),
         },
         ensure_ascii=False,
@@ -758,7 +892,7 @@ def _analyze_document(
     try:
         response = call_with_retry(lambda: client.chat.completions.create(
             model=_model(),
-            max_tokens=3000,
+            max_tokens=4500,
             messages=[
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_content},
@@ -841,6 +975,7 @@ def _analyze_document(
             weakness=_joined_claims(grounded_claims, "weakness"),
             metric_points=_verified_metric_points(data, analyzed_content, grounded_claims),
             comparison_points=_verified_comparison_points(data, grounded_claims),
+            factors=_claim_texts(grounded_claims, "factor"),
             recommended_actions=action_claims,
             monitoring_indicators=_claim_texts(grounded_claims, "monitoring"),
             evidence=[claim["evidence_quote"] for claim in grounded_claims],
@@ -855,17 +990,36 @@ def _unique_text(values: list[str | None]) -> list[str]:
     return list(dict.fromkeys(value.strip() for value in values if value and value.strip()))
 
 
-def _merge_pdf_chunk_analyses(
+def _merge_chunk_analyses(
     document: SourceDocument,
     analyses: list[DocumentAnalysis],
     information_needs: list[str],
     *,
     incomplete: bool,
 ) -> DocumentAnalysis:
+    # A chunk the model itself judged irrelevant contributes nothing but noise.
+    # Live-observed: one chunk of a magazine issue produced a claim about a
+    # dancer's floor technique, which then travelled through synthesis into the
+    # report as an "opportunity". Its own relevance_level said `irrelevant`;
+    # nothing was reading it. Claims, metrics and comparisons are now taken
+    # only from chunks that cleared their own gate - and if every chunk failed
+    # it, the document keeps them all, because then the judgement is about the
+    # document as a whole and is made once, downstream.
+    contributing = [
+        analysis for analysis in analyses if analysis.relevance_level != "irrelevant"
+    ] or analyses
+    dropped = len(analyses) - len(contributing)
+    if dropped:
+        print(
+            f"[analyzer] '{document.doc_id}': {dropped} chunk(s) judged irrelevant and "
+            "excluded from the merged analysis",
+            file=sys.stderr,
+        )
+
     claim_by_key: dict[tuple[str, str], object] = {}
     claim_id_remap: dict[str, str] = {}
     merged_claims = []
-    for analysis in analyses:
+    for analysis in contributing:
         for claim in analysis.grounded_claims:
             key = (claim.claim_type, _normalized_text(claim.evidence_quote))
             existing = claim_by_key.get(key)
@@ -881,7 +1035,7 @@ def _merge_pdf_chunk_analyses(
     seen_metrics: set[tuple] = set()
     merged_comparisons = []
     seen_comparisons: set[tuple] = set()
-    for analysis in analyses:
+    for analysis in contributing:
         for point in analysis.metric_points:
             evidence_claim_id = claim_id_remap.get(
                 point.evidence_claim_id or "", point.evidence_claim_id
@@ -985,7 +1139,7 @@ def _merge_pdf_chunk_analyses(
     )
     if incomplete:
         relevance_reasons.append(
-            "PDF가 설정된 최대 청크 수를 초과했거나 일부 청크 분석이 실패해 선택된 청크만 병합했습니다."
+            "문서가 설정된 최대 청크 수를 초과했거나 일부 청크 분석이 실패해 분석된 청크만 병합했습니다."
         )
 
     return DocumentAnalysis(
@@ -1012,6 +1166,7 @@ def _merge_pdf_chunk_analyses(
         weakness=_joined_claims(claim_dicts, "weakness"),
         metric_points=merged_metrics,
         comparison_points=merged_comparisons,
+        factors=_claim_texts(claim_dicts, "factor"),
         recommended_actions=_claim_texts(claim_dicts, "action"),
         monitoring_indicators=_claim_texts(claim_dicts, "monitoring"),
         evidence=[claim.evidence_quote for claim in merged_claims],
@@ -1020,7 +1175,7 @@ def _merge_pdf_chunk_analyses(
     )
 
 
-def _analyze_pdf_document(
+def _analyze_chunked_document(
     client: OpenAI,
     system_prompt: str,
     document: SourceDocument,
@@ -1028,16 +1183,40 @@ def _analyze_pdf_document(
     information_needs: list[str],
     target_block_shapes: list[str] | None = None,
 ) -> DocumentAnalysis:
-    chunks = _split_pdf_content(document.content or "")
-    selected_chunks = _selected_pdf_chunks(chunks, question, information_needs)
+    is_pdf = _is_pdf_document(document)
+    content = (document.content or "") if is_pdf else _clean_analysis_content(document.content)
+    chunks = _split_pdf_content(content)
+    # PDFs keep their existing cap for very long files; everything then passes
+    # the same can-this-answer gate, so a magazine issue costs calls only for
+    # the pages that could contain an answer.
+    candidates = (
+        _selected_pdf_chunks(chunks, question, information_needs)
+        if is_pdf else list(enumerate(chunks, 1))
+    )
+    terms = _question_terms(question, information_needs)
+    candidates = _periodical_chunks(candidates, terms)
+    selected_chunks = [item for item in candidates if _chunk_can_answer(item[1], terms)]
+    if not selected_chunks:
+        # Every chunk failed the gate, which is more likely to mean the terms
+        # were unusual than that the document is empty. Fall back to analysing
+        # what was selected rather than returning nothing.
+        selected_chunks = candidates
+    kind = "PDF" if is_pdf else "document"
+    skipped = len(candidates) - len(selected_chunks)
     print(
-        f"[analyzer] PDF '{document.doc_id}' split into {len(chunks)} chunk(s); "
-        f"analyzing {len(selected_chunks)}",
+        f"[analyzer] {kind} '{document.doc_id}' split into {len(chunks)} chunk(s); "
+        f"analyzing {len(selected_chunks)}"
+        + (f" ({skipped} skipped: no question term and no figure)" if skipped else ""),
         file=sys.stderr,
     )
     analyses: list[DocumentAnalysis] = []
     failures: list[PipelineStageError] = []
     for chunk_index, chunk in selected_chunks:
+        prefix = f"pdf{chunk_index}" if is_pdf else f"part{chunk_index}"
+        location = (
+            f"PDF 청크 {chunk_index}/{len(chunks)}"
+            if is_pdf else f"문서 청크 {chunk_index}/{len(chunks)}"
+        )
         try:
             analyses.append(
                 _analyze_document(
@@ -1048,14 +1227,14 @@ def _analyze_pdf_document(
                     information_needs,
                     target_block_shapes=target_block_shapes,
                     content_override=chunk,
-                    claim_id_prefix=f"pdf{chunk_index}",
-                    evidence_location_prefix=f"PDF 청크 {chunk_index}/{len(chunks)}",
+                    claim_id_prefix=prefix,
+                    evidence_location_prefix=location,
                 )
             )
         except PipelineStageError as exc:
             failures.append(exc)
             print(
-                f"[analyzer] PDF chunk {chunk_index}/{len(chunks)} failed for "
+                f"[analyzer] {kind} chunk {chunk_index}/{len(chunks)} failed for "
                 f"'{document.doc_id}': {exc.reason}",
                 file=sys.stderr,
             )
@@ -1064,9 +1243,9 @@ def _analyze_pdf_document(
             raise failures[-1]
         raise PipelineStageError(
             stage=_STAGE,
-            reason=f"PDF document '{document.doc_id}' contained no analyzable text chunks",
+            reason=f"document '{document.doc_id}' contained no analyzable text chunks",
         )
-    return _merge_pdf_chunk_analyses(
+    return _merge_chunk_analyses(
         document,
         analyses,
         information_needs,
@@ -1091,19 +1270,14 @@ def analyze(
     failures: list[str] = []
     for document in source_documents:
         # One document failing must not take the other four with it.
-        # Live-observed: a 롱폼/숏폼 run collected five good sources - a KOCCA
-        # trend report, a 숏폼 이용률 ranking article, a survey piece - and the
-        # whole run halted because a single page's response came back off
-        # schema. The stage's own job is to analyse what it can; whether
-        # what's left is enough is already decided downstream, against the
-        # sector's minimum, by code that can also trigger recollection.
+        # A mixed-source run can contain reports, rankings, surveys, and one
+        # malformed page. The stage's own job is to analyse what it can;
+        # whether what's left is enough is already decided downstream,
+        # against the sector minimum, by code that can trigger recollection.
         try:
-            if (
-                _is_pdf_document(document)
-                and len(document.content or "") > _MAX_CONTENT_CHARS
-            ):
+            if len(document.content or "") > _MAX_CONTENT_CHARS:
                 analyses.append(
-                    _analyze_pdf_document(
+                    _analyze_chunked_document(
                         client, system_prompt, document, question, needs,
                         target_block_shapes=shapes,
                     )
