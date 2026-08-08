@@ -29,6 +29,7 @@ from pydantic import BaseModel
 
 from reporting.dashboard_streamlit.blocks.base import BlockDefinition, SlotContext
 from reporting.dashboard_streamlit.blocks.registry import register
+from common.block_shapes import has_grouped_bars, has_status_levels
 from reporting.dashboard_streamlit.components import (
     action_impact_lookup,
     clean_citation,
@@ -44,6 +45,7 @@ from reporting.dashboard_streamlit.components import (
     render_cause_tree,
     render_comparison_table,
     render_factor_list,
+    render_grouped_bars,
     render_importance_bars,
     render_kpi_row,
     render_metric_bar,
@@ -52,6 +54,7 @@ from reporting.dashboard_streamlit.components import (
     render_radar,
     render_recurring_terms,
     render_share_split,
+    render_status_bar,
     render_swot,
     render_timeline,
     time_bar_groups,
@@ -79,6 +82,16 @@ def _bars(groups_of):
             return None
         return lambda: [render_metric_bar(group, synthesis.grounded_claims) for group in groups]
     return build
+
+
+def _grouped_bars(context: SlotContext):
+    points = context.synthesis.metric_series
+    return (lambda: render_grouped_bars(points)) if has_grouped_bars(points) else None
+
+
+def _status_bar(context: SlotContext):
+    points = context.synthesis.comparison_points
+    return (lambda: render_status_bar(points)) if has_status_levels(points) else None
 
 
 def _metric_comparison(context: SlotContext):
@@ -171,6 +184,8 @@ _LIVE_BLOCKS: tuple[tuple[str, Any, str], ...] = (
     ("chart", _chart, "시점이 3개 이상인 지표의 추이선."),
     ("bar", _bars(time_bar_groups), "두 시점 사이의 변화를 막대 두 개로."),
     ("item_bar", _bars(item_bar_groups), "항목 간 순위 비교 막대."),
+    ("grouped_bar", _grouped_bars, "한 지표를 여러 주체 × 여러 항목으로 비교하는 묶음 막대."),
+    ("status_bar", _status_bar, "근거가 등급을 매긴 항목들의 정성 상태 한 줄."),
     ("metric_comparison", _metric_comparison, "같은 시점·같은 단위 지표들의 항목 비교."),
     ("kpi_grid", _kpi, "확인된 수치 카드 묶음."),
     ("kpi_single", _kpi, "확인된 수치 카드 하나."),

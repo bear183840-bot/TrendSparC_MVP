@@ -262,6 +262,8 @@ def test_render_swot_draws_only_the_quadrants_that_have_evidence():
         strengths=["인프라 우위"], weaknesses=[], opportunities=["AI 개인화"], threats=[]
     )
 
-    assert "Strength" in markup and "Opportunity" in markup
+    # The heading is split as <span>S</span>trength so the artwork's colour
+    # disc can sit behind the initial alone, so match on the remainder.
+    assert ">S</span>trength" in markup and ">O</span>pportunity" in markup
     assert "Weakness" not in markup and "Threat" not in markup
     assert "관련 데이터 수집 필요" not in markup

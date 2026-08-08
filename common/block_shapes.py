@@ -110,6 +110,71 @@ def item_bar_groups(metric_points: list[Any]) -> list[list[Any]]:
     return [points for points in by_label.values() if classify_metric_shape(points) == "comparison"]
 
 
+def grouped_bar_series(metric_points: list[Any]) -> list[tuple[str, list[str], dict[str, list[Any]]]]:
+    """(label, categories, {subject: points}) for the artwork's grouped bars.
+
+    A metric measured for two or more subjects across two or more shared
+    categories - 연령대별 롱폼/숏폼 이용률, 요일별 IPTV/OTT. Three axes at
+    once, which is exactly what `subject` was added for and what neither the
+    single-series bar nor the trend line can draw: one draws the wrong
+    comparison, the other implies a path between categories.
+
+    Both floors matter. Fewer than two subjects is an ordinary bar chart; a
+    category only one subject was measured on is dropped rather than drawn as
+    a lone bar in a group, which would read as "the others are zero".
+    """
+    by_label: dict[str, list[Any]] = {}
+    for point in metric_points:
+        if getattr(point, "subject", None) and point.period:
+            by_label.setdefault(point.label, []).append(point)
+    groups = []
+    for label, points in by_label.items():
+        by_subject: dict[str, dict[str, Any]] = {}
+        for point in points:
+            by_subject.setdefault(point.subject, {})[point.period] = point
+        if len(by_subject) < 2:
+            continue
+        shared = [
+            period for period in dict.fromkeys(point.period for point in points)
+            if all(period in periods for periods in by_subject.values())
+        ]
+        if len(shared) < 2:
+            continue
+        groups.append((
+            label,
+            shared,
+            {subject: [periods[period] for period in shared] for subject, periods in by_subject.items()},
+        ))
+    return groups
+
+
+def has_grouped_bars(metric_points: list[Any]) -> bool:
+    return bool(grouped_bar_series(metric_points))
+
+
+def status_levels(comparison_points: list[Any], limit: int = 4) -> list[tuple[str, str, str]]:
+    """(criterion, entity + value, level) for the artwork's KPI status bar.
+
+    A qualitative counterpart to the KPI row: where a figure isn't available
+    but the source graded something, the grade is still worth the top of the
+    page. Only points the document actually graded are eligible - a value with
+    no stated `level` has no standing to be shown as a status.
+    """
+    graded = [point for point in comparison_points if point.level]
+    seen: set[str] = set()
+    rows: list[tuple[str, str, str]] = []
+    for point in graded:
+        if point.criterion in seen:
+            continue
+        seen.add(point.criterion)
+        rows.append((point.criterion, f"{point.entity} · {point.value}", point.level))
+    return rows[:limit]
+
+
+def has_status_levels(comparison_points: list[Any], minimum: int = 2) -> bool:
+    return len(status_levels(comparison_points)) >= minimum
+
+
 def varies_by_subject(points_for_one_label: list[Any]) -> bool:
     """True when one metric was measured for two or more different subjects -
     the axis the figures vary along is *who*, not *when*."""
@@ -398,28 +463,72 @@ def has_timeline(
     return bool(timeline_entries(evidence, metric_points, reference_year))
 
 
-def cause_tree(grounded_claims: list[Any], max_depth: int = 2) -> list[tuple[Any, list[Any]]]:
-    """Root claims with the claims the evidence says follow from them.
-
-    Two levels only. A deeper tree doesn't fit the column and, more to the
-    point, the third level is where a model's causal guesses start rather
-    than a document's stated chain. Roots are claims with no parent that at
-    least one other claim points at - a claim nobody derives from is a
-    finding, not the root of anything, and it belongs in the ordinary list.
-    """
+def _children_by_parent(grounded_claims: list[Any]) -> dict[str, list[Any]]:
     by_id = {claim.synthesis_claim_id: claim for claim in grounded_claims}
     children: dict[str, list[Any]] = {}
     for claim in grounded_claims:
         parent = getattr(claim, "parent_synthesis_claim_id", None)
         if parent in by_id and parent != claim.synthesis_claim_id:
             children.setdefault(parent, []).append(claim)
-    if max_depth < 2:
-        return []
+    return children
+
+
+def cause_roots(grounded_claims: list[Any]) -> list[Any]:
+    """Claims at least one other claim derives from, that derive from nothing.
+
+    A claim nobody derives from is a finding, not the root of anything, and
+    belongs in the ordinary list.
+    """
+    children = _children_by_parent(grounded_claims)
     return [
-        (claim, children[claim.synthesis_claim_id])
-        for claim in grounded_claims
+        claim for claim in grounded_claims
         if claim.synthesis_claim_id in children
         and not getattr(claim, "parent_synthesis_claim_id", None)
+    ]
+
+
+def cause_forest(grounded_claims: list[Any], max_depth: int = 3) -> list[dict]:
+    """The whole stated chain as nested {claim, children} nodes.
+
+    Three levels by default - root cause, what it drove, and what that in turn
+    drove - because that is as deep as the delivered artwork goes and as deep
+    as a document's own wording usually reaches. Anything below the cut is
+    dropped rather than flattened up a level, which would attribute a
+    third-order effect directly to the root.
+
+    `cause_tree` remains the two-level view; this is what the renderer walks,
+    so a document that stated a longer chain still shows it instead of having
+    its middle layer silently become the leaf layer.
+    """
+    children = _children_by_parent(grounded_claims)
+
+    def build(claim: Any, depth: int, seen: set[str]) -> dict:
+        node = {"claim": claim, "children": []}
+        if depth >= max_depth:
+            return node
+        for child in children.get(claim.synthesis_claim_id, []):
+            if child.synthesis_claim_id in seen:
+                continue
+            node["children"].append(build(child, depth + 1, seen | {child.synthesis_claim_id}))
+        return node
+
+    return [
+        build(root, 1, {root.synthesis_claim_id})
+        for root in cause_roots(grounded_claims)
+    ]
+
+
+def cause_tree(grounded_claims: list[Any], max_depth: int = 2) -> list[tuple[Any, list[Any]]]:
+    """Root claims with the claims the evidence says follow from them.
+
+    The flat two-level view, kept because `has_cause_tree` and its tests read
+    it. `cause_forest` is what the renderer walks.
+    """
+    if max_depth < 2:
+        return []
+    children = _children_by_parent(grounded_claims)
+    return [
+        (root, children[root.synthesis_claim_id]) for root in cause_roots(grounded_claims)
     ]
 
 

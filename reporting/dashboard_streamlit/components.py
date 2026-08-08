@@ -18,6 +18,7 @@ from typing import Any
 import streamlit as st
 
 from common.content_quality_validator import (
+    group_metric_points_by_series,
     classify_metric_shape,
     dated_items,
     filter_shared_comparison_axis,
@@ -48,11 +49,16 @@ from common.block_shapes import (  # noqa: F401
     has_radar,
     has_timeline,
     has_timeseries,
+    cause_forest,
     cause_tree,
     has_cause_tree,
     SHARE_SUM_TOLERANCE,
+    grouped_bar_series,
+    has_grouped_bars,
     has_recurring_terms,
     has_share_split,
+    has_status_levels,
+    status_levels,
     recurring_terms,
     share_groups,
     has_importance_ranking,
@@ -419,7 +425,7 @@ def _metric_chart_svg(points: list[Any], title: str) -> str:
     Axis labels are the evidence's own period text and real numbers; nothing
     is interpolated or extrapolated, so a gap in the evidence stays a gap.
     """
-    by_label = group_metric_points_by_label(points)
+    by_label = group_metric_points_by_series(points)
     periods = sorted({point.period for point in points}, key=period_sort_key)
     values = [point.value for point in points]
     low, high = min(values), max(values)
@@ -537,6 +543,13 @@ def render_metric_bar(
         return
     # Time bars read chronologically; subject bars have no inherent order, so
     # they read largest-first, which is what a comparison is asking.
+    # Three or more items compared read better as columns - the artwork's
+    # vertical bar card - than as a stack of rows; two are a before/after and
+    # stay horizontal, where the pair reads as one change.
+    if varies_by_subject(points_for_one_label) and len(points_for_one_label) >= _COLUMN_BAR_MIN_ITEMS:
+        render_metric_columns(points_for_one_label)
+        render_metric_insight(points_for_one_label, grounded_claims)
+        return
     if varies_by_subject(points_for_one_label):
         ordered = sorted(points_for_one_label, key=lambda p: abs(p.value), reverse=True)
     elif all(is_time_period(point.period) for point in points_for_one_label):
@@ -582,9 +595,14 @@ def render_swot(strengths: list[str], weaknesses: list[str], opportunities: list
     filled = [(label, values, tone) for label, values, tone in quadrants if values]
     if len(filled) < 2:
         return ""
+    # The artwork's quadrant head is one big initial with a soft colour disc
+    # sitting behind it, and the items hang off a hairline rule with small ring
+    # dots - no filled cell, no pill. Splitting the initial out lets the disc
+    # be positioned behind just that letter rather than the whole heading.
     cells = "".join(
-        f'<div class="ts-swot-cell {tone}"><h4>{escape(label)}</h4>'
-        + "".join(f"<p>• {escape(value)}</p>" for value in values)
+        f'<div class="ts-swot-cell {tone}">'
+        f'<h4><span class="ts-swot-initial">{escape(label[0])}</span>{escape(label[1:])}</h4>'
+        + '<ul>' + "".join(f"<li>{escape(value)}</li>" for value in values) + '</ul>'
         + "</div>"
         for label, values, tone in filled
     )
@@ -683,7 +701,16 @@ def render_action_list(rows: list[tuple[str, str, str | None]]) -> None:
 
 
 
-_DONUT_COLORS = ("var(--ts-accent)", "var(--ts-teal)", "var(--ts-muted)", "var(--ts-soft)")
+# One hue stepped down in strength, as the artwork does it: a share of a whole
+# is still the same quantity, so five unrelated colours would read as five
+# unrelated things. Slices arrive largest-first, so strength tracks size.
+_DONUT_COLORS = (
+    "var(--ts-accent)",
+    "color-mix(in srgb,var(--ts-accent) 78%,var(--ts-panel))",
+    "color-mix(in srgb,var(--ts-accent) 56%,var(--ts-panel))",
+    "color-mix(in srgb,var(--ts-accent) 36%,var(--ts-panel))",
+    "color-mix(in srgb,var(--ts-accent) 20%,var(--ts-panel))",
+)
 
 
 def render_share_split(metric_points: list[Any]) -> None:
@@ -714,7 +741,9 @@ def render_share_split(metric_points: list[Any]) -> None:
         legend = "".join(
             f'<span class="ts-donut-key">'
             f'<i style="background:{_DONUT_COLORS[index % len(_DONUT_COLORS)]}"></i>'
-            f'{escape(point.subject or point.label)} {_format_number(point.value)}%</span>'
+            f'{escape(point.subject or point.label)}'
+            f'<b style="color:{_DONUT_COLORS[index % len(_DONUT_COLORS)]}">'
+            f'{_format_number(point.value)}%</b></span>'
             for index, point in enumerate(slices)
         )
         remainder = 100 - total
@@ -731,6 +760,108 @@ def render_share_split(metric_points: list[Any]) -> None:
             f'<div class="ts-donut-legend">{legend}</div></div>{note}',
             unsafe_allow_html=True,
         )
+
+
+_SERIES_COLORS = ("var(--ts-accent)", "var(--ts-navy)", "var(--ts-orange)")
+_GROUPED_BAR_HEIGHT = 132
+
+
+_COLUMN_BAR_MIN_ITEMS = 3
+
+
+def render_metric_columns(points_for_one_label: list[Any]) -> None:
+    """One metric across three or more items, drawn as columns.
+
+    Same data the row layout takes; the difference is only that a wide set of
+    items is easier to compare against a shared baseline than down a column of
+    tracks. Scaled against the largest value present, so the tallest column is
+    the largest figure and not an arbitrary axis maximum.
+    """
+    ordered = sorted(points_for_one_label, key=lambda point: abs(point.value), reverse=True)
+    peak = max(abs(point.value) for point in ordered) or 1
+    unit = ordered[0].unit or ""
+    labels = metric_axis_labels(ordered)
+    columns = "".join(
+        f'<div class="ts-gbar-col"><div class="ts-gbar-stack">'
+        f'<i style="height:{abs(point.value) / peak * 100:.1f}%" '
+        f'title="{escape(_format_number(point.value))}{escape(unit)}"></i></div>'
+        f'<span>{escape(label)}</span></div>'
+        for point, label in zip(ordered, labels)
+    )
+    unit_note = f'<span class="ts-chart-unit">단위: {escape(unit)}</span>' if unit else ""
+    st.markdown(
+        f'<div class="ts-chart"><div class="ts-chart-head"><b>{escape(ordered[0].label)}</b>'
+        f'{unit_note}</div>'
+        f'<div class="ts-gbar single" style="height:{_GROUPED_BAR_HEIGHT}px">{columns}</div></div>',
+        unsafe_allow_html=True,
+    )
+
+
+def render_grouped_bars(metric_points: list[Any]) -> None:
+    """Two or more subjects compared across the same categories.
+
+    The third axis the data has carried since `subject` was added, and the
+    only block that can show it: one metric, several subjects, several
+    categories. Bars are scaled against the largest value in the group, and a
+    category no one measured everyone on never reaches here (`grouped_bar_series`).
+    """
+    for label, categories, by_subject in grouped_bar_series(metric_points):
+        subjects = list(by_subject)[:len(_SERIES_COLORS)]
+        peak = max(
+            abs(point.value) for subject in subjects for point in by_subject[subject]
+        ) or 1
+        unit = next(
+            (point.unit for subject in subjects for point in by_subject[subject] if point.unit), ""
+        )
+        legend = "".join(
+            f'<span class="ts-chart-key"><i style="background:{_SERIES_COLORS[index]}"></i>'
+            f'{escape(subject)}</span>'
+            for index, subject in enumerate(subjects)
+        )
+        columns = ""
+        for position, category in enumerate(categories):
+            bars = "".join(
+                f'<i style="height:{abs(by_subject[subject][position].value) / peak * 100:.1f}%;'
+                f'background:{_SERIES_COLORS[index]}" '
+                f'title="{escape(subject)} {escape(_format_number(by_subject[subject][position].value))}'
+                f'{escape(unit)}"></i>'
+                for index, subject in enumerate(subjects)
+            )
+            columns += (
+                f'<div class="ts-gbar-col"><div class="ts-gbar-stack">{bars}</div>'
+                f'<span>{escape(category)}</span></div>'
+            )
+        unit_note = f'<span class="ts-chart-unit">단위: {escape(unit)}</span>' if unit else ""
+        st.markdown(
+            f'<div class="ts-chart"><div class="ts-chart-head"><b>{escape(label)}</b>{unit_note}</div>'
+            f'<div class="ts-chart-legend">{legend}</div>'
+            f'<div class="ts-gbar" style="height:{_GROUPED_BAR_HEIGHT}px">{columns}</div></div>',
+            unsafe_allow_html=True,
+        )
+
+
+_STATUS_TONE = {"high": "high", "medium": "medium", "low": "low"}
+_KPI_ROW_LAYOUT_MAX = 2
+
+
+def render_status_bar(comparison_points: list[Any]) -> None:
+    """Graded standings across one row, the qualitative twin of the KPI row.
+
+    Shows only what a document actually graded. The grade word is always
+    printed beside its colour - the colour is a second channel, never the
+    only one carrying the value.
+    """
+    rows = status_levels(comparison_points or [])
+    if len(rows) < 2:
+        return
+    cells = "".join(
+        f'<div class="ts-status-cell {_STATUS_TONE[level]}">'
+        f'<small>{escape(criterion)}</small>'
+        f'<b>{escape(detail)}</b>'
+        f'<span class="ts-status-level">{escape(level.upper())}</span></div>'
+        for criterion, detail, level in rows
+    )
+    st.markdown(f'<div class="ts-status-bar">{cells}</div>', unsafe_allow_html=True)
 
 
 def render_factor_list(items: list[tuple[str, str | None]]) -> None:
@@ -787,36 +918,60 @@ def render_recurring_terms(grounded_claims: list[Any]) -> None:
 
 
 def _claim_link(claim: Any) -> str:
+    """A small inline arrow, not the 27px round `ts-evidence-link` badge -
+    inside a cause-tree pill that badge is nearly as tall as the pill itself
+    and pushes the label out of it."""
     url = getattr(claim, "source_url", None)
     return (
-        f'<a class="ts-evidence-link" href="{escape(url)}" target="_blank" title="근거 원문 열기">↗</a>'
+        f'<a class="ts-inline-evidence" href="{escape(url)}" target="_blank" title="근거 원문 열기">↗</a>'
         if url else ""
     )
 
 
+def _cause_node_markup(node: dict, depth: int) -> str:
+    """One outlined pill plus whatever the evidence says followed from it.
+
+    Recursive so a document that stated a three-link chain shows three links;
+    the depth cut lives in `cause_forest`, not here.
+    """
+    claim = node["claim"]
+    children = "".join(_cause_node_markup(child, depth + 1) for child in node["children"])
+    nested = f'<div class="ts-cause-sub">{children}</div>' if children else ""
+    return (
+        f'<div class="ts-cause-item">'
+        f'<span class="ts-cause-pill">{escape(clean_citation(claim.claim))}{_claim_link(claim)}</span>'
+        f'{nested}</div>'
+    )
+
+
 def render_cause_tree(grounded_claims: list[Any]) -> None:
-    """Root causes with what the evidence says follows from them.
+    """Root cause, what it drove, and what that drove - as the artwork lays it
+    out: one filled pill on top, its branches side by side beneath a shared
+    rule, and each branch's own consequences stacked under it.
+
+    The branch row is a wrapping grid rather than a fixed three columns, so
+    two causes don't leave a hole and six don't run off the card - which is
+    the whole reason this is CSS and not a copy of the SVG's geometry.
 
     Drawn only from `parent_synthesis_claim_id` links that survived the
-    analyzer's verification - a document that never stated a causal chain
+    analyzer's verification; a document that never stated a causal chain
     produces no tree, and the flat claim list stays the honest rendering.
     """
-    roots = cause_tree(grounded_claims or [])
-    if not roots:
+    forest = cause_forest(grounded_claims or [])
+    if not forest:
         return
-    branches = ""
-    for root, children in roots:
-        child_rows = "".join(
-            f'<li>{escape(clean_citation(child.claim))}{_claim_link(child)}</li>'
-            for child in children
-        )
-        branches += (
-            f'<div class="ts-cause-branch">'
-            f'<div class="ts-cause-root">{escape(clean_citation(root.claim))}{_claim_link(root)}</div>'
-            f'<ul class="ts-cause-children">{child_rows}</ul></div>'
+    trees = ""
+    for root in forest:
+        branches = "".join(_cause_node_markup(branch, 2) for branch in root["children"])
+        trees += (
+            f'<div class="ts-cause-tree-root">'
+            f'<span class="ts-cause-root">'
+            f'{escape(clean_citation(root["claim"].claim))}{_claim_link(root["claim"])}</span>'
+            f'<div class="ts-cause-branches">{branches}</div></div>'
         )
     st.markdown(
-        f'<section class="ts-cause-tree"><h3>원인 구조</h3>{branches}</section>',
+        f'<section class="ts-cause-tree"><div class="ts-block-title">원인 구조</div>'
+        f'{trees}</section>',
         unsafe_allow_html=True,
     )
 
@@ -841,7 +996,7 @@ def render_importance_bars(grounded_claims: list[Any]) -> None:
         for claim in ranked
     )
     st.markdown(
-        '<section class="ts-drivers"><h3>영향도 <span class="ts-ai-badge">AI 판단</span></h3>'
+        '<section class="ts-drivers"><div class="ts-block-title">영향도 <span class="ts-ai-badge">AI 판단</span></div>'
         '<p class="ts-drivers-note">근거 문서가 제시한 수치가 아니라 모델이 매긴 상대적 중요도입니다. '
         '각 항목에 마우스를 올리면 그렇게 본 이유가 표시됩니다.</p>'
         + rows + "</section>",
@@ -921,8 +1076,8 @@ def render_kpi_row(metric_points: list[Any], limit: int = 4, question_terms: lis
         # as fact.
         observed = [point for point in points if not getattr(point, "is_forecast", False)]
         latest = (observed or points)[-1]
-        forecast_tag = ' <span class="ts-kpi-forecast">전망</span>' if getattr(latest, "is_forecast", False) else ""
-        value_text = f"{_format_number(latest.value)}{latest.unit}{forecast_tag}"
+        forecast_tag = '<span class="ts-kpi-forecast">전망</span>' if getattr(latest, "is_forecast", False) else ""
+        value_text = f"{_format_number(latest.value)}{latest.unit}"
         if is_chronological and len(observed) >= 2:
             delta = latest.value - observed[0].value
             sign = "+" if delta >= 0 else ""
@@ -942,10 +1097,17 @@ def render_kpi_row(metric_points: list[Any], limit: int = 4, question_terms: lis
         # be asserting a judgement the data doesn't support.
         cards.append(
             f'<div class="ts-kpi-card"><small>{escape(label)}</small>'
-            f'<div class="ts-kpi-figure"><b>{escape(value_text)}</b>'
+            f'<div class="ts-kpi-figure"><b>{escape(value_text)}{forecast_tag}</b>'
             f'<small class="ts-kpi-delta">{caption_text}</small></div>{spark}</div>'
         )
-    st.markdown(f'<div class="ts-kpi-row">{"".join(cards)}</div>', unsafe_allow_html=True)
+    # The artwork ships the KPI block in several densities, and which one fits
+    # is a question about how much data arrived: one or two figures in a
+    # four-up grid leave two empty tracks, which reads as missing data rather
+    # than as a short list. Two or fewer switch to the artwork's row variant -
+    # full-width tinted rows, label left, figure right - and three or more
+    # keep the card grid.
+    layout = "ts-kpi-row rows" if len(cards) <= _KPI_ROW_LAYOUT_MAX else "ts-kpi-row"
+    st.markdown(f'<div class="{layout}">{"".join(cards)}</div>', unsafe_allow_html=True)
 
 
 def render_source_list(result: Any) -> str:
@@ -1112,6 +1274,8 @@ def render_metric_comparison(period: str, points: list[Any]) -> None:
 
 
 _STATUS_LABELS = {"done": "완료", "active": "진행", "todo": "예정"}
+_HORIZONTAL_TIMELINE_MAX_STEPS = 5
+_HORIZONTAL_TIMELINE_MAX_CHARS = 22
 
 
 def render_timeline(
@@ -1134,10 +1298,27 @@ def render_timeline(
     )[:limit]
     if not entries:
         return
+    # The artwork has both a horizontal rail and a vertical one, and which
+    # fits is a property of the data: five short stage labels read across the
+    # page, but a row of full evidence sentences does not. Long text or many
+    # steps take the vertical rail, which can give each row a full line.
+    if len(entries) <= _HORIZONTAL_TIMELINE_MAX_STEPS and all(
+        len(text) <= _HORIZONTAL_TIMELINE_MAX_CHARS for _, text, _ in entries
+    ):
+        nodes = "".join(
+            f'<div class="ts-htimeline-step {status}">'
+            f'<span class="ts-htimeline-node"></span>'
+            f'<b>{escape(period)}</b>'
+            f'<span class="ts-htimeline-state">{_STATUS_LABELS[status]}</span>'
+            f'<span class="ts-htimeline-text">{escape(text)}</span></div>'
+            for period, text, status in entries
+        )
+        st.markdown(f'<div class="ts-htimeline">{nodes}</div>', unsafe_allow_html=True)
+        return
     steps = "".join(
         f'<div class="ts-timeline-step {status}">'
         f'<b>{escape(period)}<span class="ts-step-state">{_STATUS_LABELS[status]}</span></b>'
-        f'{escape(text)}</div>'
+        f'<span>{escape(text)}</span></div>'
         for period, text, status in entries
     )
     st.markdown(f'<div class="ts-timeline">{steps}</div>', unsafe_allow_html=True)

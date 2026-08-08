@@ -59,7 +59,8 @@ LAST_RESORT = "no_data"
 DESIGN_LIBRARY_BLOCKS: dict[str, tuple[str, ...]] = {
     "KPI Card": ("kpi_grid", "kpi_single"),
     "Line / Area": ("chart",),
-    "Bar": ("bar", "item_bar", "metric_comparison"),
+    "Bar": ("bar", "item_bar", "grouped_bar", "metric_comparison"),
+    "KPI Status Bar": ("status_bar",),
     "Share Split": ("share_split",),
     "Matrix": ("matrix",),
     "Timeline": ("timeline",),
@@ -121,13 +122,13 @@ _CURRENT_STATUS: tuple[Slot, ...] = (
     # 시장 상황 then falls to its own chart/timeline. Both slots reading the
     # same metric_series is why order decides which one gets `bar`.
     Slot("ranking", "순위·비교", "항목들 사이에서 무엇이 앞서는가",
-         ("share_split", "item_bar", "metric_comparison", "table", "narrative_list"),
+         ("share_split", "grouped_bar", "item_bar", "metric_comparison", "table", "narrative_list"),
          ("key_metrics", "market_status"), (), optional=True),
     Slot("market", "시장 상황", "시장이 어느 방향으로 움직이는가",
          ("chart", "bar", "item_bar", "timeline", "narrative_list"),
          ("market_status", "current_situation")),
     Slot("metrics", "지표", "확인된 수치를 제시",
-         ("kpi_grid", "chart", "kpi_single"), ("key_metrics",)),
+         ("kpi_grid", "chart", "kpi_single", "status_bar"), ("key_metrics",)),
     Slot("competitor", "경쟁사", "다른 주체와 견주면 어디쯤인가",
          ("table", "radar", "share_split", "narrative_list"), ("market_status",)),
     # 요인/페인포인트 questions ("가입 고려 요인", "인기 요인") answer with a
@@ -249,6 +250,12 @@ def _availability() -> dict[str, Callable[[Any, list[str]], bool]]:
         # direction can't claim the ranking bars and leave 순위 empty.
         "bar": lambda synthesis, items: bool(block_shapes.time_bar_groups(synthesis.metric_series)),
         "item_bar": lambda synthesis, items: bool(block_shapes.item_bar_groups(synthesis.metric_series)),
+        # Three axes at once (metric x subject x category) - strictly more
+        # than item_bar shows, so it is offered first wherever both fit.
+        "grouped_bar": lambda synthesis, items: block_shapes.has_grouped_bars(synthesis.metric_series),
+        "status_bar": lambda synthesis, items: block_shapes.has_status_levels(
+            synthesis.comparison_points
+        ),
         # Composition, not ranking - and only where the source framed the
         # figures as parts of one named whole.
         "share_split": lambda synthesis, items: block_shapes.has_share_split(synthesis.metric_series),

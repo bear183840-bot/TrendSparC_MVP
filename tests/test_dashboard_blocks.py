@@ -130,7 +130,10 @@ def test_timeline_excludes_undated_prose():
 def test_render_timeline_caps_entries(markup):
     evidence = [f"20{10 + i}년 지표가 변동했다" for i in range(9)]
     components.render_timeline(evidence, [], limit=4)
-    assert "".join(markup).count("ts-timeline-step") == 4
+    body = "".join(markup)
+    # Short labels take the horizontal rail, long ones the vertical one - the
+    # cap under test applies to both.
+    assert body.count("ts-htimeline-step") + body.count("ts-timeline-step") == 4
 
 
 # --- cause map: three honest columns, no invented edges ---

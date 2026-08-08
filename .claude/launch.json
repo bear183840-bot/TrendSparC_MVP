@@ -4,13 +4,21 @@
     {
       "name": "trendsparc-dashboard",
       "runtimeExecutable": ".venv/Scripts/streamlit.exe",
-      "runtimeArgs": ["run", "reporting/dashboard_streamlit/app.py"],
+      "runtimeArgs": [
+        "run",
+        "reporting/dashboard_streamlit/app.py"
+      ],
       "port": 8501
     },
     {
       "name": "trendsparc-dashboard-debug",
       "runtimeExecutable": ".venv/Scripts/streamlit.exe",
-      "runtimeArgs": ["run", "reporting/dashboard_streamlit/app.py", "--server.port", "8503"],
+      "runtimeArgs": [
+        "run",
+        "reporting/dashboard_streamlit/app.py",
+        "--server.port",
+        "8503"
+      ],
       "port": 8503
     }
   ]

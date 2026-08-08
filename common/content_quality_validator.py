@@ -279,10 +279,25 @@ def classify_metric_shape(points_for_one_label: list[Any]) -> MetricShape:
     and drawn as a chart running SK브로드밴드 → KT → LG유플러스, which asserts
     a progression between companies that means nothing.
     """
-    # An explicit `subject` axis settles it without guessing: the same metric
-    # measured for several subjects is a comparison however its periods read.
+    # An explicit `subject` axis usually settles it: the same metric measured
+    # for several subjects is a comparison however its periods read.
+    #
+    # Unless each of those subjects was also tracked over time. "국내 vs 글로벌
+    # OTT 가입자, 5년치" is two trends, not a ranking, and calling it a
+    # comparison drew five years of movement as a row of bars - the shape the
+    # question was actually about disappeared. So a subject split only wins
+    # when the time axis isn't there to win instead.
     subjects = {point.subject for point in points_for_one_label if getattr(point, "subject", None)}
     if len(subjects) >= 2:
+        periods_per_subject = [
+            {point.period for point in points_for_one_label if point.subject == subject}
+            for subject in subjects
+        ]
+        if all(
+            len(periods) >= 3 and all(is_time_period(period) for period in periods)
+            for periods in periods_per_subject
+        ):
+            return "line"
         return "comparison"
     periods = {point.period for point in points_for_one_label}
     if len(periods) <= 1:
@@ -298,6 +313,24 @@ def group_metric_points_by_label(metric_points: list[Any]) -> dict[str, list[Any
     grouped: dict[str, list[Any]] = {}
     for point in metric_points:
         grouped.setdefault(point.label, []).append(point)
+    return grouped
+
+
+def group_metric_points_by_series(metric_points: list[Any]) -> dict[str, list[Any]]:
+    """One entry per drawn line: `label` alone, or "label · subject" where a
+    subject splits it.
+
+    Charting groups by label, which is right until two subjects share one -
+    then both sets of points land on a single polyline and it zigzags between
+    국내 and 글로벌 at every year instead of drawing two trends. The display
+    name doubles as the legend entry, which is why the subject is folded into
+    the key rather than tracked beside it.
+    """
+    grouped: dict[str, list[Any]] = {}
+    for point in metric_points:
+        subject = getattr(point, "subject", None)
+        key = f"{point.label} · {subject}" if subject else point.label
+        grouped.setdefault(key, []).append(point)
     return grouped
 
 

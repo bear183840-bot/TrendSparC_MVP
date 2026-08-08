@@ -19,19 +19,34 @@ def dashboard_css(dark: bool, accent_theme: str = "orange") -> str:
             "sidebar": "#d7d7d7", "ink": "#202020", "muted": "#77736e",
             "line": "#aaa7a2", "soft": "#eeeeec", "shadow": "rgba(43,38,31,.10)",
         }
+    # Values read out of the delivered SVGs rather than the spec document that
+    # accompanied them - the two disagree (the doc says accent #E8450C and a
+    # #E3E7EE hairline; every artwork file uses #F24503/#EF4504 and a much
+    # darker rule), and the artwork is what the design actually is.
+    #
+    # `teal` keeps its name because a dozen call sites use it, but it now
+    # carries the design's secondary navy: in this system "the other series"
+    # and "the good end of a scale" are one colour, #2F5D8C.
     if accent_theme == "burgundy":
         accent_colors = (
-            {"accent": "#b5333f", "accent2": "#d97a4f", "teal": "#3f8a66"}
+            {"accent": "#b5333f", "accent2": "#d97a4f", "teal": "#5f86ad"}
             if dark
-            else {"accent": "#7a1f28", "accent2": "#b5502e", "teal": "#2f6b4f"}
+            else {"accent": "#7a1f28", "accent2": "#b5502e", "teal": "#2f5d8c"}
         )
     else:
         accent_colors = (
-            {"accent": "#f24a0a", "accent2": "#ff8a00", "teal": "#0c7884"}
+            {"accent": "#f4571b", "accent2": "#f0a72e", "teal": "#7fa8cf"}
             if dark
-            else {"accent": "#f04408", "accent2": "#f08300", "teal": "#135b86"}
+            else {"accent": "#f24503", "accent2": "#f28706", "teal": "#2f5d8c"}
         )
     colors.update(accent_colors)
+    # Direction colours. Present as tokens so a renderer *can* use them, but
+    # KPI deltas stay deliberately neutral - whether a rise is good is
+    # metric-specific ("해지율 상승"), and the evidence never says which. The
+    # spec's own deltaTone prop concedes the same point.
+    colors.update(
+        {"up": "#3ec46b", "down": "#ff6b6b"} if dark else {"up": "#079700", "down": "#f40000"}
+    )
     return f"""
     <style>
     @import url('https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.css');
@@ -39,7 +54,16 @@ def dashboard_css(dark: bool, accent_theme: str = "orange") -> str:
     :root {{ --ts-page:{colors['page']}; --ts-panel:{colors['panel']}; --ts-panel2:{colors['panel2']};
       --ts-sidebar:{colors['sidebar']}; --ts-ink:{colors['ink']}; --ts-muted:{colors['muted']};
       --ts-line:{colors['line']}; --ts-soft:{colors['soft']}; --ts-accent:{colors['accent']};
-      --ts-orange:{colors['accent2']}; --ts-teal:{colors['teal']}; --ts-shadow:{colors['shadow']}; }}
+      --ts-orange:{colors['accent2']}; --ts-teal:{colors['teal']}; --ts-shadow:{colors['shadow']};
+      --ts-navy:{colors['teal']}; --ts-up:{colors['up']}; --ts-down:{colors['down']};
+      /* Every progress track in the artwork is the accent at 31%, never a
+         neutral grey - a half-filled bar reads as one colour at two
+         strengths, which is what makes the fill legible at 10px tall. */
+      --ts-track:color-mix(in srgb,var(--ts-accent) 31%,transparent);
+      --ts-surface-alt:{'#161616' if dark else '#f4f4f4'};
+      /* Referenced by every chip/badge outline. It was never defined, so
+         those borders silently fell back to currentColor. */
+      --ts-border:color-mix(in srgb,var(--ts-line) 55%,transparent); }}
     html, body, [class*="css"] {{ font-family:"Pretendard Variable",Pretendard,"Noto Sans KR","Malgun Gothic",sans-serif; }}
     [data-testid="stAppViewContainer"] {{ background:var(--ts-page); color:var(--ts-ink); }}
     [data-testid="stHeader"] {{ background:transparent; }}
@@ -168,6 +192,18 @@ def dashboard_css(dark: bool, accent_theme: str = "orange") -> str:
       min-height:104px; padding:.85rem 1rem;
       border:1px solid color-mix(in srgb,var(--ts-line) 55%,transparent);
       border-radius:9px; background:var(--ts-panel); transition:border-color .15s, box-shadow .15s; }}
+    /* The artwork's row variant: one tinted band per figure, label left and
+       value right on the same line. Used when only one or two figures came
+       back - see _KPI_ROW_LAYOUT_MAX. */
+    .ts-kpi-row.rows {{ grid-template-columns:1fr; }}
+    .ts-kpi-row.rows .ts-kpi-card {{ flex-direction:row; align-items:center;
+      justify-content:space-between; min-height:0; padding:1.1rem 1.5rem; border:0;
+      border-radius:14px; background:var(--ts-surface-alt); }}
+    .ts-kpi-row.rows .ts-kpi-card > small {{ font-size:.92rem; font-weight:700; color:var(--ts-ink); }}
+    .ts-kpi-row.rows .ts-kpi-figure {{ display:flex; align-items:baseline; gap:.9rem; }}
+    .ts-kpi-row.rows .ts-kpi-card b {{ font-size:1.24rem; }}
+    .ts-kpi-row.rows .ts-kpi-delta {{ margin-top:0; }}
+    .ts-kpi-row.rows .ts-kpi-spark {{ display:none; }}
     .ts-kpi-card:hover {{ border-color:color-mix(in srgb,var(--ts-accent) 45%,var(--ts-line));
       box-shadow:0 2px 8px color-mix(in srgb,var(--ts-accent) 14%,transparent); }}
     .ts-kpi-card > small {{ display:block; color:var(--ts-muted); font-size:.78rem; font-weight:500;
@@ -185,12 +221,16 @@ def dashboard_css(dark: bool, accent_theme: str = "orange") -> str:
     /* Evidence & Sources - reference design 1a's outlined "Link" chip. */
     .ts-source-list {{ list-style:none; margin:0; padding:0; }}
     .ts-source-list li {{ display:flex; justify-content:space-between; align-items:center; gap:.6rem;
-      padding:.55rem 0; border-bottom:1px solid color-mix(in srgb,var(--ts-line) 38%,transparent);
-      font-size:.8rem; font-weight:500; color:var(--ts-muted); }}
+      padding:.7rem 0; border-bottom:1px solid color-mix(in srgb,var(--ts-line) 38%,transparent);
+      font-size:.88rem; font-weight:600; color:var(--ts-ink); }}
+    /* The artwork sets the source name in ink and its qualifier ("통계/정책
+       자료", "내부 데이터") in a lighter medium weight on the same line. */
+    .ts-source-list li small {{ margin-left:.4rem; font-size:.76rem; font-weight:500;
+      color:var(--ts-muted); }}
     .ts-source-list li:last-child {{ border-bottom:0; }}
-    .ts-source-list a {{ display:inline-flex; align-items:center; gap:.25rem; padding:.18rem .55rem;
-      border:1px solid color-mix(in srgb,var(--ts-accent) 45%,var(--ts-line)); border-radius:5px;
-      color:var(--ts-accent); text-decoration:none; font-weight:700; font-size:.68rem; white-space:nowrap; }}
+    .ts-source-list a {{ display:inline-flex; align-items:center; gap:.3rem; padding:.3rem .7rem;
+      border:1px solid var(--ts-accent); border-radius:6px;
+      color:var(--ts-accent); text-decoration:none; font-weight:600; font-size:.72rem; white-space:nowrap; }}
     .ts-source-list a:hover {{ background:color-mix(in srgb,var(--ts-accent) 10%,transparent); }}
     .ts-section-grid {{ display:grid; grid-template-columns:1.05fr 1.1fr 1.35fr; gap:.7rem; margin-top:.65rem; }}
     /* Korean has no inter-word break opportunity by default, so a track that
@@ -224,9 +264,10 @@ def dashboard_css(dark: bool, accent_theme: str = "orange") -> str:
     .ts-card h3, .ts-card-inner h3 {{ display:block; position:relative; margin:0 0 1rem;
       padding:0 0 .45rem; border:0; border-radius:0; background:none; color:var(--ts-ink);
       font-size:.95rem; font-weight:700; letter-spacing:-.01em; }}
+    /* The one signature every artwork shares: a plain rule under the title,
+       roughly the title's own width plus a tail - not a fading accent bar. */
     .ts-card h3::after, .ts-card-inner h3::after {{ content:""; position:absolute; left:0; bottom:0;
-      width:160px; max-width:70%; height:1.5px;
-      background:linear-gradient(90deg,var(--ts-accent),color-mix(in srgb,var(--ts-accent) 0%,transparent)); }}
+      width:170px; max-width:78%; height:1px; background:var(--ts-line); opacity:.85; }}
     /* Stage marker - the reference design groups its cards behind a vertical
        PROBLEM / CAUSE / IMPROVEMENT spine. Streamlit renders each element as
        its own block and can't wrap arbitrary containers in a custom grid, so
@@ -297,8 +338,11 @@ def dashboard_css(dark: bool, accent_theme: str = "orange") -> str:
       white-space:nowrap; }}
     .ts-table tr:last-child td {{ border-bottom:0; }}
     .ts-dot {{ display:inline-block; width:8px; height:8px; border-radius:50%; margin-right:.4rem; }}
-    .ts-dot.low {{ background:var(--ts-accent); }} .ts-dot.medium {{ background:var(--ts-orange); }}
-    .ts-dot.high {{ background:var(--ts-teal); }}
+    /* High/Medium/Low as the artwork ranks them: navy, amber, red. The text
+       label always sits beside the dot - colour never carries the grade on
+       its own (spec item 6, and the same rule our own tables already used). */
+    .ts-dot.low {{ background:var(--ts-down); }} .ts-dot.medium {{ background:var(--ts-orange); }}
+    .ts-dot.high {{ background:var(--ts-navy); }}
     .ts-metric-groups {{ display:flex; gap:1.6rem; flex-wrap:wrap; margin-top:.3rem; }}
     .ts-metric-groups .ts-stat b {{ color:var(--ts-accent); }}
     .ts-metric-groups ul {{ margin:.35rem 0 0; padding-left:1.1rem; font-size:.82rem; color:var(--ts-ink); }}
@@ -309,16 +353,35 @@ def dashboard_css(dark: bool, accent_theme: str = "orange") -> str:
     .ts-swot {{ display:grid; grid-template-columns:1fr 1fr; gap:.55rem; }}
     /* Two quadrants read better side by side than in a 2x2 with holes. */
     .ts-swot.duo {{ grid-template-columns:1fr 1fr; }}
-    .ts-swot-cell {{ min-height:104px; padding:.75rem .85rem; border-radius:16px; }}
-    .ts-swot-cell.positive {{ background:color-mix(in srgb,var(--ts-teal) 10%,var(--ts-panel));
-      border:1px solid color-mix(in srgb,var(--ts-teal) 30%,var(--ts-line)); }}
-    .ts-swot-cell.negative {{ background:color-mix(in srgb,var(--ts-accent) 10%,var(--ts-panel));
-      border:1px solid color-mix(in srgb,var(--ts-accent) 30%,var(--ts-line)); }}
-    .ts-swot-cell h4 {{ display:inline-block; margin:0 0 .5rem; padding:.22rem .75rem; border-radius:999px;
-      color:#fff; font-size:.82rem; font-weight:800; letter-spacing:.01em; }}
-    .ts-swot-cell.positive h4 {{ background:var(--ts-teal); }}
-    .ts-swot-cell.negative h4 {{ background:var(--ts-accent); }}
-    .ts-swot-cell p {{ margin:.28rem 0; font-size:.78rem; line-height:1.4; }}
+    /* Quadrants divided by hairlines rather than tinted boxes, per the
+       artwork. Positive (S/O) reads navy, negative (W/T) accent - the same
+       two-colour split the rest of the system uses, so tone is consistent
+       across blocks instead of being re-invented per card. */
+    .ts-swot-cell {{ min-height:104px; padding:.85rem 1rem; }}
+    .ts-swot-cell h4 {{ position:relative; display:flex; align-items:center; margin:0 0 .6rem;
+      padding:0; background:none; border-radius:0; color:var(--ts-ink); white-space:nowrap;
+      font-size:1rem; font-weight:800; letter-spacing:-.02em; }}
+    .ts-swot-initial {{ position:relative; z-index:1; font-size:1.32rem; }}
+    /* The disc is a gradient fading to nothing, drawn behind the initial and
+       offset left the way the artwork overlaps them. */
+    .ts-swot-cell h4::before {{ content:""; position:absolute; left:-.42rem; top:50%;
+      width:1.75rem; height:1.75rem; transform:translateY(-50%); border-radius:50%; z-index:0; }}
+    .ts-swot-cell.positive h4::before {{ background:linear-gradient(90deg,
+      color-mix(in srgb,var(--ts-navy) 85%,transparent),transparent); }}
+    .ts-swot-cell.negative h4::before {{ background:linear-gradient(90deg,
+      color-mix(in srgb,var(--ts-accent) 85%,transparent),transparent); }}
+    .ts-swot-cell ul {{ list-style:none; margin:0; padding:0 0 0 .9rem; }}
+    .ts-swot-cell li {{ position:relative; margin:.35rem 0; font-size:.82rem; line-height:1.45;
+      color:var(--ts-ink); }}
+    .ts-swot-cell li::before {{ content:""; position:absolute; left:-.9rem; top:.45rem;
+      width:5px; height:5px; border-radius:50%; border:1px solid currentColor; background:var(--ts-panel); }}
+    .ts-swot-cell.positive li::before {{ color:var(--ts-navy); }}
+    .ts-swot-cell.negative li::before {{ color:var(--ts-accent); }}
+    /* The hairline cross between quadrants, drawn with cell borders so it
+       survives two, three or four quadrants without a separate element. */
+    .ts-swot > .ts-swot-cell:nth-child(odd) {{ border-right:1px solid var(--ts-border); }}
+    .ts-swot > .ts-swot-cell:nth-child(-n+2):not(:only-child) {{ border-bottom:1px solid var(--ts-border); }}
+    .ts-swot.duo > .ts-swot-cell {{ border-bottom:0; }}
     .ts-actions {{ margin-top:.65rem; padding:.65rem 1rem; border:1.5px solid var(--ts-line); border-radius:20px;
       background:var(--ts-panel); }}
     .ts-actions h3 {{ margin:0 0 .45rem; color:var(--ts-ink); }}
@@ -357,14 +420,29 @@ def dashboard_css(dark: bool, accent_theme: str = "orange") -> str:
     .ts-purpose-card.timeline .ts-compact-list li {{ border-left:2px solid var(--ts-accent); padding-left:.7rem; }}
     .ts-action-basis {{ color:var(--ts-muted); font-size:.76rem; }}
     .ts-footer-note b {{ color:var(--ts-orange); white-space:nowrap; }}
-    .ts-timeline {{ position:relative; margin:.4rem 0 .2rem .5rem; padding-left:1.8rem; }}
-    .ts-timeline::before {{ content:""; position:absolute; left:.48rem; top:.35rem; bottom:.4rem;
-      width:2px; background:linear-gradient(var(--ts-accent),var(--ts-orange)); }}
-    .ts-timeline-step {{ position:relative; margin:0 0 1rem; padding:.75rem 1rem; border:1px solid var(--ts-line);
-      border-radius:14px; background:var(--ts-panel2); color:var(--ts-ink); }}
-    .ts-timeline-step::before {{ content:""; position:absolute; left:-1.73rem; top:1rem; width:.72rem; height:.72rem;
-      border:3px solid var(--ts-panel); border-radius:50%; background:var(--ts-accent); box-shadow:0 0 0 1px var(--ts-accent); }}
-    .ts-timeline-step b {{ color:var(--ts-accent); margin-right:.55rem; }}
+    /* Timeline, per the artwork's vertical variant: nodes on a rail, no card
+       around each step. State is carried by the node and by the rail segment
+       that leads into it - filled navy for what happened, an accent ring for
+       what is under way, a grey ring for what has not started - so the eye
+       reads progress down the rail rather than from four text labels. */
+    .ts-timeline {{ position:relative; margin:.5rem 0 .2rem .35rem; padding-left:1.6rem; }}
+    .ts-timeline-step {{ position:relative; margin:0 0 1.15rem; padding:0 0 0 .1rem;
+      color:var(--ts-ink); }}
+    .ts-timeline-step:last-child {{ margin-bottom:.2rem; }}
+    /* The rail is drawn per step, not once for the whole list, because each
+       segment's style depends on the step it runs into. */
+    .ts-timeline-step::after {{ content:""; position:absolute; left:-1.13rem; top:1.1rem; bottom:-1.15rem;
+      border-left:2px solid var(--ts-navy); }}
+    .ts-timeline-step:last-child::after {{ display:none; }}
+    .ts-timeline-step.todo::after {{ border-left-style:dashed; border-left-color:var(--ts-muted); }}
+    .ts-timeline-step.active::after {{ border-left-style:dashed; border-left-color:var(--ts-accent); }}
+    .ts-timeline-step::before {{ content:""; position:absolute; left:-1.45rem; top:.2rem;
+      width:.78rem; height:.78rem; border-radius:50%; background:var(--ts-navy);
+      border:2px solid var(--ts-navy); box-sizing:border-box; }}
+    .ts-timeline-step.active::before {{ background:var(--ts-panel); border-color:var(--ts-accent); }}
+    .ts-timeline-step.todo::before {{ background:var(--ts-panel); border-color:var(--ts-muted); }}
+    .ts-timeline-step b {{ display:block; margin:0 0 .2rem; color:var(--ts-ink);
+      font-size:.9rem; font-weight:700; }}
     .ts-collection-row {{ display:grid; grid-template-columns:28px 52px minmax(180px,1fr) auto;
       align-items:center; gap:10px; margin:7px 0; padding:11px 14px; border:1px solid var(--ts-line);
       border-radius:12px; background:var(--ts-panel); color:var(--ts-ink); }}
@@ -395,14 +473,12 @@ def dashboard_css(dark: bool, accent_theme: str = "orange") -> str:
         width:14px; border-radius:0; }}
     .ts-kpi-forecast {{ font-size:0.62em; vertical-align:middle; padding:1px 5px; margin-left:4px;
         border:1px solid var(--ts-border); border-radius:999px; color:var(--ts-muted); }}
-    .ts-timeline-step .ts-step-state {{ margin-left:6px; padding:0 6px; border-radius:999px;
-        font-size:0.66rem; font-weight:600; border:1px solid var(--ts-border);
+    .ts-timeline-step .ts-step-state {{ margin-left:8px; font-size:0.74rem; font-weight:700;
         color:var(--ts-muted); }}
-    .ts-timeline-step.done .ts-step-state {{ border-color:var(--ts-accent); color:var(--ts-accent); }}
-    .ts-timeline-step.active .ts-step-state {{ background:var(--ts-accent); border-color:var(--ts-accent);
-        color:#fff; }}
-    .ts-timeline-step.todo {{ opacity:0.72; }}
-    .ts-timeline-step.todo .ts-step-state {{ border-style:dashed; }}
+    .ts-timeline-step.done .ts-step-state {{ color:var(--ts-navy); }}
+    .ts-timeline-step.active .ts-step-state {{ color:var(--ts-accent); }}
+    .ts-timeline-step > span:last-child {{ display:block; font-size:.82rem; color:var(--ts-muted);
+        line-height:1.45; }}
     .ts-donut-card {{ display:flex; align-items:center; gap:16px; flex-wrap:wrap; }}
     /* The 25-unit dashoffset already starts the first slice at 12 o'clock
        (circumference is 100 by construction), so no extra rotation. */
@@ -410,7 +486,70 @@ def dashboard_css(dark: bool, accent_theme: str = "orange") -> str:
     .ts-donut-seg {{ transform-origin:center; }}
     .ts-donut-legend {{ display:flex; flex-direction:column; gap:4px; font-size:0.84rem; }}
     .ts-donut-key {{ display:flex; align-items:center; gap:7px; }}
-    .ts-donut-key i {{ width:10px; height:10px; border-radius:3px; display:inline-block; }}
+    /* The legend marker is a 2px vertical bar in the slice's own tint, and the
+       slices are one hue stepped down in strength - never a colour wheel, so
+       a five-slice split still reads as one quantity divided up. */
+    .ts-donut-key i {{ width:3px; height:16px; border-radius:2px; display:inline-block; }}
+    .ts-donut-key b {{ margin-left:auto; font-weight:700; }}
+    /* Grouped bars: thin columns with a small gap inside a category and a
+       wide one between categories, per the artwork - the spacing is what
+       tells you which bars belong together, so it has to survive two
+       subjects or three, two categories or six. */
+    .ts-gbar {{ display:flex; align-items:flex-end; justify-content:space-around; gap:.5rem;
+      margin-top:.5rem; padding-bottom:1.35rem; border-bottom:1px solid var(--ts-line);
+      position:relative; }}
+    .ts-gbar-col {{ display:flex; flex-direction:column; justify-content:flex-end; align-items:center;
+      flex:1 1 0; min-width:0; height:100%; }}
+    .ts-gbar-stack {{ display:flex; align-items:flex-end; justify-content:center; gap:4px;
+      width:100%; height:100%; }}
+    .ts-gbar-stack i {{ display:block; width:14px; max-width:28%; border-radius:2px 2px 0 0;
+      min-height:2px; }}
+    .ts-gbar-col span {{ position:absolute; bottom:0; font-size:.72rem; color:var(--ts-muted);
+      white-space:nowrap; }}
+    /* Status bar: the qualitative KPI row. Each cell is led by a 2px rule in
+       its grade's colour, the way the artwork marks its four standings. */
+    .ts-gbar.single .ts-gbar-stack i {{ background:var(--ts-accent); width:16px; max-width:40%; }}
+    /* Horizontal timeline: nodes on one rail with the stage under each, the
+       artwork's wide variant. Wraps to a column below 520px rather than
+       compressing five labels into unreadable slivers. */
+    .ts-htimeline {{ display:flex; align-items:flex-start; gap:.25rem; margin:.9rem 0 .3rem; }}
+    .ts-htimeline-step {{ position:relative; flex:1 1 0; min-width:0; padding-top:1.35rem;
+      text-align:center; }}
+    .ts-htimeline-step:not(:last-child):after {{ content:""; position:absolute; left:50%; right:-50%;
+      top:.42rem; border-top:2px solid var(--ts-navy); }}
+    .ts-htimeline-step.active:not(:last-child):after {{ border-top-style:dashed;
+      border-top-color:var(--ts-accent); }}
+    .ts-htimeline-step.todo:not(:last-child):after {{ border-top-style:dashed;
+      border-top-color:var(--ts-muted); }}
+    .ts-htimeline-node {{ position:absolute; left:50%; top:0; width:.78rem; height:.78rem;
+      margin-left:-.39rem; border:2px solid var(--ts-navy); border-radius:50%;
+      background:var(--ts-navy); box-sizing:border-box; z-index:1; }}
+    .ts-htimeline-step.active .ts-htimeline-node {{ background:var(--ts-panel); border-color:var(--ts-accent); }}
+    .ts-htimeline-step.todo .ts-htimeline-node {{ background:var(--ts-panel); border-color:var(--ts-muted); }}
+    .ts-htimeline-step b {{ display:block; font-size:.82rem; font-weight:700; word-break:keep-all; }}
+    .ts-htimeline-state {{ display:block; margin-top:.15rem; font-size:.74rem; font-weight:700;
+      color:var(--ts-muted); }}
+    .ts-htimeline-step.done .ts-htimeline-state {{ color:var(--ts-navy); }}
+    .ts-htimeline-step.active .ts-htimeline-state {{ color:var(--ts-accent); }}
+    .ts-htimeline-text {{ display:block; margin-top:.3rem; font-size:.74rem; color:var(--ts-muted);
+      line-height:1.4; word-break:keep-all; }}
+    @media (max-width:520px) {{
+      .ts-htimeline {{ flex-direction:column; }}
+      .ts-htimeline-step:not(:last-child):after {{ display:none; }}
+    }}
+    .ts-status-bar {{ display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr));
+      gap:1.1rem; margin-top:.65rem; padding:1rem 1.15rem; border:1px solid var(--ts-border);
+      border-radius:10px; background:var(--ts-panel); }}
+    .ts-status-cell {{ padding-left:.7rem; border-left:2px solid var(--ts-navy); }}
+    .ts-status-cell.medium {{ border-left-color:var(--ts-orange); }}
+    .ts-status-cell.low {{ border-left-color:var(--ts-down); }}
+    .ts-status-cell small {{ display:block; font-size:.76rem; font-weight:700; color:var(--ts-muted); }}
+    .ts-status-cell b {{ display:block; margin-top:.3rem; font-size:.95rem; font-weight:800;
+      color:var(--ts-ink); }}
+    .ts-status-level {{ display:inline-block; margin-top:.2rem; font-size:.7rem; font-weight:700;
+      letter-spacing:.04em; color:var(--ts-navy); }}
+    .ts-status-cell.medium .ts-status-level {{ color:var(--ts-orange); }}
+    .ts-status-cell.low .ts-status-level {{ color:var(--ts-down); }}
     .ts-factor-list {{ margin:0; padding-left:18px; }}
     .ts-factor-list li {{ margin:5px 0; display:flex; gap:6px; align-items:baseline;
         font-size:0.9rem; }}
@@ -420,25 +559,95 @@ def dashboard_css(dark: bool, accent_theme: str = "orange") -> str:
         border:1px solid var(--ts-border); border-radius:999px; font-size:0.82rem; }}
     .ts-term b {{ color:var(--ts-accent); font-variant-numeric:tabular-nums; }}
     .ts-cause-tree, .ts-drivers {{ margin-top:14px; }}
-    .ts-cause-branch {{ border-left:2px solid var(--ts-accent); padding:2px 0 2px 12px;
-        margin-bottom:12px; }}
-    .ts-cause-root {{ font-weight:600; }}
-    .ts-cause-children {{ margin:6px 0 0; padding-left:18px; color:var(--ts-muted);
-        font-size:0.9rem; }}
-    .ts-cause-children li {{ margin:3px 0; }}
-    .ts-driver-row {{ display:grid; grid-template-columns:minmax(0,1fr) 120px 34px 18px;
-        align-items:center; gap:10px; padding:5px 0;
-        border-bottom:1px solid var(--ts-soft); font-size:0.88rem; }}
-    .ts-driver-row .label {{ overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }}
-    .ts-driver-row .value {{ text-align:right; color:var(--ts-muted); font-variant-numeric:tabular-nums; }}
-    .ts-driver-track {{ display:block; height:6px; border-radius:3px; background:var(--ts-soft); }}
-    .ts-driver-track i {{ display:block; height:6px; border-radius:3px; background:var(--ts-accent); }}
+    /* These two blocks carry their own heading inside a card that already has
+       one, so they sit a step down the scale rather than repeating it. */
+    .ts-block-title {{ margin:0 0 .7rem; font-size:.9rem; font-weight:700; color:var(--ts-ink); }}
+    .ts-cause-root .ts-inline-evidence, .ts-cause-children .ts-inline-evidence {{
+      display:inline; width:auto; height:auto; margin-left:.35rem; padding:0;
+      background:none; border:0; border-radius:0; font-size:.75rem; text-decoration:none;
+      vertical-align:baseline; }}
+    .ts-cause-root .ts-inline-evidence {{ color:#fff; opacity:.9; }}
+    .ts-cause-root .ts-evidence-link, .ts-cause-children .ts-evidence-link {{
+      display:inline; width:auto; height:auto; background:none; border:0; }}
+    /* Cause tree. The artwork's elbow connectors are drawn here as borders on
+       the layout boxes rather than as SVG paths, because the number of
+       branches and the length of each label are both unknown until render -
+       a copied geometry would either clip or leave gaps at every other size. */
+    .ts-cause-tree-root {{ display:flex; flex-direction:column; align-items:center;
+      margin-bottom:1rem; }}
+    .ts-cause-root {{ display:inline-flex; align-items:center; padding:9px 20px;
+      border-radius:999px; background:var(--ts-accent); color:#fff;
+      font-size:.9rem; font-weight:700; text-align:center; }}
+    /* The stub down from the root, and the horizontal bus the branches hang
+       from - one border each, so they stay joined however the row wraps. */
+    .ts-cause-branches {{ position:relative; display:grid;
+      grid-template-columns:repeat(auto-fit,minmax(165px,1fr)); gap:.9rem 1rem;
+      width:100%; margin-top:1.4rem; padding-top:1rem;
+      border-top:1.5px solid var(--ts-accent); }}
+    .ts-cause-branches:before {{ content:""; position:absolute; left:50%; top:-1.4rem;
+      height:1.4rem; border-left:1.5px solid var(--ts-accent); }}
+    .ts-cause-branches > .ts-cause-item:before {{ content:""; position:absolute; left:1.1rem;
+      top:-1rem; height:1rem; border-left:1.5px solid var(--ts-accent); }}
+    .ts-cause-item {{ position:relative; min-width:0; }}
+    .ts-cause-pill {{ display:inline-flex; align-items:center; padding:7px 15px;
+      border:1.5px solid var(--ts-accent); border-radius:999px; background:var(--ts-panel);
+      color:var(--ts-ink); font-size:.82rem; font-weight:700; word-break:keep-all; }}
+    /* A first-level branch is filled, like the artwork; anything under it is
+       outlined, so depth reads at a glance rather than from indentation only. */
+    .ts-cause-branches > .ts-cause-item > .ts-cause-pill {{ background:var(--ts-accent);
+      border-color:var(--ts-accent); color:#fff; }}
+    .ts-cause-sub {{ margin:.55rem 0 0 .9rem; padding-left:.85rem;
+      border-left:1.5px dashed var(--ts-accent); }}
+    .ts-cause-sub .ts-cause-item {{ margin:.4rem 0; }}
+    .ts-cause-sub .ts-cause-pill {{ font-weight:600; font-size:.78rem; }}
+    .ts-cause-root .ts-inline-evidence, .ts-cause-pill .ts-inline-evidence {{
+      display:inline; width:auto; height:auto; margin-left:.35rem; padding:0;
+      background:none; border:0; border-radius:0; font-size:.72rem; text-decoration:none;
+      vertical-align:baseline; }}
+    .ts-cause-root .ts-inline-evidence {{ color:#fff; opacity:.9; }}
+    .ts-cause-branches > .ts-cause-item > .ts-cause-pill .ts-inline-evidence {{ color:#fff; opacity:.9; }}
+    .ts-block-title {{ margin:0 0 .7rem; font-size:.9rem; font-weight:700; color:var(--ts-ink); }}
+    .ts-cause-root .ts-inline-evidence, .ts-cause-children .ts-inline-evidence {{
+      display:inline; width:auto; height:auto; margin-left:.35rem; padding:0;
+      background:none; border:0; border-radius:0; font-size:.75rem; text-decoration:none;
+      vertical-align:baseline; }}
+    .ts-cause-root .ts-inline-evidence {{ color:#fff; opacity:.9; }}
+    .ts-cause-root .ts-evidence-link, .ts-cause-children .ts-evidence-link {{
+      display:inline; width:auto; height:auto; background:none; border:0; }}
+    .ts-cause-branch {{ padding:0 0 0 4px; margin-bottom:16px; }}
+    /* Root cause: filled accent pill, white text. What follows from it:
+       outlined pill in ink. Same two shapes as the artwork, and the nesting
+       is carried by an indent + dashed rule rather than an SVG elbow, which
+       cannot reflow when a claim runs to two lines. */
+    .ts-cause-root {{ display:inline-block; padding:8px 18px; border-radius:999px;
+        background:var(--ts-accent); color:#fff; font-size:0.88rem; font-weight:700; }}
+    .ts-cause-root a {{ color:#fff; }}
+    .ts-cause-children {{ list-style:none; margin:8px 0 0; padding-left:22px;
+        border-left:1px dashed var(--ts-accent); font-size:0.82rem; }}
+    .ts-cause-children li {{ position:relative; display:inline-flex; align-items:center; gap:6px;
+        margin:5px 8px 5px 0; padding:5px 14px; border:1.5px solid var(--ts-accent);
+        border-radius:999px; color:var(--ts-ink); font-weight:600; background:var(--ts-panel); }}
+    .ts-driver-row {{ display:grid; grid-template-columns:minmax(0,1fr) minmax(64px,130px) 34px auto;
+        align-items:center; gap:10px; padding:7px 0; font-size:0.88rem; font-weight:700;
+        color:var(--ts-ink); }}
+    /* Below ~420px the bar has no room left to be readable beside the label,
+       so it moves under it rather than squeezing the label into an ellipsis. */
+    @media (max-width:430px) {{
+      .ts-driver-row {{ grid-template-columns:minmax(0,1fr) 34px; row-gap:4px; }}
+      .ts-driver-track {{ grid-column:1 / -1; }}
+    }}
+    .ts-driver-row .label {{ min-width:0; line-height:1.35; word-break:keep-all; }}
+    .ts-driver-row .value {{ text-align:right; color:var(--ts-ink); font-weight:700;
+        font-size:0.82rem; font-variant-numeric:tabular-nums; }}
+    .ts-driver-track {{ display:block; height:10px; border-radius:999px; background:var(--ts-track); }}
+    .ts-driver-track i {{ display:block; height:10px; border-radius:999px; background:var(--ts-accent); }}
     .ts-drivers-note {{ margin:2px 0 8px; font-size:0.76rem; color:var(--ts-muted); }}
     .ts-ai-badge {{ font-size:0.66rem; padding:1px 6px; border-radius:999px;
         border:1px solid var(--ts-border); color:var(--ts-muted); vertical-align:middle;
         margin-left:6px; }}
-    .ts-impact-bar {{ display:flex; align-items:center; gap:6px; margin-top:4px; }}
-    .ts-impact-bar i {{ display:block; height:5px; border-radius:3px; background:var(--ts-accent);
+    .ts-impact-bar {{ display:flex; align-items:center; gap:8px; margin-top:6px;
+        background:var(--ts-track); border-radius:999px; padding:0; }}
+    .ts-impact-bar i {{ display:block; height:4px; border-radius:999px; background:var(--ts-accent);
         min-width:4px; }}
     .ts-impact-bar b {{ font-size:0.74rem; font-weight:600; color:var(--ts-muted); white-space:nowrap; }}
     .ts-metric-insight {{ margin:6px 2px 0; font-size:0.82rem; line-height:1.5;
