@@ -835,6 +835,96 @@ _FIXTURE_SKIPPED_STAGES = (
 )
 
 
+
+def run_pipeline_from_documents(
+    result: PipelineResult,
+    question: str,
+    audience_id: str,
+    force_fail_stage: Optional[str] = None,
+) -> PipelineResult:
+    """Re-run analysis onward over documents a previous run already collected.
+
+    Collection is the expensive half - search rounds and a scrape per page -
+    and it is also the half that doesn't change when the bug was downstream of
+    it. A run that halted in the analyzer therefore left five perfectly good
+    documents on disk and no way to use them without paying to fetch them
+    again. This takes that saved result and restarts at the analyzer.
+
+    Not free: the analyzer is an AI stage, and so are synthesis's refinement
+    pass and the report writer. But the searching and scraping are not
+    repeated, which is where most of a run's cost and all of its rate-limit
+    pressure sit.
+
+    The stages before the analyzer keep the statuses they had in the saved
+    run, so the trace still shows what actually happened rather than implying
+    those stages ran again.
+    """
+    documents = list(result.collected_source_documents or [])
+    if not documents:
+        raise PipelineStageError(
+            stage="sector_adapter.analyzer",
+            reason="saved run has no collected documents to resume from",
+        )
+    if result.sector_route is None:
+        raise PipelineStageError(
+            stage="sector_adapter.analyzer", reason="saved run has no sector route"
+        )
+
+    request = UserRequest(
+        request_id=result.request_id, question=question, target_audience=audience_id
+    )
+    # Drop the failed analyzer entry and everything the halt skipped: those
+    # statuses describe the run being replaced, not this one.
+    _RESUMED_FROM = {"sector_adapter.analyzer", "synthesis", "report_planner",
+                     "report_generator", "audience_adapter", "layout_generator"}
+    result.trace = [trace for trace in result.trace if trace.stage not in _RESUMED_FROM]
+    result.halted_at_stage = None
+
+    def _maybe_force_fail(stage: str) -> None:
+        if force_fail_stage == stage:
+            raise PipelineStageError(stage=stage, reason="forced failure for testing")
+
+    def _halt(stage: str, reason: str, detail: Optional[str] = None) -> None:
+        result.trace.append(StageTrace(stage=stage, status=StageStatus.FAILED, reason=reason, detail=detail))
+        result.halted_at_stage = stage
+
+    try:
+        _maybe_force_fail("sector_adapter.analyzer")
+        analyses = _call_sector_adapter_stage(
+            result.sector_route, "analyzer", documents, question,
+            result.source_plan.information_needs if result.source_plan else [],
+            target_block_shapes(result.block_priority_plan),
+        )
+        # Same relevance gate the live path applies: a document search matched
+        # is not a document that answers the question.
+        usable = [
+            analysis for analysis in analyses
+            if analysis.relevant_to_question is not False
+            and analysis.analysis_validation_status != "failed"
+        ]
+        for analysis in analyses:
+            if analysis not in usable:
+                print(f"[synthesis] doc '{analysis.doc_id}' excluded on resume", file=sys.stderr)
+        result.document_analyses = usable
+        result.trace.append(StageTrace(stage="sector_adapter.analyzer", status=StageStatus.OK,
+                                       reason="resumed from saved documents"))
+    except PipelineStageError as exc:
+        _halt("sector_adapter.analyzer", exc.reason, exc.detail)
+        return result
+
+    try:
+        _maybe_force_fail("synthesis")
+        rule_based = synthesize(result.request_id, result.sector_route.sector_id, result.document_analyses)
+        rule_based.as_of_date = request.created_at.date().isoformat()
+        result.synthesis = refine_synthesis_ai(rule_based, question)
+        result.trace.append(StageTrace(stage="synthesis", status=StageStatus.OK))
+    except PipelineStageError as exc:
+        _halt("synthesis", exc.reason, exc.detail)
+        return result
+
+    _run_report_stages(result, request, audience_id, _maybe_force_fail, _halt)
+    return result
+
 def run_pipeline_from_synthesis(
     question: str,
     synthesis: TrendSynthesis,

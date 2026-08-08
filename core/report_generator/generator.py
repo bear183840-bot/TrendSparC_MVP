@@ -977,6 +977,110 @@ def _fallback_report(
     )
 
 
+
+# A gpt-4o account's tokens-per-minute allowance is the real ceiling here, not
+# the model's context window. Live-observed on a 롱폼/숏폼 run: the request
+# came to 30,881 tokens against a 30,000 TPM limit, the call raised 429, and
+# the whole report silently fell back to the rule-based path - which also
+# meant none of the figures sitting in the evidence were ever structured.
+#
+# Budget in characters, because that is what can be measured without adding a
+# tokenizer dependency. Korean runs roughly 1.4 tokens per character on
+# o200k, so the default leaves room for the system prompt and the response
+# inside a 30k allowance. Override per deployment; a larger allowance is a
+# reason to raise it, not to remove the check.
+_PAYLOAD_CHAR_BUDGET = int(os.getenv("TRENDSPARC_REPORT_GENERATOR_CHAR_BUDGET", "14000"))
+
+# Trimmed in this order once the two structural savings below aren't enough.
+# Highlights go first because they restate key_points; evidence goes last and
+# keeps a floor, because it is the text every figure is extracted from - a
+# report that loses its evidence sentences loses its charts with them.
+_TRIM_ORDER = (("highlights", 0), ("key_points", 3), ("grounded_claims", 4), ("evidence", 8))
+
+
+def _claim_for_writer(claim: dict) -> dict:
+    """A claim as the report writer needs it, not as the pipeline stores it.
+
+    `section_evidence_map` refers to claims by id, so ids and text have to
+    survive. Everything else - passage ids, locations, urls, reliability
+    tiers, and the evidence quote that is already in `evidence` verbatim - is
+    provenance the writer never reads. On the run that hit the limit it was
+    half the request: 21,758 of 42,770 characters.
+    """
+    return {
+        "synthesis_claim_id": claim.get("synthesis_claim_id"),
+        "claim_type": claim.get("claim_type"),
+        "claim": claim.get("claim"),
+        "source_id": claim.get("source_id"),
+    }
+
+
+def _referenced_claim_ids(report_plan: Any) -> set[str]:
+    """Claim ids the section map actually points at - those are the ones the
+    writer is told to place, so they are the last claims to drop."""
+    referenced: set[str] = set()
+    for refs in getattr(report_plan, "section_evidence_map", {}).values():
+        for field in ("claim_ids", "metric_ids", "comparison_ids", "conclusion_ids"):
+            referenced.update(getattr(refs, field, None) or [])
+    return referenced
+
+
+def _fit_payload(payload: dict, report_plan: Any, budget: int) -> dict:
+    """Shrink the request until it fits, cheapest loss first.
+
+    Two structural savings come before any content is dropped, and on the run
+    that failed they alone took 42,770 characters to 20,069: claims are
+    reduced to the four fields the writer reads, and rule-based conclusions -
+    which are 1:1 restatements of the claims above them - are dropped.
+
+    Only then are whole items removed, never parts of them. A truncated
+    figure ("78.8" from "78.8%") is worse than an absent one: the verifier
+    would reject it as unsupported, and the failure would read as a data
+    problem rather than a size one.
+    """
+    synthesis = payload.get("synthesis") or {}
+    claims = synthesis.get("grounded_claims") or []
+    if claims:
+        synthesis["grounded_claims"] = [_claim_for_writer(claim) for claim in claims]
+    conclusions = synthesis.get("conclusions") or []
+    if conclusions and all(
+        str(item.get("conclusion_id", "")).startswith("rule:") for item in conclusions
+    ):
+        synthesis["conclusions"] = []
+
+    def size() -> int:
+        return len(json.dumps(payload, ensure_ascii=False))
+
+    # Unreferenced claims before referenced ones: the section map names what
+    # the writer has to place, so those are the last to go.
+    if size() > budget and synthesis.get("grounded_claims"):
+        referenced = _referenced_claim_ids(report_plan)
+        if referenced:
+            synthesis["grounded_claims"] = sorted(
+                synthesis["grounded_claims"],
+                key=lambda claim: claim.get("synthesis_claim_id") not in referenced,
+            )
+
+    dropped: dict[str, int] = {}
+    for field, floor in _TRIM_ORDER:
+        while size() > budget and len(synthesis.get(field) or []) > floor:
+            synthesis[field] = synthesis[field][:-1]
+            dropped[field] = dropped.get(field, 0) + 1
+    if dropped:
+        print(
+            "[report_generator] request trimmed to fit the token budget: "
+            + ", ".join(f"{field} -{count}" for field, count in dropped.items()),
+            file=sys.stderr,
+        )
+    if size() > budget:
+        print(
+            f"[report_generator] request is {size()} chars against a {budget} budget even after "
+            "trimming; sending as is",
+            file=sys.stderr,
+        )
+    return payload
+
+
 def generate_report(
     question: str,
     synthesis: TrendSynthesis,
@@ -1016,6 +1120,7 @@ def generate_report(
             "audience": profile.model_dump(),
             "synthesis": synthesis.model_dump(),
         }
+        payload = _fit_payload(payload, report_plan, _PAYLOAD_CHAR_BUDGET)
         schema = deepcopy(_REPORT_SCHEMA)
         section_schema = schema["properties"]["sections"]
         section_schema["minItems"] = len(report_plan.sections)

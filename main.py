@@ -120,6 +120,28 @@ def _run_from_fixture(args: argparse.Namespace):
     )
 
 
+def _resume_from_saved_run(args: argparse.Namespace):
+    """Restart a saved run at the analyzer, over documents it already has."""
+    from core.request_pipeline.pipeline import PipelineResult, run_pipeline_from_documents
+    from core.run_archive import ARCHIVE_DIR
+
+    saved = PipelineResult.model_validate_json(args.resume_from.read_text(encoding="utf-8"))
+    question = args.question
+    if not question:
+        record = ARCHIVE_DIR / f"{saved.request_id}.json"
+        if record.exists():
+            question = json.loads(record.read_text(encoding="utf-8")).get("question")
+    if not question:
+        raise SystemExit("--resume-from needs --question (the saved run's archive has no record of it)")
+    audience = args.audience or (saved.generated_report.audience_id if saved.generated_report else "practitioner")
+    print(
+        f"[resume] {args.resume_from.name} | {len(saved.collected_source_documents or [])} documents "
+        f"| audience={audience} | 검색·스크레이핑 생략",
+        file=sys.stderr,
+    )
+    return run_pipeline_from_documents(saved, question, audience, force_fail_stage=args.force_fail_stage)
+
+
 def main() -> int:
     # Load local credentials only for an actual CLI invocation. Keeping this
     # out of module import prevents tests and helper imports from inheriting
@@ -138,6 +160,15 @@ def main() -> int:
         default=None,
         metavar="DIR",
         help="save raw collector documents as Markdown under DIR/<request_id>/",
+    )
+    parser.add_argument(
+        "--resume-from",
+        type=Path,
+        default=None,
+        metavar="PATH",
+        help="re-run analyzer onward over the documents a saved --save-result run already "
+             "collected. Skips search and scraping (the expensive half); the analyzer, "
+             "synthesis refinement and report writer still call OpenAI.",
     )
     parser.add_argument(
         "--save-result",
@@ -169,7 +200,9 @@ def main() -> int:
     )
     args = parser.parse_args()
 
-    if args.synthesis_fixture is not None:
+    if args.resume_from is not None:
+        result = _resume_from_saved_run(args)
+    elif args.synthesis_fixture is not None:
         result = _run_from_fixture(args)
     else:
         request = _build_request(args)
