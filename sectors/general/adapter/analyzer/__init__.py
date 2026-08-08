@@ -8,12 +8,17 @@ from pathlib import Path
 
 from openai import OpenAI
 
+from common.ai_client import openai_client_kwargs
 from common.contracts import DocumentAnalysis, SourceDocument
 from common.errors import PipelineStageError
 from sources.openai_retry import call_with_retry
 
 _API_KEY_ENV_VAR = "TRENDSPARC_GENERAL_ANALYZER_API_KEY"
 _MODEL_ENV_VAR = "TRENDSPARC_GENERAL_ANALYZER_MODEL"
+# Optional - points this stage at an OpenAI-API-compatible alternative
+# provider (e.g. Upstage Solar) instead of stock OpenAI. Unset by default;
+# see common/ai_client.py.
+_BASE_URL_ENV_VAR = "TRENDSPARC_GENERAL_ANALYZER_BASE_URL"
 _STAGE = "sectors.general.adapter.analyzer"
 _SECTOR_ROOT = Path(__file__).resolve().parent.parent.parent
 _PROJECT_ROOT = _SECTOR_ROOT.parent.parent
@@ -140,10 +145,13 @@ def analyze(
     source_documents: list[SourceDocument],
     question: str,
     information_needs: list[str] | None = None,
+    # Accepted for signature parity with sk_broadband's analyzer (pipeline.py
+    # calls every sector's analyze() the same way) - not yet acted on here.
+    target_block_shapes: list[str] | None = None,
 ) -> list[DocumentAnalysis]:
     api_key = os.getenv(_API_KEY_ENV_VAR) or os.getenv("OPENAI_API_KEY")
     if not api_key:
         raise PipelineStageError(stage=_STAGE, reason=f"template_only: {_API_KEY_ENV_VAR} is not configured")
-    client = OpenAI(api_key=api_key)
+    client = OpenAI(api_key=api_key, **openai_client_kwargs(_BASE_URL_ENV_VAR))
     prompt = _system_prompt()
     return [_analyze(client, prompt, document, question) for document in source_documents]

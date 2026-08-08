@@ -342,6 +342,113 @@ def test_question_harness_uses_scraped_evidence_gaps_for_follow_up_search():
     assert second_search_payload["current_round_query"] == "SK브로드밴드 B tv 전략 투자"
 
 
+def test_missing_block_shapes_alone_never_flips_sufficient_to_false():
+    """target_block_shapes is a bias for which follow-up query gets tried,
+    never a hard gate - see WebSearchContext.target_block_shapes' docstring.
+    A report can always fall back to prose, so an unmet shape must not make
+    the whole harness fail the way an unmet information need does."""
+    source = _source()
+    url = "https://news.sktelecom.com/tag/skbroadband/report"
+    doc_id = _doc_id(source.name, url)
+    openai_client = _FakeOpenAI(
+        [_response(citations=[_citation_annotation(url)], sufficient=True)],
+        [
+            EvidenceCoverageAssessment(
+                sufficient=True,
+                relevant_doc_ids=[doc_id],
+                covered_information_needs=["competition"],
+                missing_information_needs=[],
+                covered_block_shapes=[],
+                missing_block_shapes=["지표: 확인된 수치(metric) 2개 이상"],
+                # The model found no query worth proposing for the gap - the
+                # harness must not invent an open-ended retry on its behalf.
+                next_queries=[],
+                reason="정보 요구는 충족했으나 수치는 부족함",
+            ),
+        ],
+    )
+    firecrawl_client = _FakeFirecrawl()
+    context = WebSearchContext(
+        question="IPTV 경쟁 현황은?",
+        information_needs=["competition"],
+        target_block_shapes=["지표: 확인된 수치(metric) 2개 이상"],
+        suggested_terms=["IPTV"],
+    )
+
+    result = run_question_search_harness_result(
+        openai_client, firecrawl_client, [source], ["IPTV"],
+        HarnessConfig(
+            target_docs=6, assess_scraped_evidence=True,
+            min_scraped_docs_for_sufficient=1, min_independent_sources_for_sufficient=1,
+        ),
+        context,
+    )
+
+    assert result.sufficient is True
+    assert result.missing_block_shapes == ["지표: 확인된 수치(metric) 2개 이상"]
+    assert result.rounds_completed == 1
+
+
+def test_missing_block_shapes_earns_one_more_round_when_model_proposes_a_query():
+    """A block-shape gap the model is willing to chase gets exactly one more
+    round even after `sufficient` (information needs only) is already true -
+    otherwise the harness stops the instant a prose answer is possible and
+    the chart the question asked for never gets searched for."""
+    source_a = _source()
+    source_b = _source(name="전자신문 (통신)", url="https://www.etnews.com/news/section.html?id1=03",
+                        role="search", topics=["IPTV"], reliability_tier="analyst_media")
+    url_1 = "https://news.sktelecom.com/tag/skbroadband/report-1"
+    url_2 = "https://www.etnews.com/report-2"
+    doc_1 = _doc_id(source_a.name, url_1)
+    doc_2 = _doc_id(source_b.name, url_2)
+    shape_hint = "지표: 확인된 수치(metric) 2개 이상"
+    openai_client = _FakeOpenAI(
+        [
+            _response(citations=[_citation_annotation(url_1)], sufficient=True),
+            _response(citations=[_citation_annotation(url_2)], sufficient=True),
+        ],
+        [
+            EvidenceCoverageAssessment(
+                sufficient=True,
+                relevant_doc_ids=[doc_1],
+                covered_information_needs=["competition"],
+                missing_information_needs=[],
+                covered_block_shapes=[],
+                missing_block_shapes=[shape_hint],
+                next_queries=["SK브로드밴드 IPTV 가입자 수 추이"],
+                reason="정보 요구는 충족했으나 수치 추이가 부족함",
+            ),
+            EvidenceCoverageAssessment(
+                sufficient=True,
+                relevant_doc_ids=[doc_1, doc_2],
+                covered_information_needs=["competition"],
+                missing_information_needs=[],
+                covered_block_shapes=[shape_hint],
+                missing_block_shapes=[],
+                next_queries=[],
+                reason="수치 추이까지 확보함",
+            ),
+        ],
+    )
+    firecrawl_client = _FakeFirecrawl()
+    context = WebSearchContext(
+        question="IPTV 경쟁 현황은?",
+        information_needs=["competition"],
+        target_block_shapes=[shape_hint],
+        suggested_terms=["IPTV"],
+    )
+
+    result = run_question_search_harness_result(
+        openai_client, firecrawl_client, [source_a, source_b], ["IPTV"],
+        HarnessConfig(target_docs=6, assess_scraped_evidence=True), context,
+    )
+
+    assert result.sufficient is True
+    assert result.covered_block_shapes == [shape_hint]
+    assert result.missing_block_shapes == []
+    assert result.rounds_completed == 2
+
+
 def test_harness_attributes_citation_to_matching_registered_domain():
     source = _source()
     other_source = _source(

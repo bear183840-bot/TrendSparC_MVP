@@ -5,9 +5,11 @@ from __future__ import annotations
 import json
 import os
 import re
+import sys
 from copy import deepcopy
 
 from audience.contracts import load_audience_profile
+from common.ai_client import openai_client_kwargs
 from common.content_quality_validator import (
     dated_items,
     dedupe_across_blocks,
@@ -27,6 +29,10 @@ from common.section_titles import section_title
 from core.sector_router.affiliates import foreign_entity_names_for
 
 _DOC_ID_RE = re.compile(r"\[doc_id=([^\]]+)\]")
+# Optional - points this stage at an OpenAI-API-compatible alternative
+# provider (e.g. Upstage Solar) instead of stock OpenAI. Unset by default;
+# see common/ai_client.py.
+_BASE_URL_ENV_VAR = "TRENDSPARC_REPORT_GENERATOR_BASE_URL"
 
 
 # Sections whose job is to summarise the whole report. They yield a shared
@@ -161,6 +167,35 @@ _REPORT_SCHEMA = {
 # the text, so the check is on the *significant digit runs* instead.
 _DIGIT_RUN_RE = re.compile(r"\d[\d,]*(?:\.\d+)?")
 
+# A metric/comparison/action_impact whose only problem is a mismatched
+# source_sentence (not a missing/invented fact) gets one repair attempt,
+# mirroring sectors/sk_broadband/adapter/analyzer's _repair_failed_claim_quotes.
+# Capped the same way that repair caps its candidate passages per claim - the
+# corpus here is small (a handful of synthesis sentences), but the failure
+# count and prompt size are still bounded defensively.
+_MAX_REPAIR_ITEMS_TOTAL = 15
+_MAX_REPAIR_CANDIDATES_PER_ITEM = 5
+
+_QUOTE_REPAIR_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "repairs": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "item_id": {"type": "string"},
+                    "sentence_id": {"type": ["string", "null"]},
+                },
+                "required": ["item_id", "sentence_id"],
+                "additionalProperties": False,
+            },
+        }
+    },
+    "required": ["repairs"],
+    "additionalProperties": False,
+}
+
 
 def _take(values: list[str], limit: int) -> list[str]:
     return list(dict.fromkeys(value for value in values if value))[:limit]
@@ -280,10 +315,10 @@ def normalize_metric_label(label: str) -> str:
     return _LABEL_ALIASES.get(cleaned, cleaned) or (label or "").strip()
 
 
-def _verified_ai_metric_points(
+def _metric_points_with_failures(
     raw_points: list[dict], synthesis: TrendSynthesis, foreign_names: set[str]
-) -> list[MetricPoint]:
-    """Keep only AI-extracted figures that are actually present in the evidence.
+) -> tuple[list[MetricPoint], list[dict]]:
+    """Split candidate figures into verified points and repair-eligible failures.
 
     The model is allowed to *find* numbers the regex missed; it is not allowed
     to state one. A point survives only if the digits of its value appear in
@@ -293,6 +328,12 @@ def _verified_ai_metric_points(
     `label` is a sign the model put the subject in the wrong field, and read
     as-is the figure would pass for this company's own number. A competitor
     named in `subject` is fine - that is what the field is for.
+
+    Missing label/period or a foreign-affiliate label are structural problems
+    - no re-quote can fix them, so those are dropped outright, same as
+    before. Only "the stated digits don't show up anywhere in the corpus" is
+    treated as repair-eligible and returned in the second list, tagged with a
+    stable item_id, for _repair_failed_extraction_quotes to attempt.
     """
     corpus = [*synthesis.evidence, *synthesis.key_points, *synthesis.highlights]
     corpus_digits: set[str] = set()
@@ -300,7 +341,8 @@ def _verified_ai_metric_points(
         corpus_digits |= _digit_runs(sentence)
 
     verified: list[MetricPoint] = []
-    for raw in raw_points:
+    failures: list[dict] = []
+    for index, raw in enumerate(raw_points):
         label = (raw.get("label") or "").strip()
         if not label or not (raw.get("period") or "").strip():
             continue
@@ -308,6 +350,7 @@ def _verified_ai_metric_points(
             continue
         stated = _digit_runs(raw.get("source_sentence", "")) | _digit_runs(str(raw.get("value", "")))
         if not stated & corpus_digits:
+            failures.append({"item_id": f"m{index}", "kind": "metric", "raw": raw})
             continue
         verified.append(
             MetricPoint(
@@ -320,23 +363,50 @@ def _verified_ai_metric_points(
                 share_of=(raw.get("share_of") or "").strip() or None,
             )
         )
-    return verified
+    return verified, failures
 
 
-def _verified_ai_comparison_points(
+def _verified_ai_metric_points(
+    raw_points: list[dict], synthesis: TrendSynthesis, foreign_names: set[str]
+) -> list[MetricPoint]:
+    return _metric_points_with_failures(raw_points, synthesis, foreign_names)[0]
+
+
+def _apply_comparison_multi_entity_filter(points: list[ComparisonPoint]) -> list[ComparisonPoint]:
+    """A criterion held by only one entity is dropped - one row is not a
+    comparison, and it would render as a table with a single line. Applied
+    once, after repair has had a chance to add entities back in, since this
+    is a property of the whole list rather than any single point."""
+    entities_per_criterion: dict[str, set[str]] = {}
+    for point in points:
+        entities_per_criterion.setdefault(point.criterion, set()).add(point.entity)
+    return [
+        point for point in points
+        if len(entities_per_criterion[point.criterion]) >= 2
+    ]
+
+
+def _comparison_points_with_failures(
     raw_points: list[dict], synthesis: TrendSynthesis
-) -> list[ComparisonPoint]:
+) -> tuple[list[ComparisonPoint], list[dict]]:
     """AI-extracted comparisons, kept only where the source text supports them.
 
     Same contract as the metric verifier: the model widens recall over prose
     the sector analyzer never structured, but a claim it cannot point at in
-    the evidence is dropped. A criterion held by only one entity is dropped
-    too - one row is not a comparison, and it would render as a table with a
-    single line.
+    the evidence is dropped. Missing entity/criterion/value is structural -
+    dropped outright. A source_sentence that doesn't literally appear in the
+    corpus (and whose entity isn't mentioned anywhere either) is the
+    repair-eligible case: the model likely paraphrased a real sentence
+    instead of copying it verbatim.
+
+    The single-entity-per-criterion filter is applied by the caller via
+    _apply_comparison_multi_entity_filter, after any repaired points are
+    merged in.
     """
     corpus = " ".join([*synthesis.evidence, *synthesis.key_points, *synthesis.highlights])
     verified: list[ComparisonPoint] = []
-    for raw in raw_points:
+    failures: list[dict] = []
+    for index, raw in enumerate(raw_points):
         entity = (raw.get("entity") or "").strip()
         criterion = (raw.get("criterion") or "").strip()
         value = (raw.get("value") or "").strip()
@@ -344,6 +414,7 @@ def _verified_ai_comparison_points(
         if not (entity and criterion and value):
             continue
         if sentence and sentence not in corpus and entity not in corpus:
+            failures.append({"item_id": f"c{index}", "kind": "comparison", "raw": raw})
             continue
         level = raw.get("level")
         verified.append(
@@ -354,13 +425,14 @@ def _verified_ai_comparison_points(
                 level=level if level in {"low", "medium", "high"} else None,
             )
         )
-    entities_per_criterion: dict[str, set[str]] = {}
-    for point in verified:
-        entities_per_criterion.setdefault(point.criterion, set()).add(point.entity)
-    return [
-        point for point in verified
-        if len(entities_per_criterion[point.criterion]) >= 2
-    ]
+    return verified, failures
+
+
+def _verified_ai_comparison_points(
+    raw_points: list[dict], synthesis: TrendSynthesis
+) -> list[ComparisonPoint]:
+    verified, _ = _comparison_points_with_failures(raw_points, synthesis)
+    return _apply_comparison_multi_entity_filter(verified)
 
 
 _CONFIDENCE_ORDER = ("low", "medium", "high")
@@ -422,15 +494,17 @@ def _stated_impact_size(raw: dict, sentence: str) -> tuple[float | None, str | N
     return value, (raw.get("impact_unit") or "").strip() or None
 
 
-def _verified_action_impacts(
+def _action_impacts_with_failures(
     raw_impacts: list[dict], synthesis: TrendSynthesis
-) -> list[ActionImpact]:
+) -> tuple[list[ActionImpact], list[dict]]:
     """Action->outcome links the evidence genuinely states.
 
-    Three ways to be dropped, all of them the model over-reaching: the action
-    isn't one we actually recommended, the quoted sentence isn't in the
-    evidence, or the "impact" just restates the action. What survives is a
-    consequence a source wrote down.
+    Three structural ways to be dropped outright, none of them fixable by a
+    better quote: the action isn't one we actually recommended, the
+    "impact" just restates the action, or a required field is empty. Only
+    "the quoted sentence isn't in the evidence" is repair-eligible - the
+    outcome may still be genuinely stated somewhere, just not verbatim in
+    what the model copied.
     """
     corpus = " ".join([*synthesis.evidence, *synthesis.key_points, *synthesis.highlights])
     known_actions = {
@@ -438,8 +512,9 @@ def _verified_action_impacts(
         for action in synthesis.recommended_actions
     }
     verified: list[ActionImpact] = []
+    failures: list[dict] = []
     seen: set[str] = set()
-    for raw in raw_impacts:
+    for index, raw in enumerate(raw_impacts):
         action = _DOC_ID_RE.sub("", raw.get("action") or "").strip()
         impact = (raw.get("expected_impact") or "").strip()
         sentence = (raw.get("source_sentence") or "").strip()
@@ -447,9 +522,10 @@ def _verified_action_impacts(
             continue
         if action not in known_actions:
             continue
-        if sentence not in corpus:
-            continue
         if impact == action or impact in action or action in impact:
+            continue
+        if sentence not in corpus:
+            failures.append({"item_id": f"a{index}", "kind": "action", "raw": raw})
             continue
         seen.add(action)
         value, unit = _stated_impact_size(raw, sentence)
@@ -459,7 +535,161 @@ def _verified_action_impacts(
                 impact_value=value, impact_unit=unit,
             )
         )
-    return verified
+    return verified, failures
+
+
+def _verified_action_impacts(
+    raw_impacts: list[dict], synthesis: TrendSynthesis
+) -> list[ActionImpact]:
+    return _action_impacts_with_failures(raw_impacts, synthesis)[0]
+
+
+def _dedupe_action_impacts(impacts: list[ActionImpact]) -> list[ActionImpact]:
+    """Keep the first ActionImpact per action text.
+
+    _action_impacts_with_failures's own within-call `seen` set only guards a
+    single pass; merging its initial-pass output with a second, repaired-pass
+    output (see _repair_failed_extraction_quotes's caller) can in theory let
+    the same action survive twice. This is the backstop for that merge.
+    """
+    seen: set[str] = set()
+    deduped: list[ActionImpact] = []
+    for impact in impacts:
+        if impact.action in seen:
+            continue
+        seen.add(impact.action)
+        deduped.append(impact)
+    return deduped
+
+
+def _indexed_corpus_sentences(synthesis: TrendSynthesis) -> list[dict[str, str]]:
+    """The same evidence/key_points/highlights corpus the verifiers above
+    check source_sentence against, indexed into stable per-sentence IDs so a
+    repair call can select one rather than write free text (which would risk
+    inventing a sentence that was never actually said)."""
+    sentences = list(
+        dict.fromkeys(
+            text.strip()
+            for text in [*synthesis.evidence, *synthesis.key_points, *synthesis.highlights]
+            if text and text.strip()
+        )
+    )
+    return [{"sentence_id": f"S{index:03d}", "text": text} for index, text in enumerate(sentences, 1)]
+
+
+def _repair_query_terms(item: dict) -> list[str]:
+    kind = item["kind"]
+    raw = item["raw"]
+    if kind == "metric":
+        text = f"{raw.get('label') or ''} {raw.get('subject') or ''} {raw.get('period') or ''} {raw.get('value') or ''}"
+    elif kind == "comparison":
+        text = f"{raw.get('entity') or ''} {raw.get('criterion') or ''} {raw.get('value') or ''}"
+    else:  # action
+        text = f"{raw.get('action') or ''} {raw.get('expected_impact') or ''}"
+    return list(dict.fromkeys(re.findall(r"[가-힣a-z0-9]{2,}", text.lower())))
+
+
+def _repair_candidates_for_item(item: dict, corpus: list[dict[str, str]]) -> list[dict[str, str]]:
+    terms = _repair_query_terms(item)
+    ranked = sorted(
+        enumerate(corpus),
+        key=lambda pair: (-sum(pair[1]["text"].lower().count(term) for term in terms), pair[0]),
+    )
+    return [sentence for _, sentence in ranked[:_MAX_REPAIR_CANDIDATES_PER_ITEM]]
+
+
+def _repair_failed_extraction_quotes(
+    client, model: str, failures: list[dict], synthesis: TrendSynthesis
+) -> dict[str, str]:
+    """One extra, bounded API call that gives metric/comparison/action_impact
+    items a second chance at a matching source_sentence - mirroring
+    sectors/sk_broadband/adapter/analyzer's _repair_failed_claim_quotes, but
+    over a small pre-extracted sentence corpus instead of raw scraped pages,
+    so the model picks a sentence_id rather than writing a quote (nothing it
+    returns can be a sentence that wasn't actually in the corpus).
+
+    Only called with items that already passed every structural check in
+    their `_with_failures` counterpart - the claim/label/entity/action itself
+    is never touched here, only which real sentence backs it.
+    """
+    if not failures:
+        return {}
+    bounded_failures = failures[:_MAX_REPAIR_ITEMS_TOTAL]
+    corpus = _indexed_corpus_sentences(synthesis)
+    if not corpus:
+        return {}
+
+    candidates_by_item = {
+        item["item_id"]: _repair_candidates_for_item(item, corpus) for item in bounded_failures
+    }
+    referenced_ids = {
+        sentence["sentence_id"]
+        for candidates in candidates_by_item.values()
+        for sentence in candidates
+    }
+    repair_input = {
+        "candidate_sentences": [sentence for sentence in corpus if sentence["sentence_id"] in referenced_ids],
+        "items_to_repair": [
+            {
+                "item_id": item["item_id"],
+                "kind": item["kind"],
+                "looking_for": " ".join(_repair_query_terms(item)),
+                "candidate_sentence_ids": [
+                    sentence["sentence_id"] for sentence in candidates_by_item[item["item_id"]]
+                ],
+            }
+            for item in bounded_failures
+        ],
+        "instructions": (
+            "각 item이 실제로 필요로 하는 사실을 candidate_sentence_ids로 주어진 후보 문장 중에서만 "
+            "골라 sentence_id로 반환하라. 후보 중 그 사실을 직접 뒷받침하는 문장이 없으면 반드시 "
+            "sentence_id를 null로 반환하라. 문장을 새로 쓰거나 후보 밖의 문장을 고르지 말라."
+        ),
+    }
+    try:
+        response = client.chat.completions.create(
+            model=model,
+            max_tokens=1600,
+            messages=[
+                {
+                    "role": "system",
+                    "content": (
+                        "You repair source citations only. Never invent a sentence - choose "
+                        "sentence_id only from the candidates offered, or null if none of them "
+                        "actually state the fact."
+                    ),
+                },
+                {"role": "user", "content": json.dumps(repair_input, ensure_ascii=False)},
+            ],
+            response_format={
+                "type": "json_schema",
+                "json_schema": {
+                    "name": "report_generator_quote_repair",
+                    "schema": _QUOTE_REPAIR_SCHEMA,
+                    "strict": True,
+                },
+            },
+        )
+        message = response.choices[0].message
+        if getattr(message, "refusal", None):
+            return {}
+        repairs = json.loads(message.content).get("repairs", [])
+    except Exception as exc:  # noqa: BLE001
+        print(f"[report_generator] quote repair failed: {exc}", file=sys.stderr)
+        return {}
+
+    corpus_by_id = {sentence["sentence_id"]: sentence["text"] for sentence in corpus}
+    repaired: dict[str, str] = {}
+    for repair in repairs:
+        item_id = repair.get("item_id")
+        sentence_id = repair.get("sentence_id")
+        allowed_ids = {
+            sentence["sentence_id"] for sentence in candidates_by_item.get(item_id, [])
+        }
+        if not item_id or sentence_id not in allowed_ids:
+            continue
+        repaired[item_id] = corpus_by_id[sentence_id]
+    return repaired
 
 
 def _diversity_limitations(synthesis: TrendSynthesis) -> list[str]:
@@ -746,6 +976,8 @@ def generate_report(
     try:
         from openai import OpenAI
 
+        client = OpenAI(api_key=api_key, **openai_client_kwargs(_BASE_URL_ENV_VAR))
+        model = os.getenv("TRENDSPARC_REPORT_GENERATOR_MODEL", "gpt-4o")
         profile = load_audience_profile(audience_id)
         purpose_id = report_plan.report_purpose.purpose_id if report_plan.report_purpose else report_plan.primary_intent
         payload = {
@@ -772,8 +1004,8 @@ def generate_report(
         section_schema["minItems"] = len(report_plan.sections)
         section_schema["maxItems"] = len(report_plan.sections)
         section_schema["items"]["properties"]["section_id"]["enum"] = list(report_plan.sections)
-        response = OpenAI(api_key=api_key).responses.create(
-            model=os.getenv("TRENDSPARC_REPORT_GENERATOR_MODEL", "gpt-4o-mini"),
+        response = client.responses.create(
+            model=model,
             input=[
                 {
                     "role": "system",
@@ -870,13 +1102,48 @@ def generate_report(
             },
         )
         parsed = json.loads(response.output_text)
-        extracted_metrics = _verified_ai_metric_points(
-            parsed.get("metric_series") or [], synthesis, foreign_entity_names_for(synthesis.sector_id)
+        foreign_names = foreign_entity_names_for(synthesis.sector_id)
+        verified_metrics, metric_failures = _metric_points_with_failures(
+            parsed.get("metric_series") or [], synthesis, foreign_names
         )
-        extracted_comparisons = _verified_ai_comparison_points(
+        comparison_pass, comparison_failures = _comparison_points_with_failures(
             parsed.get("comparison_points") or [], synthesis
         )
-        action_impacts = _verified_action_impacts(parsed.get("action_impacts") or [], synthesis)
+        verified_impacts, impact_failures = _action_impacts_with_failures(
+            parsed.get("action_impacts") or [], synthesis
+        )
+
+        # One bounded extra call gives quote-only failures (structurally valid
+        # items whose source_sentence just didn't match the corpus verbatim) a
+        # second chance - see _repair_failed_extraction_quotes's docstring.
+        # Structural failures (missing fields, foreign affiliate, unknown
+        # action, self-restating impact) never reach this list.
+        all_failures = [*metric_failures, *comparison_failures, *impact_failures]
+        repaired_sentences = _repair_failed_extraction_quotes(client, model, all_failures, synthesis)
+        if repaired_sentences:
+            def _patched(failures: list[dict], kind: str) -> list[dict]:
+                return [
+                    {**failure["raw"], "source_sentence": repaired_sentences[failure["item_id"]]}
+                    for failure in failures
+                    if failure["kind"] == kind and failure["item_id"] in repaired_sentences
+                ]
+
+            extra_metrics, _ = _metric_points_with_failures(
+                _patched(metric_failures, "metric"), synthesis, foreign_names
+            )
+            extra_comparisons, _ = _comparison_points_with_failures(
+                _patched(comparison_failures, "comparison"), synthesis
+            )
+            extra_impacts, _ = _action_impacts_with_failures(
+                _patched(impact_failures, "action"), synthesis
+            )
+            verified_metrics = [*verified_metrics, *extra_metrics]
+            comparison_pass = [*comparison_pass, *extra_comparisons]
+            verified_impacts = [*verified_impacts, *extra_impacts]
+
+        extracted_metrics = verified_metrics
+        extracted_comparisons = _apply_comparison_multi_entity_filter(comparison_pass)
+        action_impacts = _dedupe_action_impacts(verified_impacts)
         fallback = _fallback_report(synthesis, report_plan, audience_id)
         fallback_by_id = {section.section_id: section for section in fallback.sections}
         returned_by_id = {

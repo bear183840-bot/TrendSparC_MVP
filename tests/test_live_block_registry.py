@@ -12,7 +12,7 @@ from __future__ import annotations
 import reporting.dashboard_streamlit.blocks  # noqa: F401  (registers everything)
 from reporting.dashboard_streamlit.blocks.base import BlockDefinition, SlotContext
 from reporting.dashboard_streamlit.blocks.registry import BLOCK_REGISTRY, register, slot_renderer
-from reporting.dashboard_streamlit.purpose_slots import PURPOSE_SLOTS
+from common.purpose_slots import PURPOSE_SLOTS
 
 
 def test_every_block_a_slot_can_choose_has_a_live_renderer():

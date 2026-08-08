@@ -209,6 +209,118 @@ def test_explicit_sector_selection_overrides_a_wrong_ai_guess(monkeypatch):
     assert result.organizations == ["SK브로드밴드"]
 
 
+def test_ai_reclassifies_a_registered_brand_that_leaked_into_keywords(monkeypatch):
+    # Live-observed bug (CLAUDE.md): the model puts named brands/products
+    # like "OK캐쉬백"/"Syrup" into the generic keywords field instead of
+    # organizations/technologies. Both are already registered as sk_planet
+    # aliases, so this should be caught deterministically regardless of what
+    # the model itself decided.
+    monkeypatch.setenv("TRENDSPARC_ENTITY_AI_API_KEY", "test-key")
+    response = _make_response(
+        "current_status",
+        [],
+        [],
+        ["OK캐쉬백", "Syrup", "포인트 마케팅"],
+        sector_id="sk_planet",
+        perspective="company_update",
+    )
+    monkeypatch.setattr(entity_ai_module, "OpenAI", lambda api_key: _FakeOpenAI(response))
+
+    profiles = {
+        "sk_planet": SectorProfile(
+            sector_id="sk_planet",
+            display_name="SK플래닛 (SK Planet)",
+            status="active",
+            canonical_name="SK플래닛",
+            aliases=["SK Planet", "SK플래닛", "OK캐쉬백", "Syrup", "시럽"],
+        ),
+    }
+    request = UserRequest(request_id="req_brand", question="OK캐쉬백 시럽 포인트 마케팅 시장 현황은?")
+
+    result = extract_entities_ai(request, None, profiles, "sk_planet")
+
+    assert set(result.technologies) == {"OK캐쉬백", "Syrup"}
+    assert result.keywords == ["포인트 마케팅"]
+
+
+def test_ai_reclassifies_the_canonical_name_itself_into_organizations(monkeypatch):
+    monkeypatch.setenv("TRENDSPARC_ENTITY_AI_API_KEY", "test-key")
+    response = _make_response(
+        "current_status",
+        [],
+        [],
+        ["SK플래닛", "실적"],
+        sector_id="sk_planet",
+        perspective="company_update",
+    )
+    monkeypatch.setattr(entity_ai_module, "OpenAI", lambda api_key: _FakeOpenAI(response))
+
+    profiles = {
+        "sk_planet": SectorProfile(
+            sector_id="sk_planet",
+            display_name="SK플래닛 (SK Planet)",
+            status="active",
+            canonical_name="SK플래닛",
+            aliases=["SK Planet", "SK플래닛"],
+        ),
+    }
+    request = UserRequest(request_id="req_canonical", question="SK플래닛 실적 어때")
+
+    result = extract_entities_ai(request, None, profiles, "sk_planet")
+
+    assert result.organizations == ["SK플래닛"]
+    assert result.keywords == ["실적"]
+
+
+def test_entity_ai_model_defaults_to_gpt4o_and_respects_env_override(monkeypatch):
+    monkeypatch.setenv("TRENDSPARC_ENTITY_AI_API_KEY", "test-key")
+    monkeypatch.delenv("TRENDSPARC_ENTITY_AI_MODEL", raising=False)
+    response = _make_response("current_status", [], [], [])
+    captured = {}
+
+    class CapturingCompletions:
+        def create(self, **kwargs):
+            captured.update(kwargs)
+            return response
+
+    fake = _FakeOpenAI(response)
+    fake.chat.completions = CapturingCompletions()
+    monkeypatch.setattr(entity_ai_module, "OpenAI", lambda api_key: fake)
+
+    request = UserRequest(request_id="req_model", question="SK하이닉스 HBM 시장 전망은?")
+    extract_entities_ai(request, _rule_based_result(request.request_id))
+
+    assert captured["model"] == "gpt-4o"
+
+    captured.clear()
+    monkeypatch.setenv("TRENDSPARC_ENTITY_AI_MODEL", "gpt-4o-mini")
+    extract_entities_ai(request, _rule_based_result(request.request_id))
+
+    assert captured["model"] == "gpt-4o-mini"
+
+
+def test_entity_ai_passes_base_url_to_the_client_only_when_the_env_var_is_set(monkeypatch):
+    monkeypatch.setenv("TRENDSPARC_ENTITY_AI_API_KEY", "test-key")
+    response = _make_response("current_status", [], [], [])
+    captured = {}
+
+    def fake_openai_ctor(**kwargs):
+        captured.update(kwargs)
+        return _FakeOpenAI(response)
+
+    monkeypatch.setattr(entity_ai_module, "OpenAI", fake_openai_ctor)
+    request = UserRequest(request_id="req_base_url", question="테스트 질문")
+
+    monkeypatch.delenv("TRENDSPARC_ENTITY_AI_BASE_URL", raising=False)
+    extract_entities_ai(request, _rule_based_result(request.request_id))
+    assert "base_url" not in captured
+
+    monkeypatch.setenv("TRENDSPARC_ENTITY_AI_BASE_URL", "https://api.upstage.ai/v1")
+    extract_entities_ai(request, _rule_based_result(request.request_id))
+    assert captured["base_url"] == "https://api.upstage.ai/v1"
+    assert captured["api_key"] == "test-key"
+
+
 def test_ai_removes_keywords_that_duplicate_canonical_entities(monkeypatch):
     monkeypatch.setenv("TRENDSPARC_ENTITY_AI_API_KEY", "test-key")
     response = _make_response(

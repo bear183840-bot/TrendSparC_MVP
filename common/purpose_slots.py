@@ -20,6 +20,12 @@ the same *intent* as the slot. A cause slot may fall back from a cause map to
 a contribution bar chart to narrative bullets, because all three explain
 causation at decreasing precision. It may not fall back to a KPI card, which
 would answer a question nobody asked.
+
+This module lives in common/, not reporting/, on purpose: it has zero
+Streamlit dependency (see the predicates it imports from block_shapes, which
+are UI-free for the same reason), and core/block_priority_planner needs to
+read PURPOSE_SLOTS before collection ever runs - core/ must never import
+from reporting/.
 """
 
 from __future__ import annotations

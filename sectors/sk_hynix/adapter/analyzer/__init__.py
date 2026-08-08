@@ -16,6 +16,7 @@ from pathlib import Path
 
 from openai import OpenAI
 
+from common.ai_client import openai_client_kwargs
 from common.content_quality_validator import (
     COMPARISON_COMPLETENESS_INSTRUCTION,
     SWOT_COMPLETENESS_INSTRUCTION,
@@ -25,6 +26,10 @@ from common.errors import PipelineStageError
 from sources.openai_retry import call_with_retry
 
 _API_KEY_ENV_VAR = "TRENDSPARC_SK_HYNIX_ANALYZER_API_KEY"
+# Optional - points this stage at an OpenAI-API-compatible alternative
+# provider (e.g. Upstage Solar) instead of stock OpenAI. Unset by default;
+# see common/ai_client.py.
+_BASE_URL_ENV_VAR = "TRENDSPARC_SK_HYNIX_ANALYZER_BASE_URL"
 _MODEL = "gpt-4o"  # adjust to whichever OpenAI model the paid key should use
 _STAGE = "sectors.sk_hynix.adapter.analyzer"
 
@@ -245,6 +250,9 @@ def analyze(
     source_documents: list[SourceDocument],
     question: str,
     information_needs: list[str] | None = None,
+    # Accepted for signature parity with sk_broadband's analyzer (pipeline.py
+    # calls every sector's analyze() the same way) - not yet acted on here.
+    target_block_shapes: list[str] | None = None,
 ) -> list[DocumentAnalysis]:
     api_key = os.environ.get(_API_KEY_ENV_VAR)
     if not api_key:
@@ -253,7 +261,7 @@ def analyze(
             reason=f"template_only: {_API_KEY_ENV_VAR} is not configured",
         )
 
-    client = OpenAI(api_key=api_key)
+    client = OpenAI(api_key=api_key, **openai_client_kwargs(_BASE_URL_ENV_VAR))
     system_prompt = _load_system_prompt()
 
     return [_analyze_document(client, system_prompt, document, question) for document in source_documents]

@@ -353,6 +353,9 @@ def dashboard_css(dark: bool, accent_theme: str = "orange") -> str:
     .ts-item-index {{ color:var(--ts-accent); font-weight:800; }}
     .ts-inline-evidence {{ display:grid; place-items:center; width:22px; height:22px; border-radius:50%;
       color:white; background:color-mix(in srgb,var(--ts-accent) 75%,#6e2525); text-decoration:none; font-weight:900; }}
+    .ts-badge-uncorroborated {{ display:inline-block; margin-left:.4rem; padding:.05rem .45rem; border-radius:999px;
+      font-size:.68rem; font-weight:700; white-space:nowrap; color:var(--ts-muted);
+      border:1px solid var(--ts-line); background:var(--ts-soft); vertical-align:middle; }}
     .ts-purpose-card.timeline .ts-compact-list {{ position:relative; padding-left:.45rem; }}
     .ts-purpose-card.timeline .ts-compact-list li {{ border-left:2px solid var(--ts-accent); padding-left:.7rem; }}
     .ts-action-basis {{ color:var(--ts-muted); font-size:.76rem; }}

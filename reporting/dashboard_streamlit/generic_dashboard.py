@@ -14,7 +14,7 @@ from common.content_quality_validator import dedupe_across_blocks
 import reporting.dashboard_streamlit.blocks  # noqa: F401
 from reporting.dashboard_streamlit.blocks.base import SlotContext
 from reporting.dashboard_streamlit.blocks.registry import slot_renderer
-from reporting.dashboard_streamlit.purpose_slots import (
+from common.purpose_slots import (
     LAST_RESORT,
     ResolvedSlot,
     resolve_slots,
@@ -54,6 +54,8 @@ from reporting.dashboard_streamlit.components import (
     render_page_header,
     render_source_list,
     render_swot,
+    item_doc_id,
+    uncorroborated_doc_ids,
 )
 
 # Same 2-of-4 threshold layout_generator uses to decide a section is
@@ -112,16 +114,24 @@ def _panel_definitions(report: Any) -> list[tuple[str, str, list[str]]]:
     return panels
 
 
-def _item_markup(raw_value: str, result: Any, index: int) -> str:
+def _item_markup(raw_value: str, result: Any, index: int, uncorroborated_ids: frozenset[str] = frozenset()) -> str:
     url = evidence_url(raw_value, result)
     link = (
         f'<a class="ts-inline-evidence" href="{escape(url)}" target="_blank" title="근거 원문 열기">↗</a>'
         if url
         else ""
     )
+    # A single-source claim isn't wrong, just not cross-verified yet - the
+    # badge says so next to the exact item it applies to, rather than only
+    # in the raw TrendSynthesis.uncorroborated_points list nobody sees.
+    badge = (
+        '<span class="ts-badge-uncorroborated" title="독립된 출처 1곳에서만 확인된 주장입니다">단일 출처</span>'
+        if item_doc_id(raw_value) in uncorroborated_ids
+        else ""
+    )
     return (
         f'<li><span class="ts-item-index">{index:02d}</span>'
-        f"<span>{escape(clean_citation(raw_value))}</span>{link}</li>"
+        f"<span>{escape(clean_citation(raw_value))}{badge}</span>{link}</li>"
     )
 
 
@@ -142,8 +152,13 @@ def _render_under_evidenced_notice(resolved: list[ResolvedSlot]) -> None:
     )
 
 
-def _render_narrative_list(title: str, items: list[str], result: Any) -> None:
-    rows = "".join(_item_markup(value, result, index) for index, value in enumerate(items[:4], 1))
+def _render_narrative_list(
+    title: str, items: list[str], result: Any, uncorroborated_ids: frozenset[str]
+) -> None:
+    rows = "".join(
+        _item_markup(value, result, index, uncorroborated_ids)
+        for index, value in enumerate(items[:4], 1)
+    )
     st.markdown(
         f'<section class="ts-card ts-purpose-card"><h3>{escape(title)}</h3>'
         f'<ol class="ts-compact-list">{rows}</ol></section>',
@@ -160,6 +175,7 @@ def _render_slot(
     opportunities: list[str],
     strengths: list[str],
     weaknesses: list[str],
+    uncorroborated_ids: frozenset[str],
 ) -> None:
     """Draw whichever block the slot resolved to, under the slot's own title."""
     title, block_type = slot.slot.title, slot.block_type
@@ -170,7 +186,7 @@ def _render_slot(
         # copy of the same message.
         return
     if block_type == "narrative_list":
-        _render_narrative_list(title, items, result)
+        _render_narrative_list(title, items, result, uncorroborated_ids)
         return
 
     # Decide what the body will be BEFORE opening the card. The title used to
@@ -254,6 +270,8 @@ def render_generic_dashboard(
     if under_evidenced(resolved):
         _render_under_evidenced_notice(resolved)
 
+    uncorroborated_ids = frozenset(uncorroborated_doc_ids(synthesis))
+
     # No second deduplication pass here. report_generator already gives each
     # section its own material and drops verbatim restatements; running the
     # same rule again over the rendered slots removed items a second time -
@@ -261,7 +279,10 @@ def render_generic_dashboard(
     # a neighbouring slot that was drawing from the same section.
     for slot in resolved:
         items = list(dict.fromkeys(slot.items))
-        _render_slot(slot, items, result, synthesis, risks, opportunities, strengths, weaknesses)
+        _render_slot(
+            slot, items, result, synthesis, risks, opportunities, strengths,
+            weaknesses, uncorroborated_ids,
+        )
 
     # Sections report_planner dropped for lack of evidence, shown with its
     # recorded reason so a gap in the report is visible rather than silent.

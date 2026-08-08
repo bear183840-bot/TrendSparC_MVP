@@ -123,6 +123,31 @@ def test_question_text_is_included_in_the_prompt_sent_to_the_model(monkeypatch):
     assert "SK하이닉스 HBM 시장 전망은?" in user_message
 
 
+def test_analyzer_passes_base_url_to_the_client_only_when_the_env_var_is_set(monkeypatch):
+    # Every sector analyzer wires this the same way (see common/ai_client.py) -
+    # sk_hynix stands in for all six here rather than repeating this in each
+    # sector's own test file.
+    monkeypatch.setenv("TRENDSPARC_SK_HYNIX_ANALYZER_API_KEY", "test-key")
+    response = _make_response("요약", ["포인트"], "neutral", True)
+    captured = {}
+
+    def fake_openai_ctor(**kwargs):
+        captured.update(kwargs)
+        return _FakeOpenAI(response)
+
+    monkeypatch.setattr(analyzer_module, "OpenAI", fake_openai_ctor)
+    monkeypatch.setattr(analyzer_module, "_load_system_prompt", lambda: "system prompt")
+
+    monkeypatch.delenv("TRENDSPARC_SK_HYNIX_ANALYZER_BASE_URL", raising=False)
+    analyze([_document()], "SK하이닉스 HBM 시장 전망은?")
+    assert "base_url" not in captured
+
+    monkeypatch.setenv("TRENDSPARC_SK_HYNIX_ANALYZER_BASE_URL", "https://api.upstage.ai/v1")
+    analyze([_document()], "SK하이닉스 HBM 시장 전망은?")
+    assert captured["base_url"] == "https://api.upstage.ai/v1"
+    assert captured["api_key"] == "test-key"
+
+
 def test_relevant_document_is_parsed_correctly(monkeypatch):
     monkeypatch.setenv("TRENDSPARC_SK_HYNIX_ANALYZER_API_KEY", "test-key")
     response = _make_response("요약", ["포인트 1", "포인트 2"], "positive", True)

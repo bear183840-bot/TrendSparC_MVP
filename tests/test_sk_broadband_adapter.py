@@ -754,52 +754,19 @@ def test_broadband_question_harness_treats_ai_gated_search_source_as_special(mon
     assert {doc.source_id for doc in docs} == {"뉴스", gated.name}
 
 
-def test_broadband_collect_continues_when_one_source_fails(monkeypatch):
+def test_broadband_collect_requires_harness_key_and_does_not_fall_back(monkeypatch):
+    # collect() used to fall back to a per-source loop when the harness key
+    # was missing, degrading silently instead of failing (KOFIC lost its
+    # AI-drafted query, every ai_gated_search source returned zero documents
+    # outright). That fallback is gone - a missing harness key now halts the
+    # stage, matching every other stage's "raise, never fake data" contract.
     monkeypatch.setenv("FIRECRAWL_API_KEY", "test-key")
-    sources = [
-        PlannedSource(name="broken", url="https://broken.example.com", collection_method=["firecrawl_search"]),
-        PlannedSource(name="ok", url="https://ok.example.com", collection_method=["firecrawl_search"]),
-    ]
-    plan = SourcePlan(request_id="req", sector_id="sk_broadband", planned_sources=sources, question_keywords=["OTT"])
+    monkeypatch.delenv(collector_module._HARNESS_API_KEY_ENV_VAR, raising=False)
+    source = PlannedSource(name="ok", url="https://ok.example.com", collection_method=["firecrawl_search"])
+    plan = SourcePlan(request_id="req", sector_id="sk_broadband", planned_sources=[source], question_keywords=["OTT"])
 
-    class _PerDomainClient:
-        def search(self, query, include_domains, limit, scrape_options):
-            if include_domains[0] == "broken.example.com":
-                raise RuntimeError("boom")
-            return _search_data([_make_result("본문" * 200, url="https://ok.example.com/a")])
-
-    monkeypatch.setattr(collector_module, "Firecrawl", lambda api_key: _PerDomainClient())
-
-    docs = _collected_documents(collect(plan))
-
-    assert len(docs) == 1
-    assert docs[0].source_id == "ok"
-
-
-def test_broadband_collect_caps_total_documents_at_twelve(monkeypatch):
-    # 8 sources * 2 results each (_MAX_RESULTS_PER_SOURCE) would be 16 raw
-    # documents; collect() must stop at _MAX_COLLECTED_DOCUMENTS (12) so the
-    # validator/analyzer never see an unbounded set.
-    monkeypatch.setenv("FIRECRAWL_API_KEY", "test-key")
-    sources = [
-        PlannedSource(name=f"source{i}", url=f"https://s{i}.example.com", collection_method=["firecrawl_search"])
-        for i in range(8)
-    ]
-    plan = SourcePlan(request_id="req", sector_id="sk_broadband", planned_sources=sources, question_keywords=["OTT"])
-
-    class _TwoResultsClient:
-        def search(self, query, include_domains, limit, scrape_options):
-            domain = include_domains[0]
-            return _search_data([
-                _make_result("본문" * 200, url=f"https://{domain}/a"),
-                _make_result("본문" * 200, url=f"https://{domain}/b"),
-            ])
-
-    monkeypatch.setattr(collector_module, "Firecrawl", lambda api_key: _TwoResultsClient())
-
-    docs = _collected_documents(collect(plan))
-
-    assert len(docs) == 12
+    with pytest.raises(PipelineStageError, match=collector_module._HARNESS_API_KEY_ENV_VAR):
+        collect(plan)
 
 
 def test_broadband_crawl_source_keeps_legacy_firecrawl_path():
@@ -1045,35 +1012,6 @@ def test_broadband_question_harness_counts_kofic_toward_sufficiency(monkeypatch)
     docs = _collected_documents(collect(plan))
 
     assert {doc.doc_id for doc in docs} == {"a", "k1"}
-
-
-def test_broadband_collect_passes_all_planned_sources_to_crawl_source(monkeypatch):
-    monkeypatch.setenv("FIRECRAWL_API_KEY", "test-key")
-    monkeypatch.delenv(collector_module._HARNESS_API_KEY_ENV_VAR, raising=False)
-    sources = [
-        PlannedSource(name="a", url="https://a.example.com", collection_method=["firecrawl_search"]),
-        PlannedSource(name="b", url="https://b.example.com", collection_method=["firecrawl_search"]),
-    ]
-    plan = SourcePlan(request_id="req", sector_id="sk_broadband", planned_sources=sources, question_keywords=["OTT"])
-
-    class _EmptySearchClient:
-        def search(self, query, include_domains, limit, scrape_options):
-            return _search_data([])
-
-    monkeypatch.setattr(collector_module, "Firecrawl", lambda api_key: _EmptySearchClient())
-    captured_all_sources = []
-    original_crawl_source = collector_module._crawl_source
-
-    def spy(client, source, api_key, keywords, all_sources=()):
-        captured_all_sources.append(all_sources)
-        return original_crawl_source(client, source, api_key, keywords, all_sources)
-
-    monkeypatch.setattr(collector_module, "_crawl_source", spy)
-
-    collect(plan)
-
-    assert len(captured_all_sources) == 2
-    assert all(tuple(captured) == tuple(sources) for captured in captured_all_sources)
 
 
 def test_broadband_processor_strips_boilerplate_and_deduplicates():

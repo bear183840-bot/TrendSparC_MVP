@@ -63,7 +63,7 @@ def test_slot_resolution_does_not_need_streamlit():
             sys.executable,
             "-c",
             "import sys;"
-            "import reporting.dashboard_streamlit.purpose_slots;"
+            "import common.purpose_slots;"
             "print('streamlit' in sys.modules)",
         ],
         cwd=_ROOT,
@@ -111,7 +111,7 @@ def test_every_planned_section_has_a_registered_title():
 
 def test_every_slot_section_reference_resolves_to_a_title():
     from common.section_titles import SECTION_TITLES
-    from reporting.dashboard_streamlit.purpose_slots import PURPOSE_SLOTS
+    from common.purpose_slots import PURPOSE_SLOTS
 
     referenced = {
         section
@@ -126,7 +126,7 @@ def test_every_slot_synthesis_field_exists_on_the_contract():
     """A slot's fallback field name is a string; a typo would silently mean
     "no evidence" forever."""
     from common.contracts import TrendSynthesis
-    from reporting.dashboard_streamlit.purpose_slots import PURPOSE_SLOTS
+    from common.purpose_slots import PURPOSE_SLOTS
 
     valid = set(TrendSynthesis.model_fields)
     for slots in PURPOSE_SLOTS.values():
@@ -167,7 +167,7 @@ def test_no_slot_borrows_another_subjects_section():
     list associates with its subject. `capability` has no such section at all,
     so it draws from synthesis.strengths instead of borrowing one.
     """
-    from reporting.dashboard_streamlit.purpose_slots import PURPOSE_SLOTS
+    from common.purpose_slots import PURPOSE_SLOTS
 
     capability = next(
         slot for slot in PURPOSE_SLOTS["future_business"] if slot.slot_id == "capability"
@@ -178,7 +178,7 @@ def test_no_slot_borrows_another_subjects_section():
 
 def test_every_slot_has_some_source():
     """A slot with neither sections nor fields can only ever say "정보 없음"."""
-    from reporting.dashboard_streamlit.purpose_slots import PURPOSE_SLOTS
+    from common.purpose_slots import PURPOSE_SLOTS
 
     for purpose_id, slots in PURPOSE_SLOTS.items():
         for slot in slots:

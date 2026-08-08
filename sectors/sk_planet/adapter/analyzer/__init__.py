@@ -16,6 +16,7 @@ from pathlib import Path
 
 from openai import OpenAI
 
+from common.ai_client import openai_client_kwargs
 from common.content_quality_validator import (
     COMPARISON_COMPLETENESS_INSTRUCTION,
     SWOT_COMPLETENESS_INSTRUCTION,
@@ -26,6 +27,10 @@ from sources.openai_retry import call_with_retry
 
 # SK플래닛 전용 환경변수 및 스테이지 설정
 _API_KEY_ENV_VAR = "TRENDSPARC_SK_PLANET_ANALYZER_API_KEY"
+# Optional - points this stage at an OpenAI-API-compatible alternative
+# provider (e.g. Upstage Solar) instead of stock OpenAI. Unset by default;
+# see common/ai_client.py.
+_BASE_URL_ENV_VAR = "TRENDSPARC_SK_PLANET_ANALYZER_BASE_URL"
 _MODEL = "gpt-4o"  # 필요 시 사용 중인 OpenAI 모델로 변경 가능
 _STAGE = "sectors.sk_planet.adapter.analyzer"
 
@@ -249,6 +254,9 @@ def analyze(
     source_documents: list[SourceDocument],
     question: str,
     information_needs: list[str] | None = None,
+    # Accepted for signature parity with sk_broadband's analyzer (pipeline.py
+    # calls every sector's analyze() the same way) - not yet acted on here.
+    target_block_shapes: list[str] | None = None,
 ) -> list[DocumentAnalysis]:
     """입력된 SK플래닛 관련 문서 목록을 분석하여 DocumentAnalysis 리스트로 반환합니다."""
     api_key = os.environ.get(_API_KEY_ENV_VAR)
@@ -258,7 +266,7 @@ def analyze(
             reason=f"template_only: {_API_KEY_ENV_VAR} is not configured",
         )
 
-    client = OpenAI(api_key=api_key)
+    client = OpenAI(api_key=api_key, **openai_client_kwargs(_BASE_URL_ENV_VAR))
     system_prompt = _load_system_prompt()
 
     return [_analyze_document(client, system_prompt, document, question) for document in source_documents]
