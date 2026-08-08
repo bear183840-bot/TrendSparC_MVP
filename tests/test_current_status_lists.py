@@ -155,4 +155,4 @@ def test_the_new_slots_are_all_optional():
         slot.slot_id for slot in PURPOSE_SLOTS["current_status"] if slot.optional
     }
 
-    assert optional == {"ranking", "factors", "keywords", "response"}
+    assert optional == {"ranking", "factors", "segments", "keywords", "response"}

@@ -1,3 +1,5 @@
+import math
+import re
 from types import SimpleNamespace
 
 from common.contracts import ComparisonPoint, CorroboratedPoint, GeneratedReport, GeneratedReportSection, MetricPoint
@@ -163,10 +165,47 @@ def test_render_metric_chart_scales_the_axis_to_the_real_value_range(monkeypatch
     )
 
     output = "\n".join(captured)
-    # Highest/lowest gridline labels come from the data itself - never a
-    # rounded-off axis that misrepresents where the real values sit.
-    assert "650" in output
-    assert "520" in output
+    # Round gridlines that contain the data, not the raw min/max. Dividing the
+    # exact range into four produced labels like 31,583.7 - accurate, and
+    # useless for judging where a point sits. The axis must still cover every
+    # plotted value, so nothing is ever drawn outside its own scale.
+    assert components._chart_y_ticks(520.0, 650.0) == [650.0, 600.0, 550.0, 500.0]
+    assert "650" in output and "500" in output
+
+
+def test_chart_y_ticks_are_always_round_and_always_contain_the_data():
+    for low, high in ((951.0, 46900.0), (12.4, 93.2), (0.5, 3.3), (44120.0, 46900.0)):
+        ticks = components._chart_y_ticks(low, high)
+        assert ticks[0] >= high and ticks[-1] <= low, (low, high, ticks)
+        step = ticks[0] - ticks[1]
+        # 1, 2, 2.5 or 5 x a power of ten - the steps a reader can count in.
+        mantissa = step / 10 ** math.floor(math.log10(step))
+        assert round(mantissa, 3) in (1.0, 2.0, 2.5, 5.0), (step, ticks)
+
+
+def test_two_series_of_different_magnitude_get_their_own_axes(monkeypatch):
+    """매출액 (4만억대) and 영업이익 (900~3,700억대) share a unit, so neither is
+    dropped - and on one axis the smaller one was a flat line on the floor."""
+    captured: list[str] = []
+    monkeypatch.setattr(components.st, "markdown", lambda body, **kwargs: captured.append(body))
+
+    components.render_metric_chart([
+        MetricPoint(label="매출액", period="2024년", value=44120.0, unit="억원"),
+        MetricPoint(label="매출액", period="2025년", value=45406.0, unit="억원"),
+        MetricPoint(label="매출액", period="2026년", value=46900.0, unit="억원"),
+        MetricPoint(label="영업이익", period="2024년", value=3522.0, unit="억원"),
+        MetricPoint(label="영업이익", period="2025년", value=3741.0, unit="억원"),
+        MetricPoint(label="영업이익", period="2026년", value=951.0, unit="억원"),
+    ])
+    output = "\n".join(captured)
+
+    assert "좌축" in output and "우축" in output
+    # The smaller series is drawn against its own scale, so its points spread
+    # across the plot instead of collapsing onto the bottom edge.
+    teal_lines = re.findall(r'points="([^"]+)" fill="none" stroke="var\(--ts-teal\)"', output)
+    assert teal_lines, output
+    ys = [float(pair.split(",")[1]) for pair in teal_lines[0].split()]
+    assert max(ys) - min(ys) > 20, ys
 
 
 def test_render_metric_chart_handles_a_flat_series_without_dividing_by_zero(monkeypatch):
@@ -258,10 +297,16 @@ def test_render_swot_declines_rather_than_apologising_for_empty_quadrants():
     assert components.render_swot(
         strengths=[], weaknesses=[], opportunities=[], threats=[]
     ) == ""
-    # One quadrant is not a matrix either.
-    assert components.render_swot(
+    # One quadrant is not dropped, though - it is drawn as the artwork's
+    # single accent panel. Dropping it sent the only finding the question had
+    # back to plain bullets, which is worse than a one-cell card: the same
+    # information with the design taken off it.
+    solo = components.render_swot(
         strengths=["인프라 우위"], weaknesses=[], opportunities=[], threats=[]
-    ) == ""
+    )
+    assert 'class="ts-swot solo"' in solo
+    assert solo.count("ts-swot-cell") == 1
+    assert "수집 필요" not in solo
 
 
 def test_render_swot_draws_only_the_quadrants_that_have_evidence():
@@ -315,3 +360,36 @@ def test_uncorroborated_doc_ids_excludes_a_doc_that_also_backs_a_corroborated_cl
 
 def test_uncorroborated_doc_ids_handles_missing_fields_gracefully():
     assert uncorroborated_doc_ids(SimpleNamespace()) == set()
+
+
+def test_importance_bars_print_the_reason_instead_of_hiding_it(monkeypatch):
+    """A score is a judgement, so its justification has to be readable.
+
+    It used to live in a `title=` tooltip: invisible on a touch screen, and
+    invisible to anyone who doesn't happen to hover - which leaves an "AI
+    판단" number looking exactly like a measured one.
+    """
+    captured: list[str] = []
+    monkeypatch.setattr(components.st, "markdown", lambda body, **kwargs: captured.append(body))
+
+    claims = [
+        SimpleNamespace(
+            claim="숏폼 이용 시간 증가", importance=80,
+            importance_basis="세 개 문서가 같은 방향을 보고했다",
+            doc_id=None, source_url=None, claim_id="c1", claim_type="factor",
+        ),
+        SimpleNamespace(
+            claim="광고 단가 하락", importance=45,
+            importance_basis="한 개 문서만 언급했다",
+            doc_id=None, source_url=None, claim_id="c2", claim_type="factor",
+        ),
+    ]
+    components.render_importance_bars(claims)
+    output = "".join(captured)
+
+    # Visible as element content, not only as a hover attribute. The tooltip
+    # is allowed as a supplement - the CSS clamps the visible text to two
+    # lines - but it may not be the only place the reason exists.
+    assert 'class="ts-action-basis"' in output
+    body = output.split('class="ts-action-basis"')[1].split(">", 1)[1]
+    assert "세 개 문서가 같은 방향을 보고했다" in body

@@ -46,6 +46,76 @@ def strip_particle(token: str) -> str:
     return token
 
 
+
+
+# What a compared entity *is*, so a section can ask for the kind it means.
+# Live-observed: a 경쟁사 table listed 50대 / 60대 / 70대 이상 - the analyzer
+# had correctly extracted an age breakdown, and the slot took it because the
+# only question asked was "are there two entities sharing a criterion". A
+# competitor section that shows age brackets is not a smaller mistake than an
+# empty one; it states something false about the market.
+#
+# Only kinds that can be recognised from the text itself are named here.
+# Everything else is `entity`, which is what a company, brand or product looks
+# like - so the default keeps working exactly as before for the ordinary case.
+# Brackets are written several ways in the same report - "20대", "30~40대",
+# "10-20대", "만 15세", "50대 이상". A range missed by the pattern reads as an
+# organisation, which is how "30~40대" once sat in a competitor table beside
+# two correctly-classified age brackets.
+_AGE_BRACKET_RE = re.compile(
+    r"(?:^|\s)(?:만\s*)?\d{1,3}\s*(?:[~\-–]\s*\d{1,3}\s*)?(?:대|세)"
+    r"(?:\s*(?:이상|이하|미만|초과))?\s*$"
+    r"|^전\s*연령"
+)
+_GENDER_WORDS = ("남성", "여성", "남자", "여자", "male", "female")
+_HOUSEHOLD_WORDS = ("1인 가구", "1인가구", "2인 가구", "가구원", "세대주")
+
+EntityKind = Literal["age", "gender", "household", "entity"]
+
+
+def entity_kind(entity: str) -> EntityKind:
+    """Which category a comparison's entity belongs to."""
+    text = (entity or "").strip()
+    if _AGE_BRACKET_RE.search(text):
+        return "age"
+    lowered = text.casefold()
+    if any(word in lowered for word in _GENDER_WORDS):
+        return "gender"
+    if any(word in text for word in _HOUSEHOLD_WORDS):
+        return "household"
+    return "entity"
+
+
+def is_demographic(entity: str) -> bool:
+    """Whether this is a slice of people rather than a named organisation."""
+    return entity_kind(entity) != "entity"
+
+
+def _age_sort_key(entity: str) -> tuple:
+    """Age brackets in their natural order, not in evidence order.
+
+    Evidence order is whichever sentence the analyzer read first, so a run
+    that happened to quote the older brackets first presented 50대/60대/70대
+    이상 as though those were the age story - on a question about short-form
+    video, where the younger brackets are the point.
+    """
+    match = re.search(r"\d{1,3}", entity or "")
+    return (0, int(match.group(0))) if match else (1, entity or "")
+
+
+def order_comparison_entities(points: list[Any]) -> list[Any]:
+    """Comparisons in an order the category itself implies.
+
+    Age brackets read youngest first because that is how a reader scans a
+    demographic split; everything else keeps the order the evidence gave,
+    which for companies is already meaningful (it is the order they were
+    discussed in).
+    """
+    if not points or not all(entity_kind(point.entity) == "age" for point in points):
+        return points
+    return sorted(points, key=lambda point: _age_sort_key(point.entity))
+
+
 def dated_items(items: list[str]) -> list[str]:
     """Items that contain a concrete date/period marker (year, quarter, or
     month-day) - the shared way to tell genuinely time-anchored content

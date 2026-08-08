@@ -60,6 +60,7 @@ from common.block_shapes import (  # noqa: F401
     has_landscape,
     has_recurring_terms,
     has_share_split,
+    split_aggregate,
     has_status_levels,
     status_levels,
     recurring_terms,
@@ -412,8 +413,13 @@ def render_metric_insight(points: list[Any], grounded_claims: list[Any] | None) 
     text, url = insight
     with st.expander("AI Insight"):
         link = f' <a href="{escape(url)}" target="_blank">출처 원문</a>' if url else ""
+        # The chip says what the sentence is before the reader starts reading
+        # it: a quoted claim, not the dashboard's own commentary. Without it
+        # the panel behind "AI Insight" reads as something the model wrote.
         st.markdown(
-            f'<div class="ts-metric-insight">{escape(clean_citation(text))}{link}</div>',
+            '<div class="ts-metric-insight">'
+            '<span class="ts-metric-insight-tag">근거</span>'
+            f'{escape(clean_citation(text))}{link}</div>',
             unsafe_allow_html=True,
         )
 
@@ -455,15 +461,77 @@ _CHART_XLABEL_Y = 136
 _CHART_GRID_LINES = 4
 
 
+# A second series whose numbers are this much smaller than the first gets its
+# own axis. Below the threshold one shared axis is easier to read - the whole
+# point of a single axis is that two lines can be compared directly, and
+# splitting them at 2x throws that away for no gain. Above it the smaller
+# series is pressed flat against the floor and stops being a line at all:
+# 영업이익 (900~3,700억원) drawn against 매출액 (44,000~46,900억원) rendered as
+# a straight rule along the bottom of the plot.
+_DUAL_AXIS_RATIO = 4.0
+
+_NICE_STEPS = (1.0, 2.0, 2.5, 5.0, 10.0)
+
+
+def _nice_step(rough: float) -> float:
+    """The next round number at or above `rough` - 1, 2, 2.5 or 5 x 10^n.
+
+    Axis ticks were the raw data range divided into four, which is how an
+    axis came to read 46,900 / 31,583.7 / 16,267.3 / 951. Those numbers are
+    accurate and unreadable; nobody holds 16,267.3 in their head to judge
+    where a point sits.
+    """
+    if rough <= 0:
+        return 1.0
+    magnitude = 10.0 ** math.floor(math.log10(rough))
+    for step in _NICE_STEPS:
+        if rough <= step * magnitude + 1e-9:
+            return step * magnitude
+    return 10.0 * magnitude
+
+
 def _chart_y_ticks(low: float, high: float) -> list[float]:
-    """`_CHART_GRID_LINES` evenly spaced values spanning the real data range,
-    top-down. A flat series (every value identical) still gets a readable
-    axis rather than a divide-by-zero."""
+    """`_CHART_GRID_LINES` round values covering the data range, top-down.
+
+    The range is widened outward to the nearest round step rather than
+    starting exactly at the data, so every plotted point sits inside the
+    axis and the labels are numbers a reader can use. A flat series (every
+    value identical) still gets a readable axis rather than a divide-by-zero.
+    """
     if high <= low:
         pad = abs(high) * 0.1 or 1.0
         low, high = high - pad, high + pad
-    step = (high - low) / (_CHART_GRID_LINES - 1)
-    return [high - step * index for index in range(_CHART_GRID_LINES)]
+    step = _nice_step((high - low) / (_CHART_GRID_LINES - 1))
+    # Series that never go negative keep a zero floor where that is close by:
+    # a revenue axis starting at 44,000 exaggerates a 6% rise into a doubling.
+    base = 0.0 if low >= 0 and low <= step else math.floor(low / step) * step
+    top = base + step * (_CHART_GRID_LINES - 1)
+    while top < high:
+        step = _nice_step(step * 1.5)
+        base = 0.0 if low >= 0 and low <= step else math.floor(low / step) * step
+        top = base + step * (_CHART_GRID_LINES - 1)
+    return [top - step * index for index in range(_CHART_GRID_LINES)]
+
+
+def _axis_groups(by_label: dict) -> list[list[str]]:
+    """Which labels share an axis - one group, or two when the scales differ.
+
+    Split on magnitude, not on label, because nothing in the evidence says
+    which metric is "the main one"; the biggest series anchors the left axis
+    and anything an order of magnitude below it moves right.
+    """
+    peaks = {
+        label: max(abs(point.value) for point in points)
+        for label, points in by_label.items() if points
+    }
+    if len(peaks) < 2:
+        return [list(by_label)]
+    ordered = sorted(peaks, key=lambda label: peaks[label], reverse=True)
+    largest = peaks[ordered[0]]
+    small = [label for label in ordered if peaks[label] * _DUAL_AXIS_RATIO <= largest]
+    if not small:
+        return [ordered]
+    return [[label for label in ordered if label not in small], small]
 
 
 def _metric_chart_svg(points: list[Any], title: str) -> str:
@@ -475,12 +543,14 @@ def _metric_chart_svg(points: list[Any], title: str) -> str:
     """
     by_label = group_metric_points_by_series(points)
     periods = sorted({point.period for point in points}, key=period_sort_key)
-    values = [point.value for point in points]
-    low, high = min(values), max(values)
-    ticks = _chart_y_ticks(low, high)
-    tick_low, tick_high = ticks[-1], ticks[0]
-    span = (tick_high - tick_low) or 1.0
     unit = next((point.unit for point in points if point.unit), "")
+
+    groups = _axis_groups(by_label)
+    ticks_by_group = []
+    for group in groups:
+        group_values = [point.value for label in group for point in by_label[label]]
+        ticks_by_group.append(_chart_y_ticks(min(group_values), max(group_values)))
+    axis_of_label = {label: index for index, group in enumerate(groups) for label in group}
 
     def x_of(period: str) -> float:
         if len(periods) == 1:
@@ -488,16 +558,36 @@ def _metric_chart_svg(points: list[Any], title: str) -> str:
         step = (_CHART_RIGHT - _CHART_LEFT) / (len(periods) - 1)
         return _CHART_LEFT + step * periods.index(period)
 
-    def y_of(value: float) -> float:
-        ratio = (value - tick_low) / span
+    def y_on(axis: int, value: float) -> float:
+        ticks = ticks_by_group[axis]
+        tick_low, tick_high = ticks[-1], ticks[0]
+        ratio = (value - tick_low) / ((tick_high - tick_low) or 1.0)
         return _CHART_BOTTOM - ratio * (_CHART_BOTTOM - _CHART_TOP)
 
+    # Gridlines follow the left axis only. Two sets of horizontal rules at
+    # different heights would read as a grid that means nothing.
     grid = "".join(
-        f'M{_CHART_LEFT - 12} {y_of(tick):.1f}h{_CHART_RIGHT - _CHART_LEFT + 12}' for tick in ticks
+        f'M{_CHART_LEFT - 12} {y_on(0, tick):.1f}h{_CHART_RIGHT - _CHART_LEFT + 12}'
+        for tick in ticks_by_group[0]
     )
     y_labels = "".join(
-        f'<text x="2" y="{y_of(tick) + 3:.1f}">{escape(_format_number(tick))}</text>' for tick in ticks
+        f'<text x="2" y="{y_on(0, tick) + 3:.1f}">{escape(_format_number(tick))}</text>'
+        for tick in ticks_by_group[0]
     )
+    # The right-hand axis is tinted with its series' colour, because on a dual
+    # axis "which line does this number belong to" is the question the reader
+    # has to answer before anything else.
+    right_labels = ""
+    if len(groups) > 1:
+        right_labels = (
+            f'<g class="ts-chart-axis" text-anchor="end" fill="var(--ts-teal)">'
+            + "".join(
+                f'<text x="{_CHART_W - 2}" y="{y_on(1, tick) + 3:.1f}">'
+                f'{escape(_format_number(tick))}</text>'
+                for tick in ticks_by_group[1]
+            )
+            + "</g>"
+        )
     x_labels = "".join(
         f'<text x="{x_of(period):.1f}" y="{_CHART_XLABEL_Y}">{escape(period)}</text>' for period in periods
     )
@@ -505,7 +595,8 @@ def _metric_chart_svg(points: list[Any], title: str) -> str:
     series_markup = ""
     for index, (label, label_points) in enumerate(by_label.items()):
         ordered = sorted(label_points, key=lambda point: period_sort_key(point.period))
-        coords = [(x_of(point.period), y_of(point.value)) for point in ordered]
+        axis = axis_of_label[label]
+        coords = [(x_of(point.period), y_on(axis, point.value)) for point in ordered]
         # A projection is not history. The observed part of the series is a
         # solid line; the segment that runs into a forecast point is dashed,
         # so the reader can see where the evidence stops and the source's
@@ -529,14 +620,14 @@ def _metric_chart_svg(points: list[Any], title: str) -> str:
         # fills would misread as a stacked chart rather than two independent
         # series sharing one axis.
         area = ""
-        if index == 0 and len(solid_coords) > 1:
+        if index == 0 and axis == 0 and len(solid_coords) > 1:
             area_path = (
                 f'M{solid_coords[0][0]:.1f} {solid_coords[0][1]:.1f}'
                 + "".join(f'L{x:.1f} {y:.1f}' for x, y in solid_coords[1:])
                 + f'L{solid_coords[-1][0]:.1f} {_CHART_BOTTOM}L{solid_coords[0][0]:.1f} {_CHART_BOTTOM}Z'
             )
             area = f'<path d="{area_path}" fill="url(#tsChartFill)"></path>'
-        stroke = "var(--ts-accent)" if index == 0 else "var(--ts-teal)"
+        stroke = "var(--ts-teal)" if axis else "var(--ts-accent)"
         forecast_markup = (
             f'<polyline points="{forecast_line}" fill="none" stroke="{stroke}" stroke-width="2.2" '
             f'stroke-dasharray="5 4" stroke-linejoin="round" stroke-linecap="round" '
@@ -549,10 +640,15 @@ def _metric_chart_svg(points: list[Any], title: str) -> str:
             f'<g fill="var(--ts-panel)" stroke="{stroke}" stroke-width="2">{dots}</g>'
         )
 
+    # The legend has to say which axis a line is read against, or a dual-axis
+    # chart silently invites the reader to compare two different scales.
     legend = "".join(
-        f'<span class="ts-chart-key"><i style="background:{"var(--ts-accent)" if index == 0 else "var(--ts-teal)"}"></i>'
-        f'{escape(label)}</span>'
-        for index, label in enumerate(by_label)
+        f'<span class="ts-chart-key">'
+        f'<i style="background:{"var(--ts-teal)" if axis_of_label[label] else "var(--ts-accent)"}"></i>'
+        f'{escape(label)}'
+        + (f'<small>{"우축" if axis_of_label[label] else "좌축"}</small>' if len(groups) > 1 else "")
+        + "</span>"
+        for label in by_label
     )
     unit_note = f'<span class="ts-chart-unit">단위: {escape(unit)}</span>' if unit else ""
     if any(getattr(point, "is_forecast", False) for point in points):
@@ -566,6 +662,7 @@ def _metric_chart_svg(points: list[Any], title: str) -> str:
         '<stop offset="1" stop-color="var(--ts-accent)" stop-opacity="0"></stop></linearGradient></defs>'
         f'<g stroke="var(--ts-soft)" stroke-width="1"><path d="{grid}"></path></g>'
         f'<g class="ts-chart-axis" text-anchor="start">{y_labels}</g>'
+        f'{right_labels}'
         f'{series_markup}'
         f'<g class="ts-chart-axis" text-anchor="middle">{x_labels}</g>'
         "</svg></div>"
@@ -594,7 +691,10 @@ def render_metric_bar(
     # Three or more items compared read better as columns - the artwork's
     # vertical bar card - than as a stack of rows; two are a before/after and
     # stay horizontal, where the pair reads as one change.
-    if varies_by_subject(points_for_one_label) and len(points_for_one_label) >= _COLUMN_BAR_MIN_ITEMS:
+    if (
+        varies_by_subject(points_for_one_label)
+        and len(split_aggregate(points_for_one_label)[0]) >= _COLUMN_BAR_MIN_ITEMS
+    ):
         render_metric_columns(points_for_one_label)
         render_metric_insight(points_for_one_label, grounded_claims)
         return
@@ -631,8 +731,11 @@ def render_swot(strengths: list[str], weaknesses: list[str], opportunities: list
     to be papered over; the agreed principle is that a multi-quadrant block is
     only used when the data genuinely fills it.
 
-    Returns "" when fewer than two quadrants have content, so the caller can
-    drop the block rather than render a one-cell "matrix".
+    One quadrant is drawn too, as the artwork's single accent panel rather
+    than as a one-cell grid pretending to be a matrix. Dropping it sent the
+    only thing the question had to say - "기회" on a brand question with no
+    stated risks - back to plain bullets, which is the opposite of using what
+    is there. Returns "" only when every quadrant is empty.
     """
     quadrants = [
         ("Strength", strengths, "positive"),
@@ -641,7 +744,7 @@ def render_swot(strengths: list[str], weaknesses: list[str], opportunities: list
         ("Threat", threats, "negative"),
     ]
     filled = [(label, values, tone) for label, values, tone in quadrants if values]
-    if len(filled) < 2:
+    if not filled:
         return ""
     # The artwork's quadrant head is one big initial with a soft colour disc
     # sitting behind it, and the items hang off a hairline rule with small ring
@@ -654,8 +757,12 @@ def render_swot(strengths: list[str], weaknesses: list[str], opportunities: list
         + "</div>"
         for label, values, tone in filled
     )
-    # Two quadrants read better side by side than in a 2x2 with two holes.
-    layout_class = "ts-swot duo" if len(filled) == 2 else "ts-swot"
+    # The grid follows the count instead of the count being padded to fit the
+    # grid: two quadrants read better side by side than in a 2x2 with two
+    # holes, and three across beats a 2x2 with one. Only four fill the square.
+    layout_class = {1: "ts-swot solo", 2: "ts-swot duo", 3: "ts-swot trio"}.get(
+        len(filled), "ts-swot"
+    )
     return f'<div class="{layout_class}">{cells}</div>'
 
 
@@ -822,25 +929,52 @@ def render_metric_columns(points_for_one_label: list[Any]) -> None:
 
     Same data the row layout takes; the difference is only that a wide set of
     items is easier to compare against a shared baseline than down a column of
-    tracks. Scaled against the largest value present, so the tallest column is
-    the largest figure and not an arbitrary axis maximum.
+    tracks. Scaled against the largest item, and the stated whole - where the
+    evidence gave one - is a caption rather than a fourth bar.
     """
-    ordered = sorted(points_for_one_label, key=lambda point: abs(point.value), reverse=True)
-    peak = max(abs(point.value) for point in ordered) or 1
+    items, total = split_aggregate(points_for_one_label)
+    ordered = sorted(items, key=lambda point: abs(point.value), reverse=True)
     unit = ordered[0].unit or ""
+    # Where the evidence stated a whole, the bars are drawn against it and it
+    # becomes a marked ceiling on the plot. Scaling to the tallest item
+    # instead makes the leader touch the top of the chart whatever it is
+    # worth - 78.8% out of a stated 93.2% looked identical to 78.8% out of
+    # 100%, and the stated whole survived only as a line of caption text.
+    ceiling = abs(total.value) if total and abs(total.value) >= max(
+        abs(point.value) for point in ordered
+    ) else 0.0
+    peak = ceiling or max(abs(point.value) for point in ordered) or 1
     labels = metric_axis_labels(ordered)
     columns = "".join(
         f'<div class="ts-gbar-col"><div class="ts-gbar-stack">'
         f'<i style="height:{abs(point.value) / peak * 100:.1f}%" '
-        f'title="{escape(_format_number(point.value))}{escape(unit)}"></i></div>'
+        f'title="{escape(_format_number(point.value))}{escape(unit)}"></i>'
+        f'<b class="ts-gbar-value">{escape(_format_number(point.value))}{escape(unit)}</b></div>'
         f'<span>{escape(label)}</span></div>'
         for point, label in zip(ordered, labels)
     )
-    unit_note = f'<span class="ts-chart-unit">단위: {escape(unit)}</span>' if unit else ""
+    ceiling_markup = (
+        f'<div class="ts-gbar-ceiling"><span>전체 {escape(_format_number(total.value))}'
+        f'{escape(total.unit or unit)}</span></div>' if ceiling else ""
+    )
+    # The period belongs in the caption line, never on the axis: it is the
+    # same for every bar here, so repeating it under each one says nothing
+    # while competing with the labels that do.
+    notes = " · ".join(
+        part for part in (
+            f"단위: {escape(unit)}" if unit else "",
+            f"{escape(ordered[0].period)} 기준" if ordered[0].period else "",
+            # Drawn as a ceiling instead when the bars are scaled to it.
+            f"전체 {escape(_format_number(total.value))}{escape(total.unit or '')}"
+            if total and not ceiling else "",
+        ) if part
+    )
+    unit_note = f'<span class="ts-chart-unit">{notes}</span>' if notes else ""
     st.markdown(
         f'<div class="ts-chart"><div class="ts-chart-head"><b>{escape(ordered[0].label)}</b>'
         f'{unit_note}</div>'
-        f'<div class="ts-gbar single" style="height:{_GROUPED_BAR_HEIGHT}px">{columns}</div></div>',
+        f'<div class="ts-gbar single" style="height:{_GROUPED_BAR_HEIGHT}px">'
+        f'{ceiling_markup}{columns}</div></div>',
         unsafe_allow_html=True,
     )
 
@@ -1103,17 +1237,27 @@ def render_importance_bars(grounded_claims: list[Any]) -> None:
     ranked = importance_ranked(grounded_claims or [])
     if len(ranked) < 2:
         return
+    # The reason is printed, not hidden behind a tooltip. A score the reader
+    # can see and a justification they have to hover to find is exactly the
+    # arrangement that lets a judgement read as a measurement - and on a touch
+    # screen the hover never happens at all.
     rows = "".join(
-        f'<div class="ts-driver-row" title="{escape(claim.importance_basis or "")}">'
-        f'<span class="label">{escape(clean_citation(claim.claim))}</span>'
+        f'<div class="ts-driver-row">'
+        f'<span class="label" title="{escape(clean_citation(claim.claim))}">'
+        f'{escape(clean_citation(claim.claim))}</span>'
         f'<span class="ts-driver-track"><i style="width:{claim.importance}%"></i></span>'
         f'<span class="value">{claim.importance}</span>{_claim_link(claim)}</div>'
+        + (
+            f'<div class="ts-action-basis" title="{escape(clean_citation(claim.importance_basis))}">'
+            f'{escape(clean_citation(claim.importance_basis))}</div>'
+            if claim.importance_basis else ""
+        )
         for claim in ranked
     )
     st.markdown(
         '<section class="ts-drivers"><div class="ts-block-title">영향도 <span class="ts-ai-badge">AI 판단</span></div>'
         '<p class="ts-drivers-note">근거 문서가 제시한 수치가 아니라 모델이 매긴 상대적 중요도입니다. '
-        '각 항목에 마우스를 올리면 그렇게 본 이유가 표시됩니다.</p>'
+        '각 항목 아래에 그렇게 본 이유를 함께 적었습니다.</p>'
         + rows + "</section>",
         unsafe_allow_html=True,
     )
@@ -1143,7 +1287,19 @@ def _sparkline_svg(points: list[Any]) -> str:
     )
 
 
-def render_kpi_row(metric_points: list[Any], limit: int = 4, question_terms: list[str] | None = None) -> None:
+# The grid is auto-fill, so the count decides the shape rather than the shape
+# deciding how many figures get shown: one or two become full-width rows,
+# three to six fill the card grid at whatever width fits. The cap exists only
+# so a run that extracted thirty figures doesn't turn the report into a wall
+# of numbers - it is not a target to pad up to.
+_KPI_MAX_CARDS = 6
+
+
+def render_kpi_row(
+    metric_points: list[Any],
+    limit: int = _KPI_MAX_CARDS,
+    question_terms: list[str] | None = None,
+) -> None:
     """Key KPI badge row - up to `limit` distinct metrics as stat cards.
 
     When two points share the same label (e.g. two different periods of the

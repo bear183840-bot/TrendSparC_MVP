@@ -37,7 +37,20 @@ def test_no_narrative_item_appears_in_two_sections(path):
                 owners.setdefault((field, value), set()).add(section.section_id)
 
     repeated = {key: sorted(sections) for key, sections in owners.items() if len(sections) > 1}
-    assert repeated == {}, repeated
+
+    # One documented exception, and only this one: generate_report keeps a
+    # duplicate rather than empty a section, because an emptied section is
+    # dropped from the report entirely. It can only bite when a field holds a
+    # single item in total - there is then nothing else to give the other
+    # sections. Any repeat where the section had something else to say is the
+    # bug this test is for.
+    by_id = {section.section_id: section for section in report.sections}
+    unexplained = {
+        (field, value): sections
+        for (field, value), sections in repeated.items()
+        if any(len(getattr(by_id[section_id], field, None) or []) > 1 for section_id in sections)
+    }
+    assert unexplained == {}, unexplained
 
 
 @pytest.mark.parametrize("path", _FIXTURES, ids=lambda p: p.stem.replace("synthesis_", ""))

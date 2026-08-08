@@ -24,8 +24,11 @@ from common.content_quality_validator import (
     dated_items,
     filter_shared_comparison_axis,
     group_metric_points_by_label,
+    entity_kind,
+    is_demographic,
     is_duplicate_statement,
     is_time_period,
+    order_comparison_entities,
     strip_particle,
     period_sort_key,
 )
@@ -97,6 +100,24 @@ def time_bar_groups(metric_points: list[Any]) -> list[list[Any]]:
     """Only the before/after-over-time labels - movement, not ranking."""
     by_label = group_metric_points_by_label(metric_points)
     return [points for points in by_label.values() if classify_metric_shape(points) == "bar"]
+
+
+def split_aggregate(points_for_one_label: list[Any]) -> tuple[list[Any], Any | None]:
+    """(items, total) for one label, where a total is present.
+
+    Evidence routinely states a whole and its parts in one breath -
+    "숏폼 이용률 93.2%, 그중 유튜브 쇼츠 78.8%, 릴스 46.2%, 틱톡 22.9%".
+    The whole arrives as a point with no `subject`, and drawn beside the
+    parts it becomes a fourth bar taller than all of them, labelled by its
+    period because it has no subject to be labelled by - which is how a bar
+    reading "2024" ended up leading a platform ranking. The total is real and
+    worth showing; it is just not one of the items.
+    """
+    items = [point for point in points_for_one_label if getattr(point, "subject", None)]
+    if not items or len(items) == len(points_for_one_label):
+        return points_for_one_label, None
+    totals = [point for point in points_for_one_label if not getattr(point, "subject", None)]
+    return items, totals[0]
 
 
 def item_bar_groups(metric_points: list[Any]) -> list[list[Any]]:
@@ -311,7 +332,9 @@ def competitor_panels(
 
 
 def has_competitor_panels(comparison_points: list[Any], metric_points: list[Any]) -> bool:
-    return bool(competitor_panels(comparison_points, metric_points))
+    return bool(competitor_panels(
+        comparison_points_of_kind(comparison_points, demographic=False), metric_points
+    ))
 
 
 def has_landscape(metric_points: list[Any]) -> bool:
@@ -325,11 +348,36 @@ def has_landscape(metric_points: list[Any]) -> bool:
     return has_timeseries(metric_points) and has_share_split(metric_points)
 
 
-def has_comparison(comparison_points: list[Any]) -> bool:
+def comparison_points_of_kind(comparison_points: list[Any], demographic: bool) -> list[Any]:
+    """Comparisons whose entities are (or are not) slices of people.
+
+    The split every section-aware caller needs: 경쟁사 wants organisations,
+    a demographic breakdown wants age or gender, and neither should be shown
+    under the other's heading. Ordered by whatever the category implies -
+    age brackets youngest first.
+    """
+    selected = [
+        point for point in comparison_points
+        if is_demographic(point.entity) == demographic
+    ]
+    return order_comparison_entities(selected)
+
+
+def has_comparison(comparison_points: list[Any], demographic: bool | None = None) -> bool:
     """True only when 2+ entities share a real common criterion - two
     entities that each only state a *different* metric (no overlap) don't
-    make a comparable table, just two unrelated facts side by side."""
-    shared = filter_shared_comparison_axis(comparison_points)
+    make a comparable table, just two unrelated facts side by side.
+
+    `demographic` narrows it to one kind of entity: False for the competitor
+    table (organisations), True for an age or gender breakdown. Left None it
+    asks the old question, which is still the right one wherever the section
+    is about comparison in general.
+    """
+    points = (
+        comparison_points if demographic is None
+        else comparison_points_of_kind(comparison_points, demographic)
+    )
+    shared = filter_shared_comparison_axis(points)
     return len({point.entity for point in shared}) >= 2
 
 
@@ -427,11 +475,35 @@ def timeline_entries(
     Undated prose is left out - a numbered list of undated statements is not
     a timeline, which is all the old registry block produced."""
     entries: list[tuple[str, str]] = []
+    # A figure only belongs on a timeline when its own label was measured at
+    # more than one point in time. Six different metrics all dated 2024 are a
+    # snapshot of one moment, and listing them in a row makes a chronology out
+    # of a cross-section - which is exactly what a reader would misread as
+    # change over time. Live-observed: 숏폼 이용률 93.2%, 소비 비율 72.1%,
+    # 광고 선호도 31% and three platform shares were drawn as a six-step
+    # timeline, all labelled 2024.
+    periods_by_label: dict[str, set[str]] = {}
     for point in metric_points:
         # `period` is free text and is not always a time. An app-churn
         # analysis used it for the compared subject ("B tv+ 앱"), which put
         # "B tv+ 앱 — 30일 이탈률 42%" on a timeline as though it were a date.
         if is_time_period(point.period):
+            periods_by_label.setdefault(point.label, set()).add(point.period)
+    # A chronology the dated prose already establishes. A one-off figure has
+    # a place on such a timeline - it is a moment among other moments. What it
+    # cannot do is *be* the timeline, which is what happened when six
+    # different metrics, every one of them dated 2024, were laid out as six
+    # steps of change.
+    prose_periods = {
+        period for period in (
+            _timeline_period(sentence, reference_year) for sentence in dated_items(evidence)
+        ) if period
+    }
+    for point in metric_points:
+        if not is_time_period(point.period):
+            continue
+        own_series = len(periods_by_label.get(point.label, ())) >= 2
+        if own_series or len(prose_periods) >= 2:
             entries.append((point.period, f"{point.label} {_format_number(point.value)}{point.unit or ''}"))
     for sentence in dated_items(evidence):
         period = _timeline_period(sentence, reference_year)
@@ -519,7 +591,15 @@ def timeline_entries_with_status(
 def has_timeline(
     evidence: list[str], metric_points: list[Any], reference_year: int | None = None
 ) -> bool:
-    return bool(timeline_entries(evidence, metric_points, reference_year))
+    """True only when the entries actually span more than one point in time.
+
+    One date repeated down a column is a snapshot wearing a timeline's
+    layout. The block exists to show *when things changed*; with a single
+    period there is no change to show, and a snapshot has its own blocks
+    (kpi_grid, metric_comparison, item_bar).
+    """
+    entries = timeline_entries(evidence, metric_points, reference_year)
+    return len({period for period, _ in entries}) >= 2
 
 
 def _children_by_parent(grounded_claims: list[Any]) -> dict[str, list[Any]]:
@@ -595,7 +675,7 @@ def has_cause_tree(grounded_claims: list[Any]) -> bool:
     return bool(cause_tree(grounded_claims))
 
 
-def importance_ranked(grounded_claims: list[Any], limit: int = 6) -> list[Any]:
+def importance_ranked(grounded_claims: list[Any], limit: int = 5) -> list[Any]:
     """Claims the model scored for importance, strongest first.
 
     Only claims carrying both a score and its stated basis - the verifier

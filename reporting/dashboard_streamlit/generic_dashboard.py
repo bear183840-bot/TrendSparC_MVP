@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import contextlib
+
 from html import escape
 from typing import Any
 
@@ -166,6 +168,56 @@ def _render_narrative_list(
     )
 
 
+# How much horizontal room a block needs to be readable. A laptop screen is
+# wider than it is tall, and the report was rendering one full-width card per
+# row - so a keyword chip list and a three-bar ranking each took a whole
+# 1700px band and the page ran to four screens of scrolling.
+#
+# Two units per row. A block that carries an axis, a chain, or several series
+# takes both; a card that is a list or a short stack of figures takes one and
+# sits beside its neighbour.
+# Bars and line charts are not on this list. A ranking of three items, or a
+# three-point trend, is perfectly readable in half a 1500px screen, and giving
+# either the full width bought nothing but a taller page - the whole point of
+# the landscape grid. Only blocks that need real horizontal room - a dated
+# rail, a branching chain, or several panels side by side - take both units.
+_WIDE_BLOCKS = frozenset({
+    "landscape", "timeline", "cause_map", "cause_tree",
+    "competitor_panels", "matrix",
+})
+_GRID_UNITS = 2
+
+
+def _slot_width(slot: ResolvedSlot) -> int:
+    """Units this slot occupies - the widest block in its composition wins."""
+    if any(block_type in _WIDE_BLOCKS for block_type in slot.block_types):
+        return _GRID_UNITS
+    return 1
+
+
+def _grid_rows(slots: list[ResolvedSlot]) -> list[list[ResolvedSlot]]:
+    """Greedy left-to-right packing that keeps the skeleton's reading order.
+
+    Deliberately not a masonry re-order: the purpose skeleton is an argument
+    (현황 -> 지표 -> 경쟁 -> 대응) and shuffling cards to fill holes would
+    scramble it. A narrow card simply waits for the next narrow card; if the
+    following slot is wide, the row closes with one card in it.
+    """
+    rows: list[list[ResolvedSlot]] = []
+    current: list[ResolvedSlot] = []
+    used = 0
+    for slot in slots:
+        width = _slot_width(slot)
+        if used + width > _GRID_UNITS:
+            rows.append(current)
+            current, used = [], 0
+        current.append(slot)
+        used += width
+    if current:
+        rows.append(current)
+    return rows
+
+
 def _render_slot(
     slot: ResolvedSlot,
     items: list[str],
@@ -178,30 +230,40 @@ def _render_slot(
     uncorroborated_ids: frozenset[str],
 ) -> None:
     """Draw whichever block the slot resolved to, under the slot's own title."""
-    title, block_type = slot.slot.title, slot.block_type
-    if block_type == LAST_RESORT:
+    title = slot.slot.title
+    if slot.is_last_resort:
         # Nothing for this slot survived any candidate. Silent: the
         # under-evidenced notice above and the omitted-sections list below
         # already account for it, and an apology card here would be the third
         # copy of the same message.
         return
-    if block_type == "narrative_list":
+    if slot.block_type == "narrative_list":
         _render_narrative_list(title, items, result, uncorroborated_ids)
         return
 
-    # Decide what the body will be BEFORE opening the card. The title used to
-    # be written first, so any block that then emitted nothing - an
+    # Decide what every body will be BEFORE opening the card. The title used
+    # to be written first, so any block that then emitted nothing - an
     # unrecognised block_type, or a renderer hitting its own internal guard -
     # left a heading with an empty box under it. That is what "필요 역량"
-    # looked like: a header, no content, and no explanation either.
-    draw = _body_renderer(
-        block_type, result, synthesis, risks, opportunities, strengths, weaknesses, items
-    )
-    if draw is None:
+    # looked like: a header, no content, and no explanation either. With a
+    # composition the same rule applies per block: a companion that would
+    # draw nothing is simply not drawn, and if none of them draw, the card
+    # never opens.
+    draws = [
+        draw for draw in (
+            _body_renderer(
+                block_type, result, synthesis, risks, opportunities,
+                strengths, weaknesses, items,
+            )
+            for block_type in slot.block_types
+        ) if draw is not None
+    ]
+    if not draws:
         return
     with st.container(border=True):
         st.markdown(f'<div class="ts-card-inner"><h3>{escape(title)}</h3></div>', unsafe_allow_html=True)
-        draw()
+        for draw in draws:
+            draw()
 
 
 def _body_renderer(
@@ -277,12 +339,16 @@ def render_generic_dashboard(
     # same rule again over the rendered slots removed items a second time -
     # "시장 변화" showed 1 of its 3 key points because two had been claimed by
     # a neighbouring slot that was drawing from the same section.
-    for slot in resolved:
-        items = list(dict.fromkeys(slot.items))
-        _render_slot(
-            slot, items, result, synthesis, risks, opportunities, strengths,
-            weaknesses, uncorroborated_ids,
-        )
+    for row in _grid_rows([slot for slot in resolved if not slot.is_last_resort]):
+        # A row of one wide card needs no column wrapper - st.columns([1]) adds
+        # padding that makes a full-width block narrower than the ones above it.
+        columns = st.columns(len(row), gap="small") if len(row) > 1 else [contextlib.nullcontext()]
+        for slot, column in zip(row, columns):
+            with column:
+                _render_slot(
+                    slot, list(dict.fromkeys(slot.items)), result, synthesis, risks,
+                    opportunities, strengths, weaknesses, uncorroborated_ids,
+                )
 
     # Sections report_planner dropped for lack of evidence, shown with its
     # recorded reason so a gap in the report is visible rather than silent.

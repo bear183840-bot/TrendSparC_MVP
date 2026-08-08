@@ -1,0 +1,57 @@
+{
+  "sector_id": "sk_broadband",
+  "audience_id": "practitioner",
+  "purpose_id": "current_status",
+  "source_count": 2,
+  "unique_source_count": 2,
+  "source_ids": [
+    "www.example.co.kr"
+  ],
+  "doc_source_map": {
+    "www.example.co.kr:aaaa1111bbbb2222": "www.example.co.kr"
+  },
+  "doc_url_map": {
+    "www.example.co.kr:aaaa1111bbbb2222": "https://www.example.co.kr/news/1"
+  },
+  "business_impacts": [],
+  "risks": [],
+  "weaknesses": [],
+  "monitoring_indicators": [],
+  "confidence_labels": [],
+  "corroborated_points": [],
+  "uncorroborated_points": [],
+  "contradictions": [],
+  "_note": "Deliberately thin: one metric label at two periods, one SWOT quadrant, no comparison_points at all. Proves a slot draws what exists and disappears rather than padding - see tests/test_slot_composition.py.",
+  "request_id": "req_synthetic_sparse_evidence",
+  "question": "SK브로드밴드 IPTV 가입자는 최근 어떻게 변했나?",
+  "highlights": [
+    "SK브로드밴드 IPTV 가입자는 2024년 946만 명에서 2025년 952만 명으로 늘었다. [doc_id=www.example.co.kr:aaaa1111bbbb2222]"
+  ],
+  "synthesis_text": "IPTV 가입자 증가폭은 크지 않으나 방향은 유지되고 있다.",
+  "key_points": [
+    "IPTV 가입자 2024년 946만 명 → 2025년 952만 명 [doc_id=www.example.co.kr:aaaa1111bbbb2222]"
+  ],
+  "opportunities": [
+    "가입자 기반이 유지되는 동안 ARPU 개선 여지가 남아 있다 [doc_id=www.example.co.kr:aaaa1111bbbb2222]"
+  ],
+  "strengths": [],
+  "recommended_actions": [],
+  "metric_series": [
+    {
+      "label": "IPTV 가입자",
+      "period": "2024년",
+      "value": 946.0,
+      "unit": "만 명"
+    },
+    {
+      "label": "IPTV 가입자",
+      "period": "2025년",
+      "value": 952.0,
+      "unit": "만 명"
+    }
+  ],
+  "comparison_points": [],
+  "evidence": [
+    "2025년 IPTV 가입자는 952만 명으로 집계됐다. [doc_id=www.example.co.kr:aaaa1111bbbb2222]"
+  ]
+}

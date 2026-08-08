@@ -30,6 +30,7 @@ from pydantic import BaseModel
 from reporting.dashboard_streamlit.blocks.base import BlockDefinition, SlotContext
 from reporting.dashboard_streamlit.blocks.registry import register
 from common.block_shapes import (
+    comparison_points_of_kind,
     has_competitor_panels,
     has_grouped_bars,
     has_landscape,
@@ -95,7 +96,10 @@ def _competitor_panels(context: SlotContext):
     synthesis = context.synthesis
     if not has_competitor_panels(synthesis.comparison_points, synthesis.metric_series):
         return None
-    return lambda: render_competitor_panels(synthesis.comparison_points, synthesis.metric_series)
+    return lambda: render_competitor_panels(
+        comparison_points_of_kind(synthesis.comparison_points, demographic=False),
+        synthesis.metric_series,
+    )
 
 
 def _landscape(context: SlotContext):
@@ -135,11 +139,15 @@ def _timeline(context: SlotContext):
     )
 
 
-def _table(context: SlotContext):
-    headers, rows = comparison_points_to_table(context.synthesis.comparison_points)
-    if not rows:
-        return None
-    return lambda: st.markdown(render_comparison_table(headers, rows), unsafe_allow_html=True)
+def _comparison_table(demographic: bool):
+    """The same table, restricted to the kind of entity a section means."""
+    def build(context: SlotContext):
+        points = comparison_points_of_kind(context.synthesis.comparison_points, demographic)
+        headers, rows = comparison_points_to_table(points)
+        if not rows:
+            return None
+        return lambda: st.markdown(render_comparison_table(headers, rows), unsafe_allow_html=True)
+    return build
 
 
 def _radar(context: SlotContext):
@@ -214,7 +222,9 @@ _LIVE_BLOCKS: tuple[tuple[str, Any, str], ...] = (
     ("kpi_single", _kpi, "확인된 수치 카드 하나."),
     ("timeline", _timeline, "날짜가 있는 근거를 순서대로, 진행 상태와 함께."),
     ("competitor_panels", _competitor_panels, "경쟁사별 등급·수치·구성비를 한 패널로."),
-    ("table", _table, "공통 기준을 가진 주체 간 정성 비교표."),
+    ("table", _comparison_table(demographic=False), "공통 기준을 가진 주체 간 정성 비교표."),
+    ("segment_table", _comparison_table(demographic=True),
+     "연령대·성별 등 이용자 집단 간 비교표."),
     ("radar", _radar, "등급이 매겨진 기준들의 레이더."),
     ("matrix", _matrix, "SWOT 사분면(2개 이상 채워졌을 때만)."),
     ("share_split", _share_split, "한 전체의 구성비 도넛."),

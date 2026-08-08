@@ -47,13 +47,13 @@ def _resolve(fixture_name: str, mutate=None):
 def test_every_purpose_has_the_agreed_slot_order():
     assert [slot.slot_id for slot in PURPOSE_SLOTS["current_status"]] == [
         "summary", "ranking", "market", "metrics", "competitor", "factors",
-        "keywords", "response",
+        "segments", "keywords", "response",
     ]
     assert [slot.slot_id for slot in PURPOSE_SLOTS["issue_response"]] == [
         "problem", "cause", "impact", "options", "recommendation",
     ]
     assert [slot.slot_id for slot in PURPOSE_SLOTS["future_business"]] == [
-        "market_shift", "opportunity", "capability", "roadmap", "risk",
+        "market_shift", "opportunity", "segments", "capability", "roadmap", "risk",
     ]
     assert [slot.slot_id for slot in PURPOSE_SLOTS["root_cause"]] == [
         "problem", "cause", "drivers", "improvement",
@@ -318,7 +318,13 @@ def test_brand_marketing_fills_every_future_business_slot():
     # An age-bracket comparison is an item ranking, not a movement in time -
     # same renderer, but the block id now says which question it answers.
     assert by_id["market_shift"].block_type == "item_bar"
-    assert by_id["capability"].block_type == "table"
+    # The age x media table is a statement about the audience, not about the
+    # capability the company needs - so it belongs to 대상 고객, and 필요 역량
+    # falls back to what it genuinely owns (synthesis.strengths as bullets).
+    assert by_id["segments"].block_type == "segment_table"
+    # ...and 필요 역량, which owns only synthesis.strengths, is empty for this
+    # question, so it disappears rather than showing an empty card.
+    assert "capability" not in by_id
     # strengths is empty here, so the SWOT has 3 of 4 quadrants - still enough.
     assert by_id["opportunity"].block_type == "matrix"
     # matrix is claimed above, so 위험 falls to its own narrative bullets.

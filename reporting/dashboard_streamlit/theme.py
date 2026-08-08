@@ -127,8 +127,12 @@ def dashboard_css(dark: bool, accent_theme: str = "orange") -> str:
        mark too large and sitting too low. Everything below the font-size is
        now in `em`, taken from the landing proportions, so any size is the
        same logo scaled rather than a different arrangement of its parts. */
-    .ts-wordmark {{ display:flex; align-items:flex-end; gap:0; color:var(--ts-ink);
-      font-size:1.75rem; }}
+    /* One wordmark, two sizes. The sidebar used to render it in ink while the
+       landing page rendered it in accent, so the same mark looked like two
+       different logos depending on which screen you were on. It is the
+       landing treatment, scaled down. */
+    .ts-wordmark {{ display:flex; align-items:flex-end; gap:0; color:var(--ts-accent);
+      font-size:1.9rem; margin:.15rem 0 1.1rem .1rem; }}
     .ts-wordmark-text {{ font-family:"Quicksand","Pretendard Variable",Pretendard,sans-serif;
       font-size:1em; line-height:.78; font-weight:500; letter-spacing:-.01em; }}
     .ts-word-1, .ts-word-2 {{ display:block; }}
@@ -138,7 +142,6 @@ def dashboard_css(dark: bool, accent_theme: str = "orange") -> str:
     .ts-mark svg {{ display:block; width:100%; height:100%; }}
     .ts-landing {{ min-height:43vh; display:flex; flex-direction:column; align-items:center;
       justify-content:flex-end; padding:3vh 0 2.1rem; text-align:center; }}
-    .ts-landing .ts-wordmark {{ color:var(--ts-accent); }}
     .ts-landing .ts-wordmark {{ font-size:5.35rem; }}
     .ts-question-title {{ margin:1.6rem 0 0!important; font-family:"Pretendard Variable",Pretendard,sans-serif!important;
       font-size:clamp(1.5rem,2.4vw,2.35rem)!important; font-weight:600!important; letter-spacing:-.02em!important;
@@ -358,7 +361,10 @@ def dashboard_css(dark: bool, accent_theme: str = "orange") -> str:
     .ts-duo-cell ul {{ margin:0; padding-left:1.1rem; font-size:.82rem; }}
     .ts-swot {{ display:grid; grid-template-columns:1fr 1fr; gap:.55rem; }}
     /* Two quadrants read better side by side than in a 2x2 with holes. */
+    .ts-swot.solo {{ grid-template-columns:1fr; }}
     .ts-swot.duo {{ grid-template-columns:1fr 1fr; }}
+    .ts-swot.trio {{ grid-template-columns:repeat(3,1fr); }}
+    @media (max-width:900px) {{ .ts-swot.trio {{ grid-template-columns:1fr; }} }}
     /* Quadrants divided by hairlines rather than tinted boxes, per the
        artwork. Positive (S/O) reads navy, negative (W/T) accent - the same
        two-colour split the rest of the system uses, so tone is consistent
@@ -427,7 +433,13 @@ def dashboard_css(dark: bool, accent_theme: str = "orange") -> str:
       border:1px solid var(--ts-line); background:var(--ts-soft); vertical-align:middle; }}
     .ts-purpose-card.timeline .ts-compact-list {{ position:relative; padding-left:.45rem; }}
     .ts-purpose-card.timeline .ts-compact-list li {{ border-left:2px solid var(--ts-accent); padding-left:.7rem; }}
-    .ts-action-basis {{ color:var(--ts-muted); font-size:.76rem; }}
+    /* Two lines, then ellipsis with the full sentence on hover. The reason
+       stays visible - that is the point of printing it rather than hiding it
+       in a tooltip - but six reasons at full length made this one block
+       taller than the rest of the report put together. */
+    .ts-action-basis {{ color:var(--ts-muted); font-size:.76rem; line-height:1.45;
+      margin:-.15rem 0 .5rem; padding-left:.1rem; display:-webkit-box;
+      -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; }}
     .ts-footer-note b {{ color:var(--ts-orange); white-space:nowrap; }}
     /* Timeline, per the artwork's vertical variant: nodes on a rail, no card
        around each step. State is carried by the node and by the rail segment
@@ -517,7 +529,19 @@ def dashboard_css(dark: bool, accent_theme: str = "orange") -> str:
       white-space:nowrap; }}
     /* Status bar: the qualitative KPI row. Each cell is led by a 2px rule in
        its grade's colour, the way the artwork marks its four standings. */
-    .ts-gbar.single .ts-gbar-stack i {{ background:var(--ts-accent); width:16px; max-width:40%; }}
+    /* The stated whole, drawn where it actually sits on the plot. */
+    .ts-gbar-ceiling {{ position:absolute; left:0; right:0; top:0; height:0;
+      border-top:1px dashed color-mix(in srgb,var(--ts-accent) 55%,transparent); }}
+    .ts-gbar-ceiling span {{ position:absolute; right:0; top:-1.05rem; font-size:.66rem;
+      font-weight:700; color:var(--ts-accent); letter-spacing:-.01em; white-space:nowrap; }}
+    .ts-gbar.single {{ position:relative; }}
+    /* The value on the bar, as in the artwork - a column with no number on it
+       can only be read against its neighbours, never against its own scale. */
+    .ts-gbar-value {{ position:absolute; bottom:calc(100% + 3px); left:50%;
+      transform:translateX(-50%); font-size:.66rem; font-weight:800;
+      color:var(--ts-ink); white-space:nowrap; }}
+    .ts-gbar.single .ts-gbar-stack i {{ position:relative; background:var(--ts-accent);
+      width:16px; max-width:40%; }}
     /* Horizontal timeline: nodes on one rail with the stage under each, the
        artwork's wide variant. Wraps to a column below 520px rather than
        compressing five labels into unreadable slivers. */
@@ -637,14 +661,6 @@ def dashboard_css(dark: bool, accent_theme: str = "orange") -> str:
       vertical-align:baseline; }}
     .ts-cause-root .ts-inline-evidence {{ color:#fff; opacity:.9; }}
     .ts-cause-branches > .ts-cause-item > .ts-cause-pill .ts-inline-evidence {{ color:#fff; opacity:.9; }}
-    .ts-block-title {{ margin:0 0 .7rem; font-size:.9rem; font-weight:700; color:var(--ts-ink); }}
-    .ts-cause-root .ts-inline-evidence, .ts-cause-children .ts-inline-evidence {{
-      display:inline; width:auto; height:auto; margin-left:.35rem; padding:0;
-      background:none; border:0; border-radius:0; font-size:.75rem; text-decoration:none;
-      vertical-align:baseline; }}
-    .ts-cause-root .ts-inline-evidence {{ color:#fff; opacity:.9; }}
-    .ts-cause-root .ts-evidence-link, .ts-cause-children .ts-evidence-link {{
-      display:inline; width:auto; height:auto; background:none; border:0; }}
     .ts-cause-branch {{ padding:0 0 0 4px; margin-bottom:16px; }}
     /* Root cause: filled accent pill, white text. What follows from it:
        outlined pill in ink. Same two shapes as the artwork, and the nesting
@@ -667,7 +683,14 @@ def dashboard_css(dark: bool, accent_theme: str = "orange") -> str:
       .ts-driver-row {{ grid-template-columns:minmax(0,1fr) 34px; row-gap:4px; }}
       .ts-driver-track {{ grid-column:1 / -1; }}
     }}
-    .ts-driver-row .label {{ min-width:0; line-height:1.35; word-break:keep-all; }}
+    /* The artwork's driver labels are short phrases. Ours are whole evidence
+       sentences, and at half-screen width a five-row ranking became the
+       tallest thing on the page. Two lines each, full text on hover - the
+       ranking is the point here, and the sentence is repeated in full under
+       Evidence & Sources. */
+    .ts-driver-row .label {{ min-width:0; line-height:1.35; word-break:keep-all;
+      display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical;
+      overflow:hidden; }}
     .ts-driver-row .value {{ text-align:right; color:var(--ts-ink); font-weight:700;
         font-size:0.82rem; font-variant-numeric:tabular-nums; }}
     .ts-driver-track {{ display:block; height:10px; border-radius:999px; background:var(--ts-track); }}

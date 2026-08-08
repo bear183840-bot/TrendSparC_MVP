@@ -1,0 +1,146 @@
+{
+  "sector_id": "sk_broadband",
+  "audience_id": "practitioner",
+  "purpose_id": "current_status",
+  "source_count": 2,
+  "unique_source_count": 2,
+  "source_ids": [
+    "www.example.co.kr"
+  ],
+  "doc_source_map": {
+    "www.example.co.kr:aaaa1111bbbb2222": "www.example.co.kr"
+  },
+  "doc_url_map": {
+    "www.example.co.kr:aaaa1111bbbb2222": "https://www.example.co.kr/news/1"
+  },
+  "business_impacts": [],
+  "risks": [],
+  "weaknesses": [],
+  "monitoring_indicators": [],
+  "confidence_labels": [],
+  "corroborated_points": [],
+  "uncorroborated_points": [],
+  "contradictions": [],
+  "_note": "Deliberately dense, and deliberately mixed: six metric labels of three different shapes, plus comparison_points holding companies AND age brackets in one list. Proves the composition grows with the data and that entity kind - not mere presence - decides which slot each comparison lands in.",
+  "request_id": "req_synthetic_mixed_entities",
+  "question": "숏폼 시장에서 연령대별 이용 양상과 사업자 간 위치는 어떻게 다른가?",
+  "highlights": [
+    "숏폼 이용률은 2024년 93.2%로 전 연령에서 높게 나타났다. [doc_id=www.example.co.kr:aaaa1111bbbb2222]",
+    "플랫폼별로는 유튜브 쇼츠 78.8%, 릴스 46.2%, 틱톡 22.9% 순이었다. [doc_id=www.example.co.kr:aaaa1111bbbb2222]"
+  ],
+  "synthesis_text": "숏폼 이용은 보편화됐고, 연령대와 사업자에 따라 이용 양상이 갈린다.",
+  "key_points": [
+    "숏폼 이용률 2024년 93.2% [doc_id=www.example.co.kr:aaaa1111bbbb2222]",
+    "유튜브 쇼츠가 플랫폼 점유 1위 [doc_id=www.example.co.kr:aaaa1111bbbb2222]"
+  ],
+  "opportunities": [
+    "숏폼 연계 광고 상품 확대 여지 [doc_id=www.example.co.kr:aaaa1111bbbb2222]"
+  ],
+  "strengths": [
+    "IPTV 가입자 기반과 결합 판매 여력 [doc_id=www.example.co.kr:aaaa1111bbbb2222]"
+  ],
+  "recommended_actions": [
+    "연령대별 숏폼 편성 실험 후 확대 여부 판단 [doc_id=www.example.co.kr:aaaa1111bbbb2222]"
+  ],
+  "metric_series": [
+    {
+      "label": "숏폼 이용률",
+      "period": "2024년",
+      "value": 93.2,
+      "unit": "%"
+    },
+    {
+      "label": "숏폼 이용률",
+      "period": "2024년",
+      "value": 78.8,
+      "unit": "%",
+      "subject": "유튜브 쇼츠"
+    },
+    {
+      "label": "숏폼 이용률",
+      "period": "2024년",
+      "value": 46.2,
+      "unit": "%",
+      "subject": "릴스"
+    },
+    {
+      "label": "숏폼 이용률",
+      "period": "2024년",
+      "value": 22.9,
+      "unit": "%",
+      "subject": "틱톡"
+    },
+    {
+      "label": "일평균 시청 시간",
+      "period": "2023년",
+      "value": 48.0,
+      "unit": "분"
+    },
+    {
+      "label": "일평균 시청 시간",
+      "period": "2024년",
+      "value": 57.0,
+      "unit": "분"
+    },
+    {
+      "label": "일평균 시청 시간",
+      "period": "2025년",
+      "value": 66.0,
+      "unit": "분"
+    },
+    {
+      "label": "숏폼 광고 선호도",
+      "period": "2024년",
+      "value": 31.0,
+      "unit": "%"
+    },
+    {
+      "label": "롱폼 소비 비율",
+      "period": "2024년",
+      "value": 72.1,
+      "unit": "%"
+    },
+    {
+      "label": "유료 구독 전환율",
+      "period": "2024년",
+      "value": 12.4,
+      "unit": "%"
+    }
+  ],
+  "comparison_points": [
+    {
+      "entity": "SK브로드밴드",
+      "criterion": "숏폼 전략",
+      "value": "B tv 내 숏폼 탭 신설"
+    },
+    {
+      "entity": "KT",
+      "criterion": "숏폼 전략",
+      "value": "지니TV 숏폼 큐레이션"
+    },
+    {
+      "entity": "LG유플러스",
+      "criterion": "숏폼 전략",
+      "value": "아이들나라 숏폼 확대"
+    },
+    {
+      "entity": "20대",
+      "criterion": "주 이용 형식",
+      "value": "숏폼 중심"
+    },
+    {
+      "entity": "50대",
+      "criterion": "주 이용 형식",
+      "value": "롱폼 중심"
+    },
+    {
+      "entity": "70대 이상",
+      "criterion": "주 이용 형식",
+      "value": "실시간 방송 중심"
+    }
+  ],
+  "evidence": [
+    "2024년 숏폼 이용률은 93.2%로 나타났다. [doc_id=www.example.co.kr:aaaa1111bbbb2222]",
+    "일평균 시청 시간은 2023년 48분에서 2025년 66분으로 늘었다. [doc_id=www.example.co.kr:aaaa1111bbbb2222]"
+  ]
+}
