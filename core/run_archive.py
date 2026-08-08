@@ -95,14 +95,89 @@ def build_run_record(result: Any, question: str, audience_id: str | None = None)
     }
 
 
+def result_path(request_id: str) -> Path:
+    """Where a run's full, replayable result lives."""
+    return ARCHIVE_DIR / f"{request_id}.result.json"
+
+
 def archive_run(result: Any, question: str, audience_id: str | None = None) -> Path | None:
-    """Write the run record. Returns the path, or None if archiving failed."""
+    """Write the run record, and beside it the full result.
+
+    Two files on purpose. The summary is the index - small enough that every
+    run can be listed and scanned - while the result is what a dashboard
+    needs to draw the report again. Keeping them apart means listing past
+    questions stays cheap no matter how heavy the runs behind them are.
+
+    Storing the result at all is what makes a past question reopenable:
+    before this, a run could be counted afterwards but never re-read, so
+    "what did that answer actually look like" had no answer once the browser
+    tab was gone.
+
+    Returns the summary path, or None if archiving failed. Any failure here
+    is swallowed - losing a diagnostic record must not cost a report.
+    """
     try:
         ARCHIVE_DIR.mkdir(parents=True, exist_ok=True)
         path = ARCHIVE_DIR / f"{result.request_id}.json"
         record = build_run_record(result, question, audience_id)
         path.write_text(json.dumps(record, ensure_ascii=False, indent=2), encoding="utf-8")
-        return path
     except Exception as exc:  # noqa: BLE001
         print(f"[run_archive] could not archive {result.request_id}: {exc}", file=sys.stderr)
+        return None
+    try:
+        result_path(result.request_id).write_text(
+            result.model_dump_json(indent=2, exclude_none=False), encoding="utf-8"
+        )
+    except Exception as exc:  # noqa: BLE001
+        # The summary is already written, so the run is still counted; only
+        # reopening it is lost.
+        print(f"[run_archive] could not store full result for {result.request_id}: {exc}",
+              file=sys.stderr)
+    return path
+
+
+def list_runs(limit: int = 30) -> list[dict]:
+    """Archived runs, newest first, each with `reopenable` set.
+
+    Reads only the summaries - the whole point of splitting the two files -
+    so the sidebar list costs the same whether a run pulled in three
+    documents or thirty.
+    """
+    try:
+        records = sorted(
+            ARCHIVE_DIR.glob("*.json"), key=lambda item: item.stat().st_mtime, reverse=True
+        )
+    except OSError:
+        return []
+    runs: list[dict] = []
+    for item in records:
+        if item.name.endswith(".result.json"):
+            continue
+        try:
+            record = json.loads(item.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        record["reopenable"] = result_path(record.get("request_id", "")).exists()
+        runs.append(record)
+        if len(runs) >= limit:
+            break
+    return runs
+
+
+def load_result(request_id: str):
+    """The stored PipelineResult for a run, or None when it wasn't kept.
+
+    Imported lazily: run_archive is imported by the pipeline itself, and the
+    contracts module it would otherwise pull in at import time brings the
+    whole result model with it.
+    """
+    from core.request_pipeline.pipeline import PipelineResult
+
+    path = result_path(request_id)
+    if not path.exists():
+        return None
+    try:
+        return PipelineResult.model_validate_json(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        print(f"[run_archive] stored result for {request_id} is unreadable: {exc}", file=sys.stderr)
         return None

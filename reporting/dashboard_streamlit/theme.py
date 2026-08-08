@@ -121,19 +121,25 @@ def dashboard_css(dark: bool, accent_theme: str = "orange") -> str:
       box-shadow:0 12px 26px color-mix(in srgb,var(--ts-accent) 55%,transparent); }}
     div[data-testid="stVerticalBlockBorderWrapper"] {{ border-color:var(--ts-line)!important;
       background:var(--ts-panel); border-radius:24px; box-shadow:none; }}
-    .ts-wordmark {{ display:flex; align-items:flex-end; gap:0; color:var(--ts-ink); }}
-    .ts-wordmark-text {{ font-family:"Quicksand","Pretendard Variable",Pretendard,sans-serif; font-size:2.15rem;
-      line-height:.92; font-weight:500; letter-spacing:-.01em; }}
+    /* One wordmark, one knob. The mark used to be sized in pixels while the
+       text was sized in rem, so the two only lined up at the size they were
+       tuned at - the landing screen - and the sidebar copy came out with the
+       mark too large and sitting too low. Everything below the font-size is
+       now in `em`, taken from the landing proportions, so any size is the
+       same logo scaled rather than a different arrangement of its parts. */
+    .ts-wordmark {{ display:flex; align-items:flex-end; gap:0; color:var(--ts-ink);
+      font-size:1.75rem; }}
+    .ts-wordmark-text {{ font-family:"Quicksand","Pretendard Variable",Pretendard,sans-serif;
+      font-size:1em; line-height:.78; font-weight:500; letter-spacing:-.01em; }}
     .ts-word-1, .ts-word-2 {{ display:block; }}
     .ts-word-2 {{ margin-left:1.85em; }}
-    .ts-mark {{ display:inline-block; width:78px; height:71px; transform:translateY(-8px);
-      margin-left:-10px; }}
+    .ts-mark {{ display:inline-block; width:2.7em; height:2.45em; margin-left:-.4em;
+      transform:translateY(-.12em); }}
     .ts-mark svg {{ display:block; width:100%; height:100%; }}
     .ts-landing {{ min-height:43vh; display:flex; flex-direction:column; align-items:center;
       justify-content:flex-end; padding:3vh 0 2.1rem; text-align:center; }}
     .ts-landing .ts-wordmark {{ color:var(--ts-accent); }}
-    .ts-landing .ts-wordmark-text {{ font-size:5.35rem; line-height:.78; }}
-    .ts-landing .ts-mark {{ width:231px; height:210px; margin-left:-34px; transform:translateY(-10px); }}
+    .ts-landing .ts-wordmark {{ font-size:5.35rem; }}
     .ts-question-title {{ margin:1.6rem 0 0!important; font-family:"Pretendard Variable",Pretendard,sans-serif!important;
       font-size:clamp(1.5rem,2.4vw,2.35rem)!important; font-weight:600!important; letter-spacing:-.02em!important;
       color:var(--ts-ink)!important; }}
@@ -693,7 +699,7 @@ def dashboard_css(dark: bool, accent_theme: str = "orange") -> str:
     .ts-radar-legend-item i {{ display:inline-block; width:.65rem; height:.65rem; border-radius:50%; }}
     @media(max-width:1050px) {{ .ts-section-grid{{grid-template-columns:1fr}} .ts-summary-grid{{grid-template-columns:1fr}}
       .ts-action-row{{grid-template-columns:40px 1fr}} .ts-action-row .impact,.ts-action-row .ts-evidence-link{{display:none}} }}
-    @media(max-width:720px) {{ .block-container{{padding:1rem .8rem 2rem}} .ts-landing .ts-wordmark-text{{font-size:3.5rem}}
+    @media(max-width:720px) {{ .block-container{{padding:1rem .8rem 2rem}} .ts-landing .ts-wordmark{{font-size:3.5rem}}
       .ts-context-line{{gap:.7rem;flex-wrap:wrap;margin-left:.3rem}} .ts-summary{{padding:1.2rem;border-radius:20px}} }}
     </style>
     """

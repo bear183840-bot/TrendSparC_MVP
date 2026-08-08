@@ -32,6 +32,8 @@ from audience.contracts import list_audience_ids
 from common.contracts import Attachment, UserRequest
 from common.errors import StageStatus
 from core.request_pipeline.pipeline import PipelineResult, run_pipeline
+from core.run_archive import list_runs, load_result
+from reporting.export.report_pdf import build_report_pdf, pdf_font_available
 from core.sector_router.router import scan_sectors
 from reporting.dashboard_streamlit.collection_progress_view import _STATUS_LABELS, render_execution_record
 from reporting.dashboard_streamlit.generic_dashboard import render_generic_dashboard
@@ -110,6 +112,164 @@ def _archived_question(result: "PipelineResult") -> str:
     return "분석 결과"
 
 
+
+def _render_archive_panel(current: "PipelineResult | None") -> None:
+    """Past questions, reopenable, plus this run as a PDF.
+
+    A dashboard answers "what does this say"; a PDF answers "what did it say
+    on the day we decided" - which is why the download is of the report, not
+    a screenshot of the page. Export needs a Hangul-capable font on the host;
+    where there is none, saying so beats shipping a page of empty boxes.
+    """
+    st.markdown("#### 다운로드")
+    if current is not None:
+        question_text = st.session_state.get("submitted_question") or "분석 결과"
+        if pdf_font_available():
+            try:
+                pdf_bytes = build_report_pdf(current, question_text)
+            except Exception as exc:  # noqa: BLE001
+                st.caption(f"PDF를 만들지 못했습니다: {exc}")
+            else:
+                st.download_button(
+                    "리포트 PDF 저장", pdf_bytes,
+                    file_name=f"{current.request_id}.pdf", mime="application/pdf",
+                    use_container_width=True,
+                )
+        else:
+            st.caption("한글 글꼴이 없어 PDF 대신 실행 결과 JSON으로 저장합니다.")
+        st.download_button(
+            "실행 결과 JSON", current.model_dump_json(indent=2, exclude_none=False),
+            file_name=f"{current.request_id}.json", mime="application/json",
+            use_container_width=True,
+        )
+
+    runs = list_runs(limit=12)
+    if not runs:
+        return
+    st.markdown("#### 지난 질문")
+    for run in runs:
+        label = (run.get("question") or "(질문 없음)").strip()
+        stamp = (run.get("archived_at") or "")[:10]
+        caption = f"{stamp} · {run.get('purpose_id') or '-'} · {run.get('audience_id') or '-'}"
+        if run.get("halted_at_stage"):
+            caption += f" · 중단: {run['halted_at_stage']}"
+        with st.container(border=True):
+            st.caption(caption)
+            if run.get("reopenable"):
+                if st.button(label[:40], key=f"open_{run['request_id']}", use_container_width=True):
+                    reopened = load_result(run["request_id"])
+                    if reopened is None:
+                        st.error("저장된 결과를 읽지 못했습니다.")
+                    else:
+                        st.session_state.result = reopened
+                        st.session_state.submitted_question = run.get("question")
+                        st.session_state.terminal_log = None
+                        st.rerun()
+            else:
+                # Runs archived before full results were stored, and any run
+                # whose result failed to write. Listed rather than hidden, so
+                # the history stays honest about what it can and can't reopen.
+                st.caption(f"{label[:40]} — 결과 미저장(재열람 불가)")
+
+
+def _diagnostics(result: "PipelineResult") -> dict:
+    """Where a run lost what it lost, in the order it lost it.
+
+    Reading a full PipelineResult to find out why a report came out thin
+    means holding several counts in your head at once - documents collected
+    vs. validated vs. analysed vs. actually used, which needs went unmet,
+    which figures survived verification, which blocks the data could support.
+    This assembles exactly those, in pipeline order, so the first line that
+    looks wrong is the stage to open.
+    """
+    synthesis = result.synthesis
+    analyses = result.document_analyses or []
+    dropped = [
+        {
+            "doc_id": analysis.doc_id,
+            "reason": ("관련 없음" if analysis.relevant_to_question is False
+                       else f"근거 검증 status={analysis.analysis_validation_status}"),
+        }
+        for analysis in analyses
+        if analysis.relevant_to_question is False or analysis.analysis_validation_status == "failed"
+    ]
+    failed_stages = [
+        {"stage": trace.stage, "status": trace.status.value, "reason": trace.reason}
+        for trace in result.trace
+        if trace.status.value not in {"ok", "skipped"}
+    ]
+    metrics = list(getattr(synthesis, "metric_series", []) or [])
+    comparisons = list(getattr(synthesis, "comparison_points", []) or [])
+    return {
+        "중단된 단계": result.halted_at_stage,
+        "문제 있는 단계": failed_stages or "없음",
+        "수집": {
+            "수집 문서": len(result.collected_source_documents or []),
+            "분석 완료": len(analyses),
+            "분석에서 제외": dropped or "없음",
+            "수집 이벤트": len(result.collection_events or []),
+        },
+        "정보 요구": {
+            "요청": (result.source_plan.information_needs if result.source_plan else []),
+            "충족": sorted({
+                need for analysis in analyses for need in (analysis.covered_information_needs or [])
+            }),
+        },
+        "구조화 결과": {
+            "metric_points": len(metrics),
+            "그중 전망": sum(1 for point in metrics if getattr(point, "is_forecast", False)),
+            "주체(subject) 있는 수치": sum(1 for point in metrics if getattr(point, "subject", None)),
+            "comparison_points": len(comparisons),
+            "등급이 매겨진 비교": sum(1 for point in comparisons if point.level),
+            "grounded_claims": len(getattr(synthesis, "grounded_claims", []) or []),
+            "인과 연결된 claim": sum(
+                1 for claim in (getattr(synthesis, "grounded_claims", []) or [])
+                if getattr(claim, "parent_synthesis_claim_id", None)
+            ),
+            "교차검증됨 / 단일출처": (
+                f"{len(getattr(synthesis, 'corroborated_points', []) or [])} / "
+                f"{len(getattr(synthesis, 'uncorroborated_points', []) or [])}"
+            ),
+        },
+        "그릴 수 있는 블록": _drawable_blocks(synthesis),
+        "리포트": {
+            "섹션": [section.section_id for section in result.generated_report.sections]
+            if result.generated_report else [],
+            "생략된 섹션": (result.report_plan.omitted_sections if result.report_plan else []),
+            "한계 고지": (result.generated_report.limitations if result.generated_report else []),
+        },
+    }
+
+
+def _drawable_blocks(synthesis) -> list[str]:
+    """Which block shapes this evidence could support - the answer to "why is
+    it all text?" without having to guess at thresholds."""
+    if synthesis is None:
+        return []
+    from common import block_shapes
+
+    metrics = synthesis.metric_series
+    comparisons = synthesis.comparison_points
+    claims = getattr(synthesis, "grounded_claims", []) or []
+    checks = {
+        "chart(3시점+)": block_shapes.has_timeseries(metrics),
+        "bar(전후)": bool(block_shapes.time_bar_groups(metrics)),
+        "item_bar(항목비교)": bool(block_shapes.item_bar_groups(metrics)),
+        "grouped_bar(3축)": block_shapes.has_grouped_bars(metrics),
+        "share_split(도넛)": block_shapes.has_share_split(metrics),
+        "landscape": block_shapes.has_landscape(metrics),
+        "table(비교표)": block_shapes.has_comparison(comparisons),
+        "status_bar(등급)": block_shapes.has_status_levels(comparisons),
+        "competitor_panels": block_shapes.has_competitor_panels(comparisons, metrics),
+        "radar": block_shapes.has_radar(comparisons),
+        "cause_tree(인과)": block_shapes.has_cause_tree(claims),
+        "driver_bars(중요도)": block_shapes.has_importance_ranking(claims),
+        "recurring_terms(키워드)": block_shapes.has_recurring_terms(claims),
+        "timeline": block_shapes.has_timeline(synthesis.evidence, metrics),
+    }
+    return [name for name, drawable in checks.items() if drawable] or ["없음 (서술형만 가능)"]
+
+
 def _html(markup: str) -> None:
     st.markdown(textwrap.dedent(markup).strip(), unsafe_allow_html=True)
 
@@ -141,6 +301,16 @@ def _reset() -> None:
         st.session_state.pop(key, None)
 
 
+# ?run=<request_id> opens an archived run directly. A past question is then a
+# link someone can send - "the answer we based this on" survives the session
+# it was produced in, which is the whole point of storing full results.
+_requested_run = st.query_params.get("run")
+if _requested_run and getattr(st.session_state.result, "request_id", None) != _requested_run:
+    _reopened = load_result(_requested_run)
+    if _reopened is not None:
+        st.session_state.result = _reopened
+        st.session_state.submitted_question = _archived_question(_reopened)
+
 result = st.session_state.result
 
 if result is None:
@@ -167,8 +337,13 @@ else:
             st.rerun()
         _html(
             '<div class="ts-side-nav"><div class="ts-nav active">▦　Dashboard</div>'
-            '<div class="ts-nav">▣　Monitoring</div><div class="ts-nav">⚙　Settings</div></div>'
+            '<div class="ts-nav">⚙　Settings</div></div>'
         )
+        # Monitoring was a label with nothing behind it. What was actually
+        # missing is this: a question asked yesterday could not be opened
+        # again, because only a summary of each run was kept. Now the full
+        # result is stored, so past questions are reachable and downloadable.
+        _render_archive_panel(result)
         st.session_state.dark_mode = st.toggle("다크 모드", value=st.session_state.dark_mode)
         st.session_state.accent_theme = (
             "burgundy" if st.toggle("버건디 테마", value=(st.session_state.accent_theme == "burgundy")) else "orange"
@@ -370,6 +545,13 @@ else:
 
 with st.expander("실행 기록 및 원본 계약"):
     render_execution_record(result.collection_events, result.trace)
+    st.markdown("#### 진단 요약")
+    st.caption(
+        "파이프라인 순서대로: 어디서 멈췄는지 → 문서가 몇 건 걸러졌고 왜인지 → "
+        "구조화가 얼마나 됐는지 → 그 결과 어떤 블록을 그릴 수 있는지. "
+        "위에서부터 읽어 처음 이상한 줄이 열어볼 단계입니다."
+    )
+    st.json(_diagnostics(result), expanded=False)
     terminal_log = st.session_state.get("terminal_log")
     if terminal_log:
         st.markdown("#### 터미널 실행 로그")
