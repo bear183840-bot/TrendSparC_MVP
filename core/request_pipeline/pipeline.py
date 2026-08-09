@@ -69,7 +69,6 @@ from core.report_purpose.classifier import classify_report_purpose
 from core.run_archive import archive_run
 from core.request_pipeline.direct_response import direct_response_for
 from core.sector_router.router import route_request, scan_sectors
-from sources.collectors.ai_search_harness import reset_query_yield_history
 from core.source_planner.planner import plan_sources, select_top_sources
 from core.synthesis.ai_based import refine_synthesis_ai
 from core.synthesis.synthesizer import synthesize
@@ -174,6 +173,12 @@ def _normalize_collection_output(output) -> SourceCollectionResult:
 
 
 def _call_sector_adapter_stage(sector_route: SectorRoute, role: str, *args):
+    if role == "collector":
+        # Search and original-source retrieval have one production engine.
+        # Sector adapters continue to own processing, validation and analysis.
+        from sources.collectors.source_router.integration import collect
+
+        return collect(*args)
     profile = sector_route.matched_profile
     module = importlib.import_module(f"{profile.pipeline_entrypoint}.{role}")
     func = getattr(module, _ADAPTER_ROLE_FUNCS[role])
@@ -211,9 +216,6 @@ def _run_pipeline_stages(
     force_fail_stage: Optional[str] = None,
     progress_sink: Optional[list[SourceCollectionEvent]] = None,
 ) -> PipelineResult:
-    # One question's search history must not colour the next - the stability
-    # warning compares repeats of the same query within a single run.
-    reset_query_yield_history()
     result = PipelineResult(
         request_id=request.request_id,
         question=request.question,
@@ -539,7 +541,12 @@ def _run_pipeline_stages(
                 profile = result.sector_route.matched_profile
                 minimum = profile.min_analyzed_documents
                 target = max(minimum, profile.target_analyzed_documents)
-                max_recollections = profile.max_analysis_recollection_attempts
+                max_recollections = (
+                    0
+                    if result.source_collection
+                    and result.source_collection.collection_mode == "source_router"
+                    else profile.max_analysis_recollection_attempts
+                )
                 recollection_attempt = 0
                 structural_gaps = assess_question_coverage(
                     usable, result.question_coverage or QuestionCoverageRequirement()

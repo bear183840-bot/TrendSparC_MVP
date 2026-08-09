@@ -371,8 +371,11 @@ class SourceCollectionResult(BaseModel):
     """
 
     documents: list[SourceDocument] = Field(default_factory=list)
-    collection_mode: Literal["legacy", "ai_search_harness"] = "legacy"
+    collection_mode: Literal["legacy", "ai_search_harness", "source_router"] = "legacy"
     minimum_validated_documents: Optional[int] = None
+    # Diagnostic-only lineage. Downstream contracts do not depend on this
+    # shape; verified source text still travels through SourceDocument.
+    router_trace: dict[str, Any] = Field(default_factory=dict)
 
 
 class EvidenceCoverageAssessment(BaseModel):

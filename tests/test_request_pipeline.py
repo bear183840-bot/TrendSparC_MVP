@@ -1,3 +1,5 @@
+import pytest
+
 import sectors.sk_hynix.adapter.analyzer as sk_hynix_analyzer
 import sectors.sk_hynix.adapter.collector as sk_hynix_collector
 import sectors.sk_hynix.adapter.processor as sk_hynix_processor
@@ -14,6 +16,31 @@ from common.contracts import (
 )
 from common.errors import PipelineStageError, StageStatus
 from core.request_pipeline.pipeline import run_pipeline
+from sources.collectors.source_router import integration as source_router_integration
+
+
+@pytest.fixture(autouse=True)
+def _legacy_collector_fixture_boundary(monkeypatch):
+    """Keep legacy recollection tests focused on their original invariant.
+
+    Production uses Source Router. These tests intentionally inject the old
+    fake collectors so validation/analyzer retry behavior remains covered
+    without making any live API call.
+    """
+
+    def _collect(source_plan):
+        module = {
+            "sk_hynix": sk_hynix_collector,
+            "sk_broadband": sk_broadband_collector,
+        }.get(source_plan.sector_id)
+        if module is None:
+            raise PipelineStageError(
+                stage="sector_adapter.collector",
+                reason=f"template_only: no fixture collector for {source_plan.sector_id}",
+            )
+        return module.collect(source_plan)
+
+    monkeypatch.setattr(source_router_integration, "collect", _collect)
 
 
 def _make_request(question: str, **kwargs) -> UserRequest:
@@ -482,3 +509,56 @@ def test_pipeline_halts_when_analyzer_still_has_fewer_than_minimum_after_recolle
     assert len(collector_calls) == 2
     assert result.halted_at_stage == "sector_adapter.analyzer"
     assert "insufficient usable analyses" in result.trace[-1].reason
+
+
+def test_source_router_collection_does_not_start_a_second_search_loop(monkeypatch):
+    """The router already ran its own bounded gap loop before returning.
+
+    Same shape as the recollection test above - one usable analysis against a
+    profile minimum that would normally trigger a retry - except the
+    collection announces itself as source_router. The pipeline must accept
+    the thin result instead of re-entering search, or every run pays for two
+    stacked follow-up loops.
+    """
+    collector_calls = []
+
+    def fake_collect(source_plan):
+        collector_calls.append(source_plan)
+        return SourceCollectionResult(
+            documents=[
+                SourceDocument(
+                    doc_id="d1",
+                    source_id="s1",
+                    title="자료 1",
+                    url="https://one.example/a",
+                    content="가" * 300,
+                )
+            ],
+            collection_mode="source_router",
+            minimum_validated_documents=0,
+        )
+
+    monkeypatch.setattr(sk_broadband_collector, "collect", fake_collect)
+    monkeypatch.setattr(sk_broadband_processor, "process", lambda documents: documents)
+    monkeypatch.setattr(
+        sk_broadband_validator,
+        "validate",
+        lambda documents, search_context=None: documents,
+    )
+    monkeypatch.setattr(
+        sk_broadband_analyzer,
+        "analyze",
+        lambda documents, question, information_needs=None, target_block_shapes=None: [
+            DocumentAnalysis(doc_id="d1", relevant_to_question=True, usable_for_synthesis=True)
+        ],
+    )
+
+    result = run_pipeline(
+        _make_request("SK브로드밴드 최신 IPTV 경쟁 현황은?", requested_sector_id="sk_broadband"),
+        dry_run=False,
+    )
+
+    assert len(collector_calls) == 1
+    assert not any(
+        trace.stage.endswith("recollection") for trace in result.trace
+    ), [trace.stage for trace in result.trace]

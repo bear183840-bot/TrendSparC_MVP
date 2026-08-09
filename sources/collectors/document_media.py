@@ -10,6 +10,13 @@ from urllib.parse import parse_qs, urlparse
 import requests
 
 _PDF_SUFFIX_RE = re.compile(r"\.pdf(?:$|[?#&=])", re.IGNORECASE)
+# Content-Disposition is not a URL. RFC 6266's usual form quotes the filename
+# ('attachment; filename="report.pdf"'), so the URL pattern above misses it -
+# `.pdf` is followed by a closing quote, not by end-of-string or a query
+# separator. That miss is not cosmetic: it drops the caller through to the
+# streaming GET fallback, fetching the whole file just to learn what the
+# header already said.
+_PDF_DISPOSITION_RE = re.compile(r"\.pdf(?:[\"';\s]|$)", re.IGNORECASE)
 _MEDIA_TYPE_KEYS = ("content_type", "contentType", "mime_type", "mimeType", "media_type")
 _HEADER_KEYS = ("headers", "response_headers", "responseHeaders")
 _DOWNLOAD_PATH_TOKENS = ("download", "attachment", "export", "filedown")
@@ -37,7 +44,7 @@ def _pdf_from_headers(headers: Mapping[str, Any]) -> str | None:
     lowered = {str(key).lower(): value for key, value in headers.items()}
     media_type = _normalized_media_type(lowered.get("content-type"))
     disposition = str(lowered.get("content-disposition") or "")
-    if media_type == "application/pdf" or _PDF_SUFFIX_RE.search(disposition):
+    if media_type == "application/pdf" or _PDF_DISPOSITION_RE.search(disposition):
         return "application/pdf"
     return media_type
 
