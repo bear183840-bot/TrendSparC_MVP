@@ -1,31 +1,31 @@
-# SK플래닛 (SK Planet) sector
+# SK Planet sector
 
-Status: `template_only` profile로 유지 중. routing metadata, source registry, system prompt는 채워져 있고, collector/processor/validator/analyzer 구현 구조도 준비되어 있다. 다만 실제 운영 전환은 API Key, 비용, 품질 검증 후 진행한다.
+Status: `active`.
 
-SK플래닛 섹터 - OK캐쉬백, Syrup 중심의 포인트/마케팅 플랫폼, Target Intelligence
-기반 AI/빅데이터 솔루션, Web3/블록체인 로열티 생태계 및 모바일 커머스/Ad-Tech
-동향 분석.
+SK플래닛의 OK캐쉬백·Syrup, 포인트/리워드, 데이터 마케팅, Target Intelligence,
+Ad-Tech, 모바일 커머스, 마이데이터와 Web3 로열티 생태계를 분석하는 섹터입니다.
 
-## 라우팅 (profile.json)
-- aliases: SK Planet, SK플래닛, 에스케이플래닛, Planet, 플래닛, OK캐쉬백, Syrup, 시럽
-- keywords: OK캐쉬백/Syrup/시럽, Target Intelligence, 데이터 마케팅, 포인트·리워드,
-  Web3/NFT/블록체인, CDP, Ad-Tech, 모바일 커머스, O2O, 마이데이터 등 (전체 목록은
-  `profile.json` 참고)
+## 라우팅
 
-## 소스 레지스트리 (`sources/registry/sk_planet/sources.json`)
-전용 Source 5개 등록: SK플래닛 공식 뉴스룸, 전자신문(IT/데이터/플랫폼), 블로터(Web3/테크),
-모바일인덱스(아이지에이웍스, 앱/트래픽 분석), 데이터넷(빅데이터/마케팅). 공통 Source인 네이버 뉴스는 `sources/registry/common/`에서 자동 병합됩니다.
-각 소스의 `collection_method`/`frequency`/`reliability_reason`은 registry 파일에
-그대로 명시되어 있으며, 등록되지 않은 소스에는 임의로 신뢰도를 부여하지 않습니다.
+실제 alias·keyword는 `profile.json`이 기준입니다. 대표 신호는 SK플래닛,
+OK캐쉬백, Syrup/시럽, 데이터 마케팅, 포인트·리워드, CDP, Ad-Tech, O2O,
+마이데이터와 Web3입니다.
 
-## 분석 프롬프트 (`prompts/system_prompt.md`)
-데이터 플랫폼·커머스·디지털 마케팅 관점에서 포함/제외 범위, 핵심 키워드·용어집,
-국내외 주요 경쟁사, 실제 질문 예시, 중요도 판단 기준, 다른 섹터(반도체/미디어)와
-헷갈리기 쉬운 질문 구분표, 대상별(임원/실무진/외부인/경영진) 강조 포인트까지
-정의되어 있음.
+## 현재 구현
 
-## 아직 안 된 것
+- `profile.json`: `active`
+- Source Registry: 섹터 전용 16개 + 공통 소스
+- Collector / Processor / Validator / Analyzer: 실제 구현 연결
+- Analyzer: 구조화 JSON, 표·비교 완전성, 상대지표와 명시적 정성 등급 추출 규칙 적용
 
-- `profile.json.status`는 아직 `template_only`이다.
-- 실제 운영 전환 전 `.env`에 `FIRECRAWL_API_KEY`와 `TRENDSPARC_SK_PLANET_ANALYZER_API_KEY`를 채워야 한다.
-- sector reporter 단계는 공통 report planner와 역할을 분리해 추후 정리한다.
+소스 목록과 역할은
+[SK Planet Source Registry](../../sources/registry/sk_planet/README.md)를 참고합니다.
+실제 URL과 메타데이터의 단일 기준은 `sources/registry/sk_planet/sources.json`입니다.
+
+## 운영 주의
+
+- OK캐쉬백과 Syrup 같은 브랜드/제품명을 일반 조직이나 기술 엔터티로 잘못 분류하지
+  않습니다.
+- 앱 이용률·광고 도달률·포인트 거래액·회원 수는 측정 대상과 분모가 다르면 분리합니다.
+- 사용자 반응은 대표성 한계가 있으므로 공식 통계처럼 사용하지 않습니다.
+- API·모델 설정은 `.env.example`을 따르며 실제 키는 저장소에 기록하지 않습니다.

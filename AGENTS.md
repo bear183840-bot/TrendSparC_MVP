@@ -180,8 +180,8 @@ Bash 힙독(heredoc)에 파이썬을 넣으면 따옴표가 자주 망가진다 
 2. **진단부터.** 실제 실행 JSON / 브라우저 / 직접 호출로 현상을 재현하라. 코드만 읽고
    원인을 추정하지 마라.
 3. **픽스처로 회귀 확인.** `tests/fixtures/synthesis_*.json` 9개 전부.
-4. `pytest -q` 통과. 현재 기준 **835 passed, 2 skipped** (2026-08-09,
-   `a53b775`). 숫자는 새 테스트가 추가되면 실제 실행 결과로 갱신한다.
+4. `pytest -q` 통과. 현재 기준 **878 passed, 2 skipped** (2026-08-09,
+   `2f2ba86`). 숫자는 새 테스트가 추가되면 실제 실행 결과로 갱신한다.
 5. 프롬프트 규칙을 건드렸으면 `tests/test_prompt_invariants.py`에 불변식 추가.
 6. **커밋·푸시는 같은 대화에서 명시적으로 요청받았을 때만.** 수정 직후라도 자동으로
    하지 않는다.
@@ -194,9 +194,11 @@ Bash 힙독(heredoc)에 파이썬을 넣으면 따옴표가 자주 망가진다 
 
 - `sk_broadband` 외 섹터에는 관계 필드(`parent_claim_id`, `importance`)가 아직 없다.
   스키마에 세 필드를 추가하고 `_verified_relations()`를 호출하면 그대로 동작한다.
-- `audience/adapter.py`는 아직 실제로 청중별 재작성을 하지 않는다(`CLAUDE.md`의
-  "Known gaps" 참조).
-- `README.md`는 낡았다. `CLAUDE.md`와 코드를 신뢰하라.
+- `audience/adapter.py`는 생성된 보고서를 다시 LLM으로 재작성하지 않는다. 청중별
+  어조·밀도 지시는 report generator와 `audience/presentation.py`에서 적용하고,
+  adapter는 결과 전달·노출 범위를 담당한다. 청중 차별화 품질 자체는 계속 평가한다.
+- 루트·섹터 README는 `2f2ba86` 구현 기준으로 갱신됐다. 그래도 숫자·상태·CLI가
+  의심되면 문서보다 `profile.json`, `sources.json`, 실제 코드와 테스트를 우선한다.
 
 ---
 
@@ -240,12 +242,13 @@ Bash 힙독(heredoc)에 파이썬을 넣으면 따옴표가 자주 망가진다 
 방어는 `d785cad`에 들어갔다. 반대로 문서가 생겼다는 이유만으로 성공으로 판단하지
 않는다.
 
-### 8-3. 최신 실제 실행은 파이프라인 완주지만 **품질 회귀**다
+### 8-3. 2026-08-09 실제 실행 기록은 파이프라인 완주지만 **품질 회귀**였다
 
 - 재현 결과: `storage/requests/req_ui_bd88e065.result.json`
 - 질문: `SK브로드밴드 브랜드 이미지 개선에 맞는연령층별 광고 매체 및 모델 추천`
 - 조건: 실무진 / SK Broadband / Streamlit 실제 질문창 실행
-- 회귀가 발생한 코드 기준: `d785cad` (현재는 `a53b775`에서 revert 완료)
+- 회귀가 발생한 코드 기준: `d785cad` (`a53b775`에서 revert 완료, 이후
+  `9dfb515`의 목적 라우팅·근거 블록 개선과 `2f2ba86`의 hardening이 추가됨)
 - 실행 결과: 문서 8건, 분석 5건, grounded claim 107건, 파이프라인 전 단계 `ok`
 - 보존된 요구사항:
   1. SK브로드밴드 브랜드 이미지 개선 전략
@@ -327,3 +330,50 @@ Bash 힙독(heredoc)에 파이썬을 넣으면 따옴표가 자주 망가진다 
 가능하면 담당별 브랜치/작업 트리를 분리하고, 상대 변경을 읽기 전 대규모 리팩터링이나
 공통 파일 수정을 피한다. 팀장 AI도 최종 블록을 임의 선택하거나 근거 없는 값을 채우면
 안 된다. 최종 블록 선택은 계속 결정론적 계약이 담당한다.
+
+### 8-6. `9dfb515` / `2f2ba86` 이후 현재 hardening 상태
+
+아래는 이미 구현됐으므로 다시 별도 구조를 만들거나 과거 방식으로 되돌리지 않는다.
+
+**목적·슬롯·블록**
+
+- `common/purpose_slots.py`가 네 목적의 narrative slot 순서와 후보 블록 우선순위를
+  담당한다. 최종 `resolve_slots()`는 lead-first 2패스를 유지한다.
+- `common/block_shapes.py`는 UI와 분리된 블록 적격성 계약이다. line/bar/KPI뿐 아니라
+  landscape, grouped bar, share split, ranking, benchmark, level/decision matrix,
+  cause tree 등의 입력 조건을 판정한다.
+- `reporting/dashboard_streamlit/blocks/slot_blocks.py`가 live Streamlit 슬롯 렌더러의
+  단일 등록 지점이다. `blocks/purpose_templates.py`는 보조적 선언 문서이며 현재 슬롯
+  선택의 source of truth가 아니다.
+- 질문의 명시 요구(비교·추이·추천·원인·대응)는 purpose만 바꾸는 단일 키워드가 아니라
+  `question_answer_type`, `answer_requirements`, 슬롯 선택과 수집 힌트에 걸쳐 보존한다.
+
+**Evidence structuring**
+
+- `MetricPoint`는 절대값 외에 원문이 직접 말한 상대지표를
+  `is_relative` / `comparison_period` / `value_origin`으로 보존한다. 상대지표에서
+  보이지 않는 절대값을 계산하거나 단일 배수를 가짜 시계열로 만들지 않는다.
+- metric grouping은 label alias가 같아도 unit, `share_of`, time basis, 상대/절대 속성이
+  다르면 한 계열로 합치지 않는다.
+- landscape는 같은 topic·geography·time context가 있는 데이터만 결합한다. 관련 없는
+  headline KPI를 붙여 복합 블록을 성립시키지 않는다.
+- 정성 `high/medium/low`는 원문이 직접 수준을 평가한 경우만 허용한다. 수치 크기나
+  긍정 표현만 보고 level을 만들지 않는다.
+- 인과 edge와 importance는 `sk_broadband` analyzer가 근거·대상 claim·cycle·basis를
+  검증한 뒤에만 보존한다. 다른 섹터에 같은 계약을 확장할 때 이 검증을 우회하지 않는다.
+
+**명시 alias 계약**
+
+- 엔터티·지표 통합은 `common/content_quality_validator.py`의 작은 명시 계약으로만 한다.
+  fuzzy matching을 추가하지 않는다.
+- HBM 쪽은 Samsung Electronics/삼성전자, SK hynix/SK하이닉스,
+  Micron Technology/마이크론과 검토된 시장규모 표현을 지원한다.
+- SK브로드밴드 쪽은 SK Broadband/SK브로드밴드/SKB, KT, LG Uplus 및 주요 OTT·숏폼
+  플랫폼의 bilingual alias를 지원한다. 단, `B tv = SK Broadband`,
+  `Genie TV = KT`처럼 서비스와 회사를 같은 엔터티로 합치지 않는다.
+- IPTV/초고속인터넷/OTT 가입자, 이용률·점유율·시청시간, 광고 reach, ARPU, churn,
+  브랜드 인지도·선호도, 모델 선호·브랜드 적합도, 롱폼·숏폼, 셋톱박스 원가처럼
+  서로 다른 측정값은 분리한다. 문자열이 비슷하다는 이유로 통합하지 않는다.
+
+이 상태의 회귀 기준은 `python -m pytest -q`의 **878 passed, 2 skipped**다. 문서만
+고치는 작업에서는 코드·프롬프트·테스트를 함께 바꾸지 않는다.

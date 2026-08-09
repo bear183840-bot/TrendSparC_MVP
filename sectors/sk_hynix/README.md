@@ -1,24 +1,37 @@
 # SK hynix sector
 
-Status: `template_only` profile로 유지 중. routing metadata, source registry, system prompt는 채워져 있고, collector/processor/validator/analyzer 구현 구조도 준비되어 있다. 다만 실제 운영 전환은 API Key, 비용, 품질 검증 후 진행한다.
+Status: `active`.
 
-## 라우팅 (profile.json)
-- aliases: SK hynix, SK하이닉스, 하이닉스, 에스케이하이닉스, 000660
-- keywords: HBM/DRAM/NAND 등 기술, 투자/CAPEX, 실적, M&A, 공급망, 경쟁사(NVIDIA/TSMC/Micron/삼성전자), 정책/규제 등 (전체 목록은 `profile.json` 참고)
+SK하이닉스의 DRAM·NAND·HBM 시장, 투자·CAPEX, 실적, 공급망, 고객사·경쟁사와
+반도체 정책·규제를 분석하는 섹터입니다.
 
-## 소스 레지스트리 (`sources/registry/sk_hynix/sources.json`)
-전용 Source 5개 등록: SK하이닉스 뉴스룸, 삼성전자DS 뉴스룸, 전자신문(반도체), TrendForce Press Center(시장조사),
-BIS 미국 상무부 산업안보국 Newsroom(수출통제 등 규제 공식 발표). 공통 Source인 네이버 뉴스는 `sources/registry/common/`에서 자동 병합됩니다.
-각 소스의 `collection_method`/`frequency`/`reliability_reason`은 registry 파일에 그대로 명시되어 있으며,
-등록되지 않은 소스에는 임의로 신뢰도를 부여하지 않습니다.
+## 라우팅
 
-## 분석 프롬프트 (`prompts/system_prompt.md`)
-전략기획팀 실무자 관점의 8개 앵글(시장 동향/경쟁사 전략/재무·실적/투자/M&A·제휴/정책·규제/리스크/기회요인)
-기준으로 문서를 분석하도록 정의되어 있음. 포함 범위는 DRAM/NAND/HBM 시장·투자·실적과 경쟁사 비교,
-공급망 리스크까지이며, 파운드리 자체 공정기술 심층분석과 통신/네트워크(sk_broadband 담당)는 제외.
+실제 alias·keyword·market keyword는 `profile.json`이 기준입니다. 대표 신호는
+SK hynix/SK하이닉스, HBM, DRAM, NAND, 메모리, NVIDIA, Micron, 삼성전자,
+CAPEX와 반도체 공급망입니다. 통신·IPTV 질문은 `sk_broadband` 또는 `sk_telecom`으로
+분리합니다.
 
-## 아직 안 된 것
+## 현재 구현
 
-- `profile.json.status`는 아직 `template_only`이다.
-- 실제 운영 전환 전 `.env`에 `FIRECRAWL_API_KEY`와 `TRENDSPARC_SK_HYNIX_ANALYZER_API_KEY`를 채워야 한다.
-- sector reporter 단계는 공통 report planner와 역할을 분리해 추후 정리한다.
+- `profile.json`: `active`
+- Source Registry: 섹터 전용 14개 + 공통 소스
+- Collector / Processor / Validator / Analyzer: 실제 구현 연결
+- Analyzer: 구조화 JSON, 표·비교 완전성, 상대지표(YoY/CAGR/증감률), 명시적 정성
+  등급 추출 규칙 적용
+- 명시 alias: Samsung Electronics/삼성전자, SK hynix/SK하이닉스,
+  Micron Technology/마이크론
+- HBM 시장 규모·매출처럼 동일하다고 검토된 지표 표현만 합치고, 지역 범위·출하량·
+  다른 제품 지표는 분리
+
+소스 목록·역할·접근 검증 내역은
+[SK hynix Source Registry](../../sources/registry/sk_hynix/README.md)를 참고합니다.
+실제 URL과 메타데이터의 단일 기준은 `sources/registry/sk_hynix/sources.json`입니다.
+
+## 운영 주의
+
+- 원문에 없는 절대 시장값을 성장률이나 배수에서 역산하지 않습니다.
+- global/Korea, revenue/shipments, HBM/DRAM처럼 범위나 측정 정의가 다르면 같은
+  시계열로 합치지 않습니다.
+- 경쟁사·고객사 공식 발표는 각 회사 관점의 자료이므로 독립 출처와 교차 확인합니다.
+- API·모델 설정은 `.env.example`을 따르며 실제 키는 저장소에 기록하지 않습니다.

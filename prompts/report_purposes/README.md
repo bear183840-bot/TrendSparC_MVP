@@ -14,6 +14,13 @@
 ## 원칙
 
 - 이 폴더의 Prompt는 런타임 분석/보고서 구조에 영향을 주는 프로젝트 자산이다.
-- 팀원들이 작성할 때는 각 목적별로 필요한 섹션, 중요도 기준, 대시보드 블록 힌트, 1-page report 구성 기준을 명시한다.
-- 프롬프트가 아직 비어 있어도 코드는 깨지지 않아야 한다.
+- `core/report_purpose/classifier.py`는 목적별 파일을 분류 근거로 읽고,
+  `core/report_planner/planner.py`는 선택된 목적 파일과 `common_planning.md`를 함께
+  읽어 섹션·근거 배치를 계획한다.
+- `common_planning.md`는 QUESTION FIRST → DIRECT ANSWER → NARRATIVE → SLOT →
+  BLOCK → LAYOUT의 공통 원칙을 담고, 목적별 파일은 각 목적의 스토리 흐름과 정보
+  우선순위를 담당한다.
+- 목적 프롬프트의 block 힌트는 필요한 데이터 모양을 수집하도록 돕지만 최종 렌더링을
+  강제하지 않는다. 최종 블록 적격성은 `common/block_shapes.py`가 판정한다.
+- 프롬프트 규칙을 바꾸면 `tests/test_prompt_invariants.py`의 불변식도 함께 갱신한다.
 - 기존 `prompts/report_structures/`는 호환용으로 보존하지만, 새 작업은 이 폴더를 기준으로 한다.

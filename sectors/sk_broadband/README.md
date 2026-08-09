@@ -224,30 +224,22 @@ SK Broadband 섹터는 TrendSparC의 1차 발표 기준 섹터다. 사용자가 
 - `adapter/collector`: Firecrawl 검색 수집 + KOFIC PDF 다운로드/parse 지원
 - `adapter/processor`: 공백 정리, boilerplate 제거, 중복 제거
 - `adapter/validator`: 출처·URL·본문 길이 기준 검증
-- `adapter/analyzer`: SK Broadband 전용 prompt + Structured JSON 분석
+- `adapter/analyzer`: SK Broadband 전용 prompt + Structured JSON 분석, 표·비교 완전성,
+  상대지표, 명시적 정성 등급, 검증된 원인 관계·중요도 추출
 - `adapter/reporter`: 공통 리포팅 단계에 넘길 수 있는 report payload 생성
 
 분석 결과는 공통 계약인 `DocumentAnalysis`를 따른다. 모든 섹터가 동일하게 `summary`, `key_points`, `business_impact`, `risk`, `opportunity`, `recommended_actions`, `monitoring_indicators`, `evidence`, `action_level`, `analysis_confidence`를 사용한다.
 
 ## 4. 주요 Source
 
-현재 실행용 Source Registry는 크롤링 부담과 분석 목적을 고려해 **섹터 전용 6개 Source**로 제한한다. 공통 Source인 네이버 뉴스 1개는 `sources/registry/common/`에서 자동 병합되므로, 실제 SourcePlan 기준으로는 **최대 7개 Source**가 사용된다.
+현재 Source Registry에는 **섹터 전용 12개 Source**가 등록되어 있고 공통 소스가
+별도로 병합된다. 공식 발표, 경쟁사 공식 자료, 공공 시장분석, 규제, 전문매체와
+사용자 반응을 역할별로 구분한다. 파이프라인은 질문·목적과 관련성이 높은 후보를
+선택하므로 등록된 모든 소스를 매번 수집하는 것은 아니다.
 
-| Source | role | reliability_tier | 목적 |
-|---|---|---|---|
-| SK브로드밴드 뉴스룸 | official | official | 공식 서비스·제휴·사업 발표 |
-| KT 뉴스룸 | competitor_official | official | 경쟁사 공식 발표 비교 |
-| KOCCA | market_analysis | official | 콘텐츠산업 시장동향·통계 |
-| KOFIC | market_analysis | official | 영화산업 결산·콘텐츠 소비 흐름 |
-| 전자신문(통신) | search | analyst_media | 통신·미디어 산업 뉴스 보완 |
-| 왓챠피디아 | user_sentiment | user_generated | 콘텐츠 사용자 반응 보조 신호 |
-| Naver News | search | common | 공통 뉴스 보완 |
-
-URL, 유형, role, content_type, 활용 목적은 [SK Broadband Source Registry](../../sources/registry/sk_broadband/README.md)를 참고한다.
-
-### 향후 검토 Source
-
-기존 후보였던 방송통신위원회(KCC), 정보통신정책연구원(KISDI)은 정책·규제·통신시장 분석에 의미가 있으므로 후보로 보존한다. 다만 현재 `sources.json`에는 등록하지 않았고, 팀 회의에서 실제 수집 범위가 확정되면 추가 여부를 결정한다.
+URL, 유형, role, content_type, 검증 내역은
+[SK Broadband Source Registry](../../sources/registry/sk_broadband/README.md)를 참고한다.
+실제 등록 정보의 단일 기준은 `sources/registry/sk_broadband/sources.json`이다.
 
 ## 5. 분석 시 주의사항
 
@@ -366,4 +358,5 @@ URL, 유형, role, content_type, 활용 목적은 [SK Broadband Source Registry]
 - Source 수를 무작정 늘리지 않고 목적별 대표 Source를 유지한다.
 - 공식 자료, 시장분석 자료, 뉴스, 사용자 반응의 역할을 구분한다.
 - AI 분석 결과에는 추측보다 근거 기반 판단을 우선한다.
-- Dashboard와 Report는 향후 report purpose에 따라 동적으로 구성될 수 있어야 한다.
+- Dashboard와 Report는 목적별 슬롯 흐름과 실제 근거의 데이터 모양에 따라 동적으로
+  구성한다. 블록 우선순위는 수집 힌트이며 근거 없는 블록을 강제하지 않는다.
