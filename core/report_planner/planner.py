@@ -27,6 +27,7 @@ from core.report_purpose.classifier import recommended_sections_for
 _BASE_SECTIONS = ["overview"]
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 _REPORT_PURPOSES_DIR = _PROJECT_ROOT / "prompts" / "report_purposes"
+_COMMON_PLANNING_PROMPT = _REPORT_PURPOSES_DIR / "common_planning.md"
 _LEGACY_REPORT_STRUCTURES_DIR = _PROJECT_ROOT / "prompts" / "report_structures"
 
 
@@ -114,10 +115,17 @@ def _dedupe_semantic_sections(sections: list[str]) -> list[str]:
 
 
 def _load_intent_emphasis(purpose_id: str) -> str | None:
+    common = (
+        _COMMON_PLANNING_PROMPT.read_text(encoding="utf-8")
+        if _COMMON_PLANNING_PROMPT.is_file() else ""
+    )
     for directory in (_REPORT_PURPOSES_DIR, _LEGACY_REPORT_STRUCTURES_DIR):
         path = directory / f"{purpose_id}.md"
         if path.is_file():
-            return path.read_text(encoding="utf-8")
+            purpose = path.read_text(encoding="utf-8")
+            return "\n\n".join(value for value in (common, purpose) if value)
+    # An unregistered purpose remains unsupported; the shared planner is not
+    # a reason to make an unknown intent look configured.
     return None
 
 
@@ -171,6 +179,7 @@ def _content_backed_sections(
         sections.append("risk_and_opportunity")
     if (
         "action" in claim_types or synthesis.recommended_actions
+        or synthesis.ai_recommended_actions
     ) and not _has_claim_slot(existing_sections, {"action"}):
         sections.append("recommended_action")
     if (synthesis.sources or synthesis.source_ids) and "sources" not in existing_sections:
@@ -232,7 +241,7 @@ _SECTION_CONTENT_FIELDS: dict[str, tuple[str, ...]] = {
     "key_metrics": ("metric_series",),
     "market_status": ("metric_series", "comparison_points"),
     "risk_and_opportunity": ("risks", "opportunities", "strengths", "weaknesses"),
-    "recommended_action": ("recommended_actions",),
+    "recommended_action": ("recommended_actions", "ai_recommended_actions"),
 }
 
 

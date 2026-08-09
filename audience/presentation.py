@@ -70,6 +70,11 @@ def order_slots_for_audience(slots: list[Any], policy: AudiencePresentation) -> 
     the profile's registered ``report_structure`` move forward in that order.
     Unmatched purpose-specific slots retain their original relative order.
     """
+    # Question-first narrative slots carry an explicit logical reason for
+    # their position.  Audience changes density and wording, but must not turn
+    # Problem -> Cause -> Impact into an unrelated preferred-section order.
+    if any(getattr(resolved.slot, "question_answered", "") for resolved in slots):
+        return list(slots)
     if not policy.preferred_sections:
         return list(slots)
     preferred = {section: index for index, section in enumerate(policy.preferred_sections)}

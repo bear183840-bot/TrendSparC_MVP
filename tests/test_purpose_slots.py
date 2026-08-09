@@ -24,6 +24,8 @@ from common.purpose_slots import (
     PURPOSE_SLOTS,
     resolve_slots,
     under_evidenced,
+    slots_for,
+    narrative_configuration_issues,
 )
 
 _FIXTURES = Path(__file__).parent / "fixtures"
@@ -58,6 +60,48 @@ def test_every_purpose_has_the_agreed_slot_order():
     assert [slot.slot_id for slot in PURPOSE_SLOTS["root_cause"]] == [
         "problem", "cause", "drivers", "improvement",
     ]
+
+
+def test_question_answer_type_selects_reader_flow_without_adding_a_fifth_purpose():
+    assert [slot.slot_id for slot in slots_for("current_status", "status")][:3] == [
+        "snapshot", "market", "comparison",
+    ]
+    assert [slot.slot_id for slot in slots_for("current_status", "compare")][:3] == [
+        "comparison", "snapshot", "competitor",
+    ]
+    assert [slot.slot_id for slot in slots_for("current_status", "trend")][:3] == [
+        "market", "snapshot", "factors",
+    ]
+    assert [slot.slot_id for slot in slots_for("current_status", "recommend")] == [
+        "target", "candidates", "comparison", "fit", "recommendation", "execution",
+    ]
+
+
+def test_purpose_narratives_follow_problem_to_decision_order():
+    assert [slot.slot_id for slot in slots_for("root_cause", "cause")] == [
+        "problem", "cause", "drivers", "evidence", "improvement",
+    ]
+    assert [slot.slot_id for slot in slots_for("issue_response", "issue_response")] == [
+        "problem", "cause", "impact", "options", "recommendation", "execution",
+    ]
+    assert [slot.slot_id for slot in slots_for("future_business", "strategy")] == [
+        "current_position", "future_change", "opportunity", "competitive_fit",
+        "strategic_choice", "recommendation", "execution", "risk",
+    ]
+
+
+def test_question_first_slots_explain_what_they_answer_and_why_they_are_there():
+    for purpose_id, answer_type in (
+        ("current_status", "status"),
+        ("current_status", "recommend"),
+        ("root_cause", "cause"),
+        ("issue_response", "issue_response"),
+        ("future_business", "strategy"),
+    ):
+        for slot in slots_for(purpose_id, answer_type):
+            assert slot.question_answered.strip(), slot.slot_id
+            assert slot.why_here.strip(), slot.slot_id
+        assert narrative_configuration_issues(slots_for(purpose_id, answer_type)) == []
 
 
 def test_every_candidate_is_a_real_block_type():
@@ -330,6 +374,36 @@ def test_brand_marketing_fills_every_future_business_slot():
     # matrix is claimed above, so 위험 falls to its own narrative bullets.
     assert by_id["risk"].block_type == "narrative_list"
     assert not any(slot.is_last_resort for slot in resolved)
+
+
+def test_live_brand_recommendation_uses_target_to_recommendation_flow():
+    from common.contracts import EntityExtractionResult
+    from core.report_purpose.classifier import classify_report_purpose
+
+    synthesis, question, audience_id, _ = load_synthesis_fixture(
+        _FIXTURES / "synthesis_brand_marketing.json"
+    )
+    entities = EntityExtractionResult(
+        request_id=synthesis.request_id,
+        primary_intent="future_business",
+        perspective="market_landscape",
+        keywords=["광고 매체", "모델", "추천"],
+    )
+    purpose = classify_report_purpose(
+        synthesis.request_id, entities, question=question
+    )
+    plan = plan_report(synthesis, audience_id, purpose)
+    report = generate_report(question, synthesis, plan, audience_id)
+    resolved = resolve_slots(
+        purpose.purpose_id, synthesis, report, purpose.question_answer_type
+    )
+
+    assert purpose.purpose_id == "current_status"
+    assert purpose.question_answer_type == "recommend"
+    assert [slot.slot.slot_id for slot in resolved][:5] == [
+        "target", "candidates", "comparison", "fit", "recommendation",
+    ]
+    assert resolved[0].block_type in {"kpi_grid", "grouped_bar", "segment_table"}
 
 
 # --- one metric across several subjects is a bar, never a line ----------

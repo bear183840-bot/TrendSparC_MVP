@@ -42,6 +42,8 @@ from common.block_shapes import (
     share_groups,
     has_status_levels,
     importance_ranked,
+    has_decision_matrix,
+    metric_snapshot_groups,
 )
 from reporting.dashboard_streamlit.components import (
     action_impact_lookup,
@@ -69,6 +71,7 @@ from reporting.dashboard_streamlit.components import (
     render_metric_bar,
     render_metric_chart,
     render_metric_comparison,
+    render_decision_matrix,
     render_question_axis_comparison,
     render_radar,
     render_recurring_terms,
@@ -141,7 +144,15 @@ def _status_bar(context: SlotContext):
 
 
 def _metric_comparison(context: SlotContext):
-    groups = metric_comparison_groups(context.synthesis.metric_series)
+    snapshots = metric_snapshot_groups(context.synthesis.metric_series)
+    snapshot_periods = {period for period, _ in snapshots}
+    groups = [
+        *snapshots,
+        *(
+            group for group in metric_comparison_groups(context.synthesis.metric_series)
+            if group[0] not in snapshot_periods
+        ),
+    ]
     if not groups:
         return None
     if context.compact:
@@ -209,7 +220,10 @@ def _matrix(context: SlotContext):
         strengths=context.strengths, weaknesses=context.weaknesses,
         opportunities=context.opportunities, threats=context.risks,
     )
-    return (lambda: st.markdown(markup, unsafe_allow_html=True)) if markup else None
+    if markup:
+        return lambda: st.markdown(markup, unsafe_allow_html=True)
+    points = context.synthesis.comparison_points
+    return (lambda: render_decision_matrix(points)) if has_decision_matrix(points) else None
 
 
 def _share_split(context: SlotContext):
@@ -299,7 +313,7 @@ def _driver_bars(context: SlotContext):
 def _cause_map(context: SlotContext):
     synthesis = context.synthesis
     return lambda: render_cause_map(
-        context.risks,
+        dedupe_clean(synthesis.factors, 3) or context.risks,
         dedupe_clean(synthesis.business_impacts, 3),
         dedupe_clean(synthesis.recommended_actions, 3),
     )
@@ -315,10 +329,35 @@ def _action_list(context: SlotContext):
         (clean_citation(action), impacts.get(clean_citation(action)), evidence_url(action, context.result))
         for action in actions
     ]
+    ai_judgements: dict[str, str] = {}
+    claims_by_id = {
+        claim.synthesis_claim_id: claim
+        for claim in (context.synthesis.grounded_claims or [])
+    }
+    for judgement in getattr(context.synthesis, "ai_recommended_actions", None) or []:
+        title = clean_citation(judgement.action)
+        if title in {row[0] for row in rows}:
+            continue
+        support = [
+            claims_by_id[claim_id]
+            for claim_id in judgement.supporting_claim_ids
+            if claim_id in claims_by_id
+        ]
+        if not support:
+            continue
+        rows.append((
+            title,
+            "",
+            support[0].source_url
+            or context.synthesis.doc_url_map.get(support[0].doc_id),
+        ))
+        ai_judgements[title] = judgement.basis
     from common.action_quality import routed_action_owner
 
     owner = routed_action_owner(getattr(context.result, "sector_route", None))
-    return (lambda: render_action_list(rows, owner=owner)) if rows else None
+    return (
+        lambda: render_action_list(rows, owner=owner, ai_judgements=ai_judgements)
+    ) if rows else None
 
 
 def _question_comparison(context: SlotContext):

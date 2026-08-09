@@ -36,7 +36,6 @@ from core.run_archive import load_result
 from core.sector_router.router import scan_sectors
 from reporting.dashboard_streamlit.collection_progress_view import _STATUS_LABELS, render_execution_record
 from reporting.dashboard_streamlit.generic_dashboard import render_generic_dashboard
-from reporting.dashboard_streamlit.issue_response_view import render_issue_response_dashboard
 from reporting.dashboard_streamlit.logo import wordmark_html
 from reporting.dashboard_streamlit.build_stamp import build_stamp_html
 from reporting.dashboard_streamlit.theme import dashboard_css
@@ -498,8 +497,6 @@ no_evidence = result.synthesis is not None and result.synthesis.source_count == 
 if no_evidence:
     _html(f'<div class="ts-top-question"><span class="search">⌕</span>{escape(question)}<span class="ts-sk">SK</span></div>')
     st.error("관련 소스를 수집·검증하지 못해 리포트를 생성하지 않았습니다.")
-elif purpose_id == "issue_response" and result.synthesis is not None:
-    render_issue_response_dashboard(result, question, sector, audience, purpose)
 elif result.synthesis is not None:
     # Gated on the synthesis the view actually reads. It used to be gated on
     # `result.layout.blocks`, which this view never touches (layout.blocks is

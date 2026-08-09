@@ -19,7 +19,12 @@ data shows up anyway (resolve_slots doesn't consult this plan at all).
 from __future__ import annotations
 
 from common.contracts import BlockPriorityPlan, SlotTarget
-from common.purpose_slots import DEFAULT_PURPOSE_SLOTS, PURPOSE_SLOTS
+from common.purpose_slots import (
+    DEFAULT_PURPOSE_SLOTS,
+    PURPOSE_SLOTS,
+    narrative_configuration_issues,
+    slots_for,
+)
 
 # Plain-language restatement of each block_type's block_shapes predicate -
 # never a new judgement, just what common/block_shapes.py already requires,
@@ -27,16 +32,16 @@ from common.purpose_slots import DEFAULT_PURPOSE_SLOTS, PURPOSE_SLOTS
 # appears in any Slot.candidates across common/purpose_slots.py must have an
 # entry here (see tests/test_block_priority_planner.py).
 _REQUIRED_DATA_HINTS: dict[str, str] = {
-    "chart": "같은 라벨로 서로 다른 시점 3개 이상의 수치 (추이)",
-    "landscape": "추이용 시계열 수치와 함께, 하나의 전체에 대한 구성비(%)까지",
-    "grouped_bar": "같은 라벨을 2개 이상 주체 × 2개 이상 공통 항목에 대해 측정한 수치",
+    "chart": "같은 semantic metric·비교 가능한 단위로 실제 시점 3개 이상의 수치 (비연속 시점 허용, actual/estimate/forecast/target 구분)",
+    "landscape": "핵심 시장 추이/스냅샷 1개와 구성비·현재 KPI·주요 주체 비교 중 보완 구조 1개",
+    "grouped_bar": "같은 semantic metric·단위로 2개 이상 주체 × 2개 이상 공통 항목에 대해 측정한 수치",
     "status_bar": "근거가 등급(High/Medium/Low)을 매긴 항목 2개 이상",
-    "bar": "같은 라벨로 서로 다른 시점 정확히 2개의 수치 (전후 비교)",
-    "item_bar": "같은 라벨을 2개 이상 주체(기업·연령대 등)에 대해 측정한 수치 (항목 비교)",
+    "bar": "같은 semantic metric·단위의 정확히 두 시점 또는 명시적 current/target·before/after 상태",
+    "item_bar": "같은 semantic metric·시점/맥락을 2개 이상 주체(기업·연령대 등)에 대해 측정한 수치",
     "ranking_list": "같은 라벨을 4개 이상 항목에 대해 측정한 수치 (긴 순위 목록)",
     "share_split": "하나의 전체(share_of)에 대한 비중(%) 2개 이상, 합계 100 이하",
     "composition_breakdown": "하나의 전체(share_of)에 대한 비중(%) 4개 이상 (상세 구성)",
-    "metric_comparison": "같은 시점·같은 단위를 공유하는 서로 다른 라벨의 수치 2개 이상",
+    "metric_comparison": "같은 시점·맥락을 설명하는 서로 다른 핵심 수치 2개 이상(단위가 다르면 공통 막대축 금지, 개별 단위 유지)",
     "kpi_grid": "확인된 수치(metric) 2개 이상",
     "kpi_single": "확인된 수치(metric) 1개 이상",
     "timeline": "날짜가 명시된 근거 문장 또는 시점이 있는 수치",
@@ -46,8 +51,8 @@ _REQUIRED_DATA_HINTS: dict[str, str] = {
     "competitor_panels": "경쟁사별로 등급·수치·구성비 중 2가지 이상이 확인되는 자료",
     "benchmark_table": "기업·국가·기술 2개 이상을 공통 정량/정성 기준 2개 이상으로 비교한 자료",
     "radar": "등급(level)이 매겨진 공통 기준 3개 이상, 엔티티 2개 이상",
-    "matrix": "강점/약점/기회/위험 중 2개 이상 항목에 근거",
-    "cause_tree": "원인-결과로 연결된(parent_claim_id) claim",
+    "matrix": "근거가 있는 SWOT 항목 또는 후보 2개 이상에 대해 실제 수치/명시 level이 존재하는 공통 판단축 2개",
+    "cause_tree": "원문이 명시한 원인-결과를 별도 claim과 parent_claim_id로 연결한 구조(동시 발생만으로 연결 금지)",
     "cause_map": "위험/영향/대응 중 2개 이상 열에 근거",
     "driver_bars": "중요도 점수와 그 근거(importance + importance_basis)가 모두 있는 claim 2개 이상",
     "action_list": "권고 조치(recommended_actions)",
@@ -106,7 +111,9 @@ def _hint_for(block_type: str) -> str:
     return _REQUIRED_DATA_HINTS.get(block_type, "")
 
 
-def plan_block_priorities(request_id: str, purpose_id: str) -> BlockPriorityPlan:
+def plan_block_priorities(
+    request_id: str, purpose_id: str, question_answer_type: str | None = None,
+) -> BlockPriorityPlan:
     """Read purpose_slots' fixed skeleton for `purpose_id` and restate each
     slot's top-priority block as a search/extraction target.
 
@@ -114,7 +121,11 @@ def plan_block_priorities(request_id: str, purpose_id: str) -> BlockPriorityPlan
     resolved by the time this runs (report_purpose classified it); this stage
     never re-derives it.
     """
-    slots = PURPOSE_SLOTS.get(purpose_id, DEFAULT_PURPOSE_SLOTS)
+    slots = slots_for(purpose_id, question_answer_type)
+    if question_answer_type:
+        issues = narrative_configuration_issues(slots)
+        if issues:
+            raise ValueError("invalid narrative slot configuration: " + "; ".join(issues))
     targets: list[SlotTarget] = []
     claimed_shapes: set[str] = set()
     included_count = 0
@@ -152,6 +163,9 @@ def plan_block_priorities(request_id: str, purpose_id: str) -> BlockPriorityPlan
                     for block_type in fresh
                 ) if included else "",
                 included=included,
+                role=slot.role if slot.role in {"answer", "evidence", "analysis", "decision", "action", "support"} else "support",
+                question_answered=slot.question_answered,
+                why_here=slot.why_here,
             )
         )
     return BlockPriorityPlan(request_id=request_id, purpose_id=purpose_id, slots=targets)

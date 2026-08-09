@@ -21,6 +21,7 @@ from common.purpose_slots import (
     DEFAULT_PURPOSE_SLOTS,
     LAST_RESORT,
     PURPOSE_SLOTS,
+    slots_for,
     block_data_supported,
     resolve_slots,
     slot_evidence_items,
@@ -166,7 +167,8 @@ def build_block_delivery_trace(result: Any, audience_id: str | None = None) -> B
         return None
     purpose_id = purpose.purpose_id
     report = getattr(result, "generated_report", None)
-    resolved = resolve_slots(purpose_id, synthesis, report)
+    answer_type = getattr(purpose, "question_answer_type", None)
+    resolved = resolve_slots(purpose_id, synthesis, report, answer_type)
     resolved_by_id = {item.slot.slot_id: item for item in resolved}
     selected_elsewhere = {
         block_type: item.slot.slot_id
@@ -178,12 +180,12 @@ def build_block_delivery_trace(result: Any, audience_id: str | None = None) -> B
     plan = getattr(result, "block_priority_plan", None)
     plan_source = "pipeline"
     if plan is None:
-        plan = plan_block_priorities(result.request_id, purpose_id)
+        plan = plan_block_priorities(result.request_id, purpose_id, answer_type)
         plan_source = "reconstructed_for_diagnostics"
     targets = {target.slot_id: target for target in plan.slots}
 
     slots = []
-    for slot in PURPOSE_SLOTS.get(purpose_id, DEFAULT_PURPOSE_SLOTS):
+    for slot in slots_for(purpose_id, answer_type):
         _, items = slot_evidence_items(slot, synthesis, report)
         resolved_slot = resolved_by_id.get(slot.slot_id)
         selected = list(resolved_slot.block_types) if resolved_slot else []
@@ -224,6 +226,9 @@ def build_block_delivery_trace(result: Any, audience_id: str | None = None) -> B
             selected_block_types=selected,
             last_resort=bool(resolved_slot and resolved_slot.is_last_resort),
             candidates=candidates,
+            role=slot.role,
+            question_answered=slot.question_answered,
+            why_here=slot.why_here,
         ))
 
     return BlockDeliveryTrace(

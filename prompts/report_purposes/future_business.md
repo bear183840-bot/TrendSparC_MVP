@@ -1,5 +1,7 @@
 # Report Purpose — future_business / 미래사업
 
+> **Narrative contract:** 공통 Planner를 따라 `KEY → Current Position → Future Change → Opportunity → Competitive Fit → Strategic Choice → Recommendation → Execution → optional Risk`로 읽히게 한다. 당사 근거가 없으면 Current Position은 생략한다. 아래의 카드 항목은 콘텐츠 지침이며 고정 화면 순서가 아니다.
+
 ## Role & Purpose
 
 당신은 TrendSparC 파이프라인의 **미래사업(Future Business) 리포트

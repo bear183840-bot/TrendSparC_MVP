@@ -94,6 +94,43 @@ _PURPOSE_SIGNALS: dict[str, tuple[str, ...]] = {
 _PURPOSE_TIE_PRIORITY = ("issue_response", "root_cause", "future_business", "current_status")
 _SECONDARY_PURPOSE_THRESHOLD = 4
 
+_STRATEGY_STRONG_SIGNALS = (
+    "미래", "향후", "중장기", "성장전략", "신사업", "진출", "투자", "사업기회",
+    "사업 포트폴리오", "시장 확대", "신규 사업", "전략 방향", "roadmap", "portfolio",
+)
+_RECOMMEND_SIGNALS = (
+    "추천", "뭐가 좋", "어떤 것을 선택", "어느 것이 적합", "무엇을 써야",
+    "우선순위", "최적", "적합한", "선정", "골라",
+)
+_COMPARE_SIGNALS = ("비교", "대비", " vs ", "차이", "경쟁력")
+_TREND_SIGNALS = ("추이", "변화", "지난", "최근", "연도별", "전망")
+
+
+def classify_question_answer_type(question: str | None, entities: EntityExtractionResult) -> str:
+    """Classify the requested answer shape without changing the broad purpose.
+
+    Explicit response/cause framing wins, followed by strong strategy and
+    selection.  Compare/trend then refine ordinary status questions.  This is
+    intentionally lexical and deterministic; the entity AI has already had
+    its chance to supply the broad primary intent.
+    """
+    terms = " ".join([
+        question or "", *entities.keywords, *entities.technologies, *entities.organizations,
+    ]).lower()
+    if any(signal in terms for signal in _EXPLICIT_ISSUE_RESPONSE_SIGNALS):
+        return "issue_response"
+    if any(signal in terms for signal in ("원인", "왜", "이유", "근본", "root cause", "why")):
+        return "cause"
+    if any(signal in terms for signal in _STRATEGY_STRONG_SIGNALS):
+        return "strategy"
+    if any(signal in terms for signal in _RECOMMEND_SIGNALS):
+        return "recommend"
+    if any(signal in terms for signal in _COMPARE_SIGNALS):
+        return "compare"
+    if any(signal in terms for signal in _TREND_SIGNALS):
+        return "trend"
+    return "status"
+
 
 def recommended_sections_for(purpose_id: str) -> list[str]:
     """Public lookup so other stages (report_planner) can pull a purpose's
@@ -133,10 +170,19 @@ def classify_report_purpose(
     """
 
     terms = " ".join([question or "", *entities.keywords, *entities.technologies, *entities.organizations]).lower()
+    question_answer_type = classify_question_answer_type(question, entities)
     mapped_primary_purpose = _PRIMARY_INTENT_TO_PURPOSE.get(entities.primary_intent)
     scores = {purpose_id: 0 for purpose_id in _PURPOSE_DEFINITIONS}
     matched_signals: dict[str, list[str]] = {purpose_id: [] for purpose_id in _PURPOSE_DEFINITIONS}
-    if mapped_primary_purpose:
+    # Entity models often label any request containing "추천" as
+    # future_business.  A recommendation with no strong strategy horizon is a
+    # selection answer, not evidence that the broad purpose is future growth.
+    recommendation_only = question_answer_type == "recommend" and not any(
+        signal in terms for signal in _STRATEGY_STRONG_SIGNALS
+    )
+    if mapped_primary_purpose and not (
+        recommendation_only and mapped_primary_purpose == "future_business"
+    ):
         scores[mapped_primary_purpose] += 4
     for purpose_id, signals in _PURPOSE_SIGNALS.items():
         for signal in signals:
@@ -179,4 +225,5 @@ def classify_report_purpose(
         dashboard_block_hints=list(definition["dashboard_block_hints"]),
         prompt_path=_prompt_path_for(purpose_id),
         secondary_purpose_id=secondary_purpose_id,
+        question_answer_type=question_answer_type,
     )

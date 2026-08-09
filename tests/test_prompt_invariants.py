@@ -227,3 +227,17 @@ def test_report_writer_keeps_action_owner_distinct_from_source_organisations():
     assert "payload.target_company is the accountable actor" in text
     assert "third-party " in text
     assert "plans only as evidence or benchmarks" in text
+
+
+def test_all_report_purposes_share_question_first_planning_without_fixed_issue_rows():
+    prompt_dir = _ROOT / "prompts" / "report_purposes"
+    common = (prompt_dir / "common_planning.md").read_text(encoding="utf-8")
+
+    assert "QUESTION FIRST" in common
+    assert "question_answered" in common
+    assert "why_here" in common
+    assert "AI judgement" in common
+    for filename in ("current_status.md", "root_cause.md", "issue_response.md", "future_business.md"):
+        assert "Narrative contract" in (prompt_dir / filename).read_text(encoding="utf-8")
+    issue = (prompt_dir / "issue_response.md").read_text(encoding="utf-8")
+    assert "고정 행으로 만들지 말고" in issue

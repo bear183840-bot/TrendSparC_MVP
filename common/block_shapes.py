@@ -29,6 +29,10 @@ from common.content_quality_validator import (
     is_duplicate_statement,
     is_time_period,
     order_comparison_entities,
+    normalize_comparison_axes,
+    semantic_entity_key,
+    semantic_metric_key,
+    select_chartable_series,
     strip_particle,
     period_sort_key,
 )
@@ -216,10 +220,10 @@ def grouped_bar_series(metric_points: list[Any]) -> list[tuple[str, list[str], d
     category only one subject was measured on is dropped rather than drawn as
     a lone bar in a group, which would read as "the others are zero".
     """
-    by_label: dict[str, list[Any]] = {}
-    for point in metric_points:
-        if getattr(point, "subject", None) and point.period:
-            by_label.setdefault(point.label, []).append(point)
+    by_label = {
+        label: [point for point in points if getattr(point, "subject", None) and point.period]
+        for label, points in group_metric_points_by_label(metric_points).items()
+    }
     groups = []
     for label, points in by_label.items():
         by_subject: dict[str, dict[str, Any]] = {}
@@ -253,7 +257,7 @@ def status_levels(comparison_points: list[Any], limit: int = 4) -> list[tuple[st
     page. Only points the document actually graded are eligible - a value with
     no stated `level` has no standing to be shown as a status.
     """
-    graded = [point for point in comparison_points if point.level]
+    graded = [point for point in normalize_comparison_axes(comparison_points) if point.level]
     seen: set[str] = set()
     rows: list[tuple[str, str, str]] = []
     for point in graded:
@@ -279,7 +283,7 @@ def level_matrix(
     Order is the evidence's own, not alphabetical: the first entity discussed
     is usually the subject of the question.
     """
-    graded = [point for point in comparison_points or [] if point.level]
+    graded = [point for point in normalize_comparison_axes(comparison_points or []) if point.level]
     entities: list[str] = []
     criteria: list[str] = []
     cells: dict[tuple[str, str], tuple[str, str]] = {}
@@ -313,6 +317,11 @@ def benchmark_grid(
     they have their own segment block. A missing cell stays blank rather
     than becoming zero.
     """
+    comparison_points = normalize_comparison_axes(comparison_points or [])
+    metric_points = [
+        point for points in group_metric_points_by_label(metric_points or []).values()
+        for point in points
+    ]
     cells: dict[tuple[str, str], str] = {}
     entities: list[str] = []
     dimensions: list[str] = []
@@ -438,18 +447,31 @@ def share_groups(metric_points: list[Any]) -> list[tuple[str, list[Any]]]:
     few. Inventing a "기타" slice to close the circle would be the fabrication
     this whole check exists to prevent.
     """
-    by_whole: dict[str, list[Any]] = {}
-    for point in metric_points:
+    normalized_points = [
+        point for points in group_metric_points_by_label(metric_points).values()
+        for point in points
+    ]
+    by_whole: dict[tuple[str, str], list[Any]] = {}
+    whole_labels: dict[tuple[str, str], str] = {}
+    for point in normalized_points:
         whole = (getattr(point, "share_of", None) or "").strip()
         if whole and (point.unit or "").strip() in {"%", "％"}:
-            by_whole.setdefault(whole, []).append(point)
+            period_key = point.period if is_time_period(point.period) else (point.period or "")
+            key = (semantic_metric_key(whole), period_key)
+            whole_labels.setdefault(key, whole)
+            by_whole.setdefault(key, []).append(point)
     groups = []
-    for whole, points in by_whole.items():
+    for key, points in by_whole.items():
         if len(points) < SHARE_MIN_SLICES:
+            continue
+        subjects = [semantic_entity_key(getattr(point, "subject", None)) for point in points]
+        if not all(subjects) or len(set(subjects)) != len(subjects):
+            continue
+        if any(point.value < 0 for point in points):
             continue
         if sum(point.value for point in points) > 100 + SHARE_SUM_TOLERANCE:
             continue
-        groups.append((whole, sorted(points, key=lambda point: point.value, reverse=True)))
+        groups.append((whole_labels[key], sorted(points, key=lambda point: point.value, reverse=True)))
     return groups
 
 
@@ -477,10 +499,15 @@ def competitor_panels(
     An entity with a single fact isn't a panel; it is a row in the comparison
     table, and it stays there.
     """
+    comparison_points = normalize_comparison_axes(comparison_points or [])
+    normalized_metric_points = [
+        point for points in group_metric_points_by_label(metric_points or []).values()
+        for point in points
+    ]
     entities = list(dict.fromkeys(point.entity for point in comparison_points))
     shares = {
         point.subject: point
-        for _, slices in share_groups(metric_points)
+        for _, slices in share_groups(normalized_metric_points)
         for point in slices
         if getattr(point, "subject", None)
     }
@@ -491,7 +518,8 @@ def competitor_panels(
             for point in comparison_points if point.entity == entity
         ]
         figures = [
-            point for point in metric_points if getattr(point, "subject", None) == entity
+            point for point in normalized_metric_points
+            if semantic_entity_key(getattr(point, "subject", None)) == semantic_entity_key(entity)
         ]
         share = shares.get(entity)
         if len(graded) + len(figures) + (1 if share else 0) < 2:
@@ -532,14 +560,47 @@ def competitor_panels_not_covered_by_ranking(
 
 
 def has_landscape(metric_points: list[Any]) -> bool:
-    """Whether one card can carry both halves of the artwork's Landscape:
-    how the market moved, and what it is made of.
+    """Whether the evidence supports a market overview with two real parts.
 
-    Both halves have to stand on their own first - a trend that earns a line
-    and a split that earns a donut - because this block only places them side
-    by side. It never derives one from the other.
+    A landscape is broader than a line chart: it needs one core trend or
+    snapshot structure and one complementary structure.  The complement may
+    be an explicit part-to-whole split, a current player comparison, or a
+    separate headline KPI.  A lone time series remains a chart.
     """
-    return has_timeseries(metric_points) and has_share_split(metric_points)
+    return landscape_parts(metric_points) is not None
+
+
+def landscape_parts(metric_points: list[Any]) -> tuple[str, list[Any], str, list[Any]] | None:
+    """``(core_kind, core_points, complement_kind, complement_points)``.
+
+    Every returned point is evidence-stated. This function groups and selects
+    only; it never fills a missing period, share, or headline value.
+    """
+    grouped = group_metric_points_by_label(metric_points)
+    trend = select_chartable_series(metric_points)
+    shares = share_groups(metric_points)
+    item_groups = item_bar_groups(metric_points)
+    kpi_groups = [
+        points for points in grouped.values()
+        if classify_metric_shape(points) == "kpi"
+    ]
+
+    if trend:
+        if shares:
+            return "trend", trend, "share", shares[0][1]
+        if item_groups:
+            return "trend", trend, "comparison", item_groups[0]
+        if kpi_groups:
+            return "trend", trend, "kpi", [points[0] for points in kpi_groups[:3]]
+        return None
+
+    # Snapshot landscape: at least two distinct headline measures plus a
+    # genuine structure. A collection of unrelated one-off figures alone is
+    # a KPI grid, not an overview.
+    headline = [points[0] for points in kpi_groups[:4]]
+    if len(headline) >= 2 and shares:
+        return "kpi", headline, "share", shares[0][1]
+    return None
 
 
 def comparison_points_of_kind(comparison_points: list[Any], demographic: bool) -> list[Any]:
@@ -554,7 +615,7 @@ def comparison_points_of_kind(comparison_points: list[Any], demographic: bool) -
         point for point in comparison_points
         if is_demographic(point.entity) == demographic
     ]
-    return order_comparison_entities(selected)
+    return order_comparison_entities(normalize_comparison_axes(selected))
 
 
 def comparison_points_not_covered_by_ranking(
@@ -633,7 +694,10 @@ def radar_axes(comparison_points: list[Any]) -> list[str]:
     """Criteria every compared entity has a stated `level` for. A radar with
     a missing vertex misreads as a zero, so an axis only counts when all
     plotted entities actually have a value on it."""
-    leveled = [point for point in comparison_points if point.level in _LEVEL_RADIUS_FRACTION]
+    leveled = [
+        point for point in normalize_comparison_axes(comparison_points)
+        if point.level in _LEVEL_RADIUS_FRACTION
+    ]
     entities = list(dict.fromkeys(point.entity for point in leveled))[:_RADAR_MAX_ENTITIES]
     if not entities:
         return []
@@ -660,8 +724,12 @@ def metric_comparison_groups(metric_points: list[Any]) -> list[tuple[str, list[A
     figures comparable. Subject-bearing points belong to an item/ranking
     series; this block is for top-level measures pinned to the same period.
     """
+    normalized_points = [
+        point for points in group_metric_points_by_label(metric_points).values()
+        for point in points
+    ]
     by_period: dict[str, list[Any]] = {}
-    for point in metric_points:
+    for point in normalized_points:
         if not is_time_period(point.period) or getattr(point, "subject", None):
             continue
         by_period.setdefault(point.period, []).append(point)
@@ -679,8 +747,95 @@ def metric_comparison_groups(metric_points: list[Any]) -> list[tuple[str, list[A
     return groups
 
 
+def metric_snapshot_groups(metric_points: list[Any]) -> list[tuple[str, list[Any]]]:
+    """Same-context headline metrics whose own units stay visible.
+
+    Unlike ``metric_comparison_groups`` these values are not put on one
+    numeric axis. They may mix market size, growth and share, provided they
+    are top-level figures from the same explicit period.
+    """
+    by_period: dict[str, list[Any]] = {}
+    for points in group_metric_points_by_label(metric_points).values():
+        for point in points:
+            if is_time_period(point.period) and not getattr(point, "subject", None):
+                by_period.setdefault(point.period, []).append(point)
+    groups: list[tuple[str, list[Any]]] = []
+    for period, points in by_period.items():
+        distinct: dict[str, Any] = {}
+        for point in points:
+            distinct.setdefault(point.label.casefold().strip(), point)
+        units = {(point.unit or "").strip() for point in distinct.values()}
+        if len(distinct) >= 2 and len(units) >= 2:
+            groups.append((period, list(distinct.values())[:5]))
+    return groups
+
+
 def has_metric_comparison(metric_points: list[Any]) -> bool:
     return bool(metric_comparison_groups(metric_points))
+
+
+def decision_matrix(
+    comparison_points: list[Any], entity_limit: int = 6,
+) -> tuple[list[str], str, str, dict[str, tuple[float, float, str, str]]] | None:
+    """Two evidence-backed axes for a set of decision candidates.
+
+    Numeric values use their stated number; qualitative values require an
+    explicit ``level`` already verified by the analyzer. Coordinates are
+    normalized only for drawing relative positions—no High/Medium/Low label
+    or threshold is invented.
+    """
+    comparison_points = normalize_comparison_axes(comparison_points or [])
+    by_entity: dict[str, dict[str, Any]] = {}
+    criterion_order: list[str] = []
+    for point in comparison_points or []:
+        by_entity.setdefault(point.entity, {})[point.criterion] = point
+        if point.criterion not in criterion_order:
+            criterion_order.append(point.criterion)
+    shared = [
+        criterion for criterion in criterion_order
+        if sum(criterion in rows for rows in by_entity.values()) >= 2
+    ]
+    if len(shared) < 2:
+        return None
+
+    def grounded_coordinate(point: Any) -> float | None:
+        if getattr(point, "level", None) in LEVEL_RADIUS_FRACTION:
+            return LEVEL_RADIUS_FRACTION[point.level]
+        match = re.search(r"-?\d+(?:\.\d+)?", getattr(point, "value", "") or "")
+        return float(match.group()) if match else None
+
+    for x_axis, y_axis in (
+        (shared[left], shared[right])
+        for left in range(len(shared)) for right in range(left + 1, len(shared))
+    ):
+        raw: list[tuple[str, float, float, str, str]] = []
+        for entity, rows in by_entity.items():
+            if x_axis not in rows or y_axis not in rows:
+                continue
+            x_value = grounded_coordinate(rows[x_axis])
+            y_value = grounded_coordinate(rows[y_axis])
+            if x_value is None or y_value is None:
+                continue
+            raw.append((entity, x_value, y_value, rows[x_axis].value, rows[y_axis].value))
+        if len(raw) < 2:
+            continue
+        x_values = [row[1] for row in raw]
+        y_values = [row[2] for row in raw]
+
+        def scale(value: float, values: list[float]) -> float:
+            low, high = min(values), max(values)
+            return 0.5 if high == low else (value - low) / (high - low)
+
+        cells = {
+            entity: (scale(x, x_values), scale(y, y_values), x_text, y_text)
+            for entity, x, y, x_text, y_text in raw[:entity_limit]
+        }
+        return list(cells), x_axis, y_axis, cells
+    return None
+
+
+def has_decision_matrix(comparison_points: list[Any]) -> bool:
+    return decision_matrix(comparison_points) is not None
 
 
 def _timeline_period(sentence: str, reference_year: int | None = None) -> str | None:
@@ -730,10 +885,10 @@ def timeline_entries(
     Undated prose is left out - a numbered list of undated statements is not
     a timeline, which is all the old registry block produced."""
     entries: list[tuple[str, str]] = []
-    points_by_label: dict[str, list[Any]] = {}
-    for point in metric_points:
-        if is_time_period(point.period):
-            points_by_label.setdefault(point.label, []).append(point)
+    points_by_label = {
+        label: [point for point in points if is_time_period(point.period)]
+        for label, points in group_metric_points_by_label(metric_points).items()
+    }
     series = max(
         (
             points for points in points_by_label.values()

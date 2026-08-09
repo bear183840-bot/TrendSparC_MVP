@@ -14,6 +14,7 @@ from common.content_quality_validator import (
     dated_items,
     dedupe_across_blocks,
     dedupe_structured_across_sections,
+    metric_value_type,
 )
 from common.contracts import (
     ActionImpact,
@@ -105,11 +106,15 @@ _REPORT_SCHEMA = {
                     "value": {"type": "number"},
                     "unit": {"type": "string"},
                     "is_forecast": {"type": "boolean"},
+                    "value_type": {
+                        "type": "string",
+                        "enum": ["actual", "estimate", "forecast", "target", "guidance"],
+                    },
                     "share_of": {"type": ["string", "null"]},
                     "source_sentence": {"type": "string"},
                 },
                 "required": [
-                    "label", "subject", "period", "value", "unit", "is_forecast",
+                    "label", "subject", "period", "value", "unit", "is_forecast", "value_type",
                     "share_of", "source_sentence",
                 ],
             },
@@ -377,6 +382,7 @@ def _metric_points_with_failures(
                 value=float(raw["value"]),
                 unit=(raw.get("unit") or "").strip() or None,
                 is_forecast=_is_stated_forecast(raw),
+                value_type=metric_value_type(raw.get("source_sentence", "")),
                 share_of=(raw.get("share_of") or "").strip() or None,
             )
         )
@@ -1038,6 +1044,7 @@ def _metric_for_writer(point: dict) -> dict:
         "value": point.get("value"),
         "unit": point.get("unit"),
         "is_forecast": bool(point.get("is_forecast")),
+        "value_type": point.get("value_type", "actual"),
         "evidence_synthesis_claim_id": point.get("evidence_synthesis_claim_id"),
     }
 
@@ -1138,6 +1145,10 @@ def generate_report(
             "sector_id": synthesis.sector_id,
             "purpose": {
                 "id": purpose_id,
+                "question_answer_type": (
+                    report_plan.report_purpose.question_answer_type or "status"
+                    if report_plan.report_purpose else "status"
+                ),
                 "secondary_id": (
                     report_plan.report_purpose.secondary_purpose_id if report_plan.report_purpose else None
                 ),

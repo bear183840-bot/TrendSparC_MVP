@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import difflib
 import re
+import unicodedata
 from typing import Any, Literal
 
 from common.contracts import MetricPoint
@@ -69,8 +70,13 @@ _AGE_BRACKET_RE = re.compile(
 )
 _GENDER_WORDS = ("남성", "여성", "남자", "여자", "male", "female")
 _HOUSEHOLD_WORDS = ("1인 가구", "1인가구", "2인 가구", "가구원", "세대주")
+_CUSTOMER_SEGMENT_WORDS = (
+    "이용자", "사용자", "가입자", "고객", "시청자", "헤비 유저", "라이트 유저",
+    "신규 가입", "기존 가입", "학생", "직장인", "소득층", "user segment",
+    "subscriber", "customer segment",
+)
 
-EntityKind = Literal["age", "gender", "household", "entity"]
+EntityKind = Literal["age", "gender", "household", "segment", "entity"]
 
 
 def entity_kind(entity: str) -> EntityKind:
@@ -83,6 +89,8 @@ def entity_kind(entity: str) -> EntityKind:
         return "gender"
     if any(word in text for word in _HOUSEHOLD_WORDS):
         return "household"
+    if any(word in lowered for word in _CUSTOMER_SEGMENT_WORDS):
+        return "segment"
     return "entity"
 
 
@@ -222,6 +230,139 @@ def is_time_period(period: str | None) -> bool:
     a Timeline section listing "B tv+ 앱" as if it were a moment.
     """
     return bool(_TIME_PERIOD_RE.search(period or ""))
+
+
+_COMPARABLE_STATE_PATTERNS = (
+    re.compile(r"^(?:current|현재|현행)$", re.I),
+    re.compile(r"^(?:target|목표)$", re.I),
+    re.compile(r"^(?:before|이전|정책\s*전|도입\s*전)$", re.I),
+    re.compile(r"^(?:after|이후|정책\s*후|도입\s*후)$", re.I),
+    re.compile(r"^(?:previous\s*generation|current\s*generation|이전\s*세대|현\s*세대)$", re.I),
+)
+
+
+def is_comparable_state(period: str | None) -> bool:
+    """Whether ``period`` names one side of an explicitly stated state pair.
+
+    These labels are evidence, not dates, but two of them still describe a
+    meaningful before/after or current/target delta.  Arbitrary categories
+    (companies, age groups, platforms) deliberately do not qualify.
+    """
+    normalized = re.sub(r"\s+", " ", (period or "").strip())
+    return any(pattern.fullmatch(normalized) for pattern in _COMPARABLE_STATE_PATTERNS)
+
+
+def canonical_time_id(period: str | None) -> str:
+    """Canonical display/sort key for an explicitly stated time label."""
+    raw = unicodedata.normalize("NFKC", period or "").strip()
+    year_match = re.search(r"(?:FY\s*)?(20\d{2})|(?:'|\b)(\d{2})(?:년|\b)", raw, re.I)
+    if not year_match:
+        return re.sub(r"\s+", " ", raw)
+    year = year_match.group(1) or f"20{year_match.group(2)}"
+    quarter = re.search(r"(?:Q\s*([1-4])|([1-4])\s*(?:Q|분기))", raw, re.I)
+    if quarter:
+        return f"{year}년 {quarter.group(1) or quarter.group(2)}분기"
+    month = re.search(r"(\d{1,2})\s*월", raw)
+    if month:
+        return f"{year}년 {int(month.group(1))}월"
+    return f"{year}년"
+
+
+_SEMANTIC_NOISE_RE = re.compile(
+    r"\b(?:global|worldwide|expected|estimated|forecast|forecasted|projected|"
+    r"actual|estimate|guidance|target|current)\b|"
+    r"(?:글로벌|세계|전망치?|예상치?|추정치?|실적|가이던스|목표치?|현재)",
+    re.I,
+)
+_MARKET_SIZE_PATTERNS = (
+    re.compile(r"market\s+(?:expected\s+|forecast\s+)?size", re.I),
+    re.compile(r"market\s+revenue", re.I),
+    re.compile(r"시장\s*(?:매출\s*)?(?:규모|가치)", re.I),
+)
+
+
+def semantic_metric_key(label: str | None) -> str:
+    """Conservative, deterministic identity for a metric label.
+
+    It only removes presentation/status words and normalizes a small set of
+    bilingual *measurement phrases*.  Topic-bearing tokens remain, so
+    ``HBM market size`` and ``DRAM market size`` cannot collapse together.
+    This is intentionally not fuzzy string matching: similarity alone is not
+    evidence that two measurements share a definition.
+    """
+    text = unicodedata.normalize("NFKC", label or "").casefold()
+    for pattern in _MARKET_SIZE_PATTERNS:
+        text = pattern.sub(" metric_market_size ", text)
+    text = _SEMANTIC_NOISE_RE.sub(" ", text)
+    # A year belongs on MetricPoint.period. Some extractors repeat it in the
+    # label; removing an explicit 20xx token reconnects the same measurement
+    # without inventing a missing time point.
+    text = re.sub(r"\b20\d{2}\b", " ", text)
+    text = re.sub(r"[^0-9a-z가-힣_]+", " ", text)
+    return " ".join(text.split())
+
+
+def semantic_entity_key(entity: str | None) -> str:
+    """Conservative identity across punctuation and legal-suffix variants."""
+    text = unicodedata.normalize("NFKC", entity or "").casefold()
+    text = re.sub(r"\b(?:incorporated|inc|corporation|corp|company|co|ltd|limited)\b\.?", " ", text)
+    text = re.sub(r"(?:주식회사|㈜)", " ", text)
+    return re.sub(r"[^0-9a-z가-힣]+", "", text)
+
+
+_UNIT_SCALES: dict[str, tuple[str, float]] = {
+    "usd billion": ("USD million", 1000.0),
+    "billion usd": ("USD million", 1000.0),
+    "usd bn": ("USD million", 1000.0),
+    "$b": ("USD million", 1000.0),
+    "usd million": ("USD million", 1.0),
+    "million usd": ("USD million", 1.0),
+    "usd mn": ("USD million", 1.0),
+    "$m": ("USD million", 1.0),
+    "조원": ("억원", 10000.0),
+    "조 원": ("억원", 10000.0),
+    "억원": ("억원", 1.0),
+    "억 원": ("억원", 1.0),
+    "%": ("%", 1.0),
+    "％": ("%", 1.0),
+    "%p": ("%p", 1.0),
+}
+
+
+def comparable_unit(unit: str | None) -> tuple[str, float]:
+    """Canonical unit and deterministic multiplier, never an exchange rate."""
+    normalized = unicodedata.normalize("NFKC", unit or "").casefold().strip()
+    normalized = re.sub(r"\s+", " ", normalized)
+    return _UNIT_SCALES.get(normalized, ((unit or "").strip(), 1.0))
+
+
+def metric_value_type(text: str | None) -> str:
+    """Evidence-stated status of a number, with the most specific marker first."""
+    normalized = (text or "").casefold()
+    if any(marker in normalized for marker in ("목표", "target")):
+        return "target"
+    if any(marker in normalized for marker in ("가이던스", "guidance")):
+        return "guidance"
+    if any(marker in normalized for marker in ("추정", "estimate", "estimated")):
+        return "estimate"
+    if any(marker in normalized for marker in ("전망", "예상", "예측", "forecast", "projected")):
+        return "forecast"
+    return "actual"
+
+
+def _normalized_metric_copy(
+    point: Any, *, label: str, unit: str, scale: float, subject: str | None = None,
+) -> Any:
+    period = canonical_time_id(point.period) if is_time_period(point.period) else point.period
+    updates = {
+        "label": label, "unit": unit, "value": float(point.value) * scale,
+        "period": period,
+        "subject": subject if subject is not None else getattr(point, "subject", None),
+    }
+    copier = getattr(point, "model_copy", None)
+    if callable(copier):
+        return copier(update=updates)
+    return point
 
 
 def has_renderable_content(*value_groups: Any) -> bool:
@@ -414,7 +555,10 @@ def classify_metric_shape(points_for_one_label: list[Any]) -> MetricShape:
     subjects = {point.subject for point in points_for_one_label if getattr(point, "subject", None)}
     if len(subjects) >= 2:
         periods_per_subject = [
-            {point.period for point in points_for_one_label if point.subject == subject}
+            {
+                canonical_time_id(point.period) if is_time_period(point.period) else point.period
+                for point in points_for_one_label if point.subject == subject
+            }
             for subject in subjects
         ]
         if all(
@@ -423,10 +567,15 @@ def classify_metric_shape(points_for_one_label: list[Any]) -> MetricShape:
         ):
             return "line"
         return "comparison"
-    periods = {point.period for point in points_for_one_label}
+    periods = {
+        canonical_time_id(point.period) if is_time_period(point.period) else point.period
+        for point in points_for_one_label
+    }
     if len(periods) <= 1:
         return "kpi"
     if not all(is_time_period(period) for period in periods):
+        if len(periods) == 2 and all(is_comparable_state(period) for period in periods):
+            return "bar"
         return "comparison"
     if len(periods) == 2:
         return "bar"
@@ -434,9 +583,52 @@ def classify_metric_shape(points_for_one_label: list[Any]) -> MetricShape:
 
 
 def group_metric_points_by_label(metric_points: list[Any]) -> dict[str, list[Any]]:
-    grouped: dict[str, list[Any]] = {}
+    semantic_groups: dict[tuple[str, str], list[tuple[Any, str, float]]] = {}
     for point in metric_points:
-        grouped.setdefault(point.label, []).append(point)
+        canonical_unit, scale = comparable_unit(getattr(point, "unit", None))
+        key = (semantic_metric_key(point.label), canonical_unit)
+        semantic_groups.setdefault(key, []).append((point, canonical_unit, scale))
+
+    grouped: dict[str, list[Any]] = {}
+    for rows in semantic_groups.values():
+        display_label = rows[0][0].label
+        subject_labels: dict[str, str] = {}
+        for point, _, _ in rows:
+            subject = getattr(point, "subject", None)
+            if subject:
+                subject_labels.setdefault(semantic_entity_key(subject), subject)
+        normalized = [
+            _normalized_metric_copy(
+                point, label=display_label, unit=unit, scale=scale,
+                subject=(subject_labels.get(semantic_entity_key(point.subject)) if point.subject else None),
+            )
+            for point, unit, scale in rows
+        ]
+        # Preserve the historic public key wherever possible. If the same
+        # display label genuinely occurs with incompatible units, keep both
+        # groups distinct rather than merging them onto one false axis.
+        key = display_label
+        if key in grouped:
+            key = f"{display_label} [{rows[0][1]}]"
+            normalized = [
+                _normalized_metric_copy(
+                    point, label=key, unit=unit, scale=scale,
+                    subject=(subject_labels.get(semantic_entity_key(point.subject)) if point.subject else None),
+                )
+                for point, unit, scale in rows
+            ]
+        deduped: list[Any] = []
+        seen: set[tuple[Any, ...]] = set()
+        for point in normalized:
+            identity = (
+                getattr(point, "subject", None), point.period, float(point.value), point.unit,
+                getattr(point, "value_type", "actual"),
+            )
+            if identity in seen:
+                continue
+            seen.add(identity)
+            deduped.append(point)
+        grouped[key] = deduped
     return grouped
 
 
@@ -451,10 +643,11 @@ def group_metric_points_by_series(metric_points: list[Any]) -> dict[str, list[An
     the key rather than tracked beside it.
     """
     grouped: dict[str, list[Any]] = {}
-    for point in metric_points:
-        subject = getattr(point, "subject", None)
-        key = f"{point.label} · {subject}" if subject else point.label
-        grouped.setdefault(key, []).append(point)
+    for semantic_label, points in group_metric_points_by_label(metric_points).items():
+        for point in points:
+            subject = getattr(point, "subject", None)
+            key = f"{semantic_label} · {subject}" if subject else semantic_label
+            grouped.setdefault(key, []).append(point)
     return grouped
 
 
@@ -497,11 +690,30 @@ def filter_shared_comparison_axis(comparison_points: list[Any]) -> list[Any]:
     """
     if not comparison_points:
         return []
+    comparison_points = normalize_comparison_axes(comparison_points)
     entities_per_criterion: dict[str, set[str]] = {}
     for point in comparison_points:
         entities_per_criterion.setdefault(point.criterion, set()).add(point.entity)
     shared_criteria = {criterion for criterion, entities in entities_per_criterion.items() if len(entities) >= 2}
     return [point for point in comparison_points if point.criterion in shared_criteria]
+
+
+def normalize_comparison_axes(comparison_points: list[Any]) -> list[Any]:
+    """Canonicalize safe label/entity variants while preserving stated values."""
+    criterion_labels: dict[str, str] = {}
+    entity_labels: dict[str, str] = {}
+    for point in comparison_points or []:
+        criterion_labels.setdefault(semantic_metric_key(point.criterion), point.criterion)
+        entity_labels.setdefault(semantic_entity_key(point.entity), point.entity)
+    normalized = []
+    for point in comparison_points or []:
+        updates = {
+            "criterion": criterion_labels[semantic_metric_key(point.criterion)],
+            "entity": entity_labels[semantic_entity_key(point.entity)],
+        }
+        copier = getattr(point, "model_copy", None)
+        normalized.append(copier(update=updates) if callable(copier) else point)
+    return normalized
 
 
 def _similarity(a: str, b: str) -> float:

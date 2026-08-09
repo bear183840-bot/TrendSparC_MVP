@@ -5,7 +5,7 @@ core/block_priority_planner/planner.py for why not)."""
 
 from __future__ import annotations
 
-from common.purpose_slots import PURPOSE_SLOTS
+from common.purpose_slots import PURPOSE_SLOTS, slots_for
 from core.block_priority_planner.planner import (
     _REQUIRED_DATA_HINTS,
     plan_block_priorities,
@@ -127,3 +127,32 @@ def test_target_block_shapes_carry_machine_readable_block_ids_and_contracts():
 
 def test_target_block_shapes_handles_none_plan():
     assert target_block_shapes(None) == []
+
+
+def test_answer_type_plan_carries_narrative_metadata_into_collection():
+    plan = plan_block_priorities("req_recommend", "current_status", "recommend")
+
+    assert [slot.slot_id for slot in plan.slots][:3] == ["target", "candidates", "comparison"]
+    assert all(slot.question_answered and slot.why_here and slot.role for slot in plan.slots)
+
+
+def test_every_question_first_candidate_has_a_data_contract_and_stays_in_budget():
+    variants = (
+        ("current_status", "status"),
+        ("current_status", "compare"),
+        ("current_status", "trend"),
+        ("current_status", "recommend"),
+        ("root_cause", "cause"),
+        ("issue_response", "issue_response"),
+        ("future_business", "strategy"),
+    )
+    for purpose_id, answer_type in variants:
+        candidates = {
+            block_type
+            for slot in slots_for(purpose_id, answer_type)
+            for block_type in slot.candidates
+        }
+        assert candidates <= set(_REQUIRED_DATA_HINTS)
+        assert len(target_block_shapes(
+            plan_block_priorities("req", purpose_id, answer_type)
+        )) <= 5

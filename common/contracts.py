@@ -11,7 +11,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Any, Literal, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 
 class Attachment(BaseModel):
@@ -100,6 +100,13 @@ class ReportPurposeClassification(BaseModel):
     secondary_purpose_id: Optional[
         Literal["current_status", "issue_response", "future_business", "root_cause"]
     ] = None
+    # Purpose is the broad decision context; answer type is the shape of the
+    # answer the sentence explicitly asks for.  Keeping these separate stops
+    # a short-term "추천" question from inheriting the whole future-business
+    # market/opportunity narrative merely because it is prescriptive.
+    question_answer_type: Optional[Literal[
+        "status", "compare", "trend", "cause", "issue_response", "recommend", "strategy"
+    ]] = None
 
 
 class SlotTarget(BaseModel):
@@ -122,6 +129,9 @@ class SlotTarget(BaseModel):
     # (see purpose_slots.Slot.optional) - never fabricated from question text,
     # see common/purpose_slots.py's `optional` docstring for why not.
     included: bool = True
+    role: Optional[Literal["answer", "evidence", "analysis", "decision", "action", "support"]] = None
+    question_answered: str = ""
+    why_here: str = ""
 
 
 class BlockPriorityPlan(BaseModel):
@@ -416,6 +426,11 @@ class MetricPoint(BaseModel):
     # observed history; until now the only signal was whether the *period*
     # string happened to contain "(전망)", which is text formatting, not data.
     is_forecast: bool = False
+    # More precise source-stated status. ``is_forecast`` remains for backward
+    # compatibility and fast rendering; this field prevents an estimate,
+    # target or company guidance from being flattened into one generic future
+    # bucket. No pipeline stage may promote a non-actual value to actual.
+    value_type: Literal["actual", "estimate", "forecast", "target", "guidance"] = "actual"
     # The whole this figure is a share of ("스포츠 시청 이용자 전체"), where
     # the source frames it that way. A donut claims its slices partition one
     # population, and nothing in a plain percentage says whether it does -
@@ -434,6 +449,16 @@ class MetricPoint(BaseModel):
     doc_id: Optional[str] = None
     source_id: Optional[str] = None
     source_url: Optional[str] = None
+
+    @model_validator(mode="after")
+    def keep_projection_flags_consistent(self):
+        # Old fixtures and stored runs only carry ``is_forecast``. Preserve
+        # their meaning while new payloads retain the more precise subtype.
+        if self.is_forecast and self.value_type == "actual":
+            self.value_type = "forecast"
+        elif self.value_type != "actual":
+            self.is_forecast = True
+        return self
 
 
 class ComparisonPoint(BaseModel):
@@ -615,6 +640,20 @@ class SynthesisConclusion(BaseModel):
     confidence: Literal["low", "medium", "high"] = "medium"
 
 
+class AIRecommendedAction(BaseModel):
+    """A model-derived proposal linked only to verified synthesis claims.
+
+    This is deliberately separate from source-stated `recommended_actions`.
+    The UI labels it as AI judgement and exposes the basis; it must never be
+    rendered as an observed fact or as a decision already made by the company.
+    """
+
+    action: str
+    basis: str
+    supporting_claim_ids: list[str] = Field(default_factory=list)
+    confidence: Literal["low", "medium", "high"] = "medium"
+
+
 class CorroboratedPoint(BaseModel):
     """A claim plus the documents/sources that back it, verified in code from
     TrendSynthesis.doc_source_map rather than trusted from the model's own
@@ -649,6 +688,7 @@ class TrendSynthesis(BaseModel):
     comparison_points: list[ComparisonPoint] = Field(default_factory=list)
     factors: list[str] = Field(default_factory=list)
     recommended_actions: list[str] = Field(default_factory=list)
+    ai_recommended_actions: list[AIRecommendedAction] = Field(default_factory=list)
     monitoring_indicators: list[str] = Field(default_factory=list)
     evidence: list[str] = Field(default_factory=list)
     confidence_labels: list[str] = Field(default_factory=list)
@@ -862,6 +902,9 @@ class SlotDeliveryTrace(BaseModel):
     selected_block_types: list[str] = Field(default_factory=list)
     last_resort: bool = False
     candidates: list[BlockCandidateDeliveryTrace] = Field(default_factory=list)
+    role: Optional[str] = None
+    question_answered: str = ""
+    why_here: str = ""
 
 
 class BlockDeliveryTrace(BaseModel):

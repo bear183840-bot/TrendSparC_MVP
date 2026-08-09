@@ -18,6 +18,7 @@ from common.content_quality_validator import (
     COMPARISON_COMPLETENESS_INSTRUCTION,
     SWOT_COMPLETENESS_INSTRUCTION,
     TABLE_COMPLETENESS_INSTRUCTION,
+    metric_value_type,
     strip_particle,
 )
 from common.contracts import DocumentAnalysis, SourceDocument
@@ -138,6 +139,11 @@ _ANALYSIS_SCHEMA = {
                         "type": "boolean",
                         "description": "원문이 전망·예상·목표·추정이라고 명시한 수치만 true.",
                     },
+                    "value_type": {
+                        "type": "string",
+                        "enum": ["actual", "estimate", "forecast", "target", "guidance"],
+                        "description": "원문의 상태. 전망/추정/목표/가이던스를 실제값으로 바꾸지 말 것.",
+                    },
                     "share_of": {
                         "type": ["string", "null"],
                         "maxLength": 120,
@@ -150,7 +156,7 @@ _ANALYSIS_SCHEMA = {
                     },
                 },
                 "required": [
-                    "label", "subject", "period", "value", "unit", "is_forecast",
+                    "label", "subject", "period", "value", "unit", "is_forecast", "value_type",
                     "share_of", "evidence_claim_id",
                 ],
                 "additionalProperties": False,
@@ -925,18 +931,15 @@ def _verified_metric_points(
         grounded_share_of = point.get("share_of") or None
         if grounded_share_of and _normalized_text(str(grounded_share_of)) not in normalized_local:
             grounded_share_of = None
-        forecast_markers = (
-            "전망", "예상", "목표", "추정", "계획", "가이던스", "예측",
-            "forecast", "estimate",
-        )
+        grounded_value_type = metric_value_type(quote)
         verified.append({
             **point,
             "period": grounded_period,
             "unit": grounded_unit,
             "subject": grounded_subject,
             "share_of": grounded_share_of,
-            "is_forecast": bool(point.get("is_forecast"))
-            and any(marker in normalized_quote.casefold() for marker in forecast_markers),
+            "is_forecast": grounded_value_type != "actual",
+            "value_type": grounded_value_type,
             "evidence_quote": quote,
         })
     return verified
@@ -1146,6 +1149,7 @@ def _recovered_metric_points(grounded_claims: list[dict]) -> list[dict]:
                     marker in quote.casefold()
                     for marker in ("전망", "예상", "목표", "추정", "forecast", "estimate")
                 ),
+                "value_type": metric_value_type(quote),
                 "share_of": None,
                 "evidence_claim_id": claim["claim_id"],
                 "evidence_quote": quote,
@@ -1316,9 +1320,16 @@ def _analyze_document(
                 "질문 일부에 직접 관련된 수치가 있으면 metric claim과 metric_points를 비우지 마라. "
                 "한 문장·표에서 같은 지표로 여러 항목을 비교하면 공통 지표명은 같은 label, "
                 "각 항목명은 subject로 분리해 모든 값을 보존하라. "
+                "같은 metric이 문서 안에서 표현만 달라져도 의미와 단위가 실제로 같다면 label을 "
+                "하나의 간결한 공통 metric명으로 정규화하되, 서로 다른 정의를 유사한 단어만으로 합치지 마라. "
+                "각 metric의 value_type은 actual/estimate/forecast/target/guidance 중 원문 표현에 맞게 "
+                "보존하고 미래·목표 수치를 actual로 표시하지 마라. "
                 "share_of는 원문이 하나의 전체와 그 구성요소를 명시한 경우에만 그 전체 이름으로 채워라. "
                 "여러 기업·국가·기술을 공통 기준으로 비교한 자료는 entity와 criterion을 유지해 "
                 "항목별 comparison_points로 분리하라. "
+                "원문이 '때문에', '로 인해', 'driving', 'led to'처럼 인과를 직접 말하면 원인 claim과 "
+                "결과 claim을 분리하고 결과의 parent_claim_id를 원인 claim_id로 연결하라. 두 현상이 "
+                "같이 증가했다는 사실만으로 parent_claim_id를 만들지 마라. "
                 f"{SWOT_COMPLETENESS_INSTRUCTION} "
                 f"{COMPARISON_COMPLETENESS_INSTRUCTION} "
                 f"{TABLE_COMPLETENESS_INSTRUCTION} "

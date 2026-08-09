@@ -337,6 +337,7 @@ def _run_pipeline_stages(
         _maybe_force_fail("block_priority_planner")
         result.block_priority_plan = plan_block_priorities(
             request.request_id, result.report_purpose.purpose_id,
+            result.report_purpose.question_answer_type,
         )
         result.trace.append(StageTrace(stage="block_priority_planner", status=StageStatus.OK))
     except PipelineStageError as exc:

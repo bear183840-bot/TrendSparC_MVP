@@ -40,6 +40,7 @@ from common.contracts import (
     Contradiction,
     ContradictingClaim,
     CorroboratedPoint,
+    AIRecommendedAction,
     SynthesisClaim,
     SynthesisConclusion,
     TrendSynthesis,
@@ -132,6 +133,10 @@ of 2 or more IDs. Code adds every ungrouped verified claim as a singleton afterw
 - contradictions: only genuine factual conflicts about the same scope/period/metric.
 Return a short topic and the conflicting synthesis_claim_id values. Different emphasis
 or scope is not a contradiction.
+- inferred_actions: at most 4 practical proposals only when the verified claims make
+the proposal useful for answering a prescriptive question. Each action must include a
+short basis and every supporting claim ID. These are AI judgements, not source-stated
+facts. Return an empty list when the evidence does not support a responsible proposal.
 
 Keep wording compact but do not merge distinct facts or drop a distinct claim from
 claim_groups. IDs are provenance, never presentation copy."""
@@ -187,8 +192,21 @@ _SCHEMA = {
                 "additionalProperties": False,
             },
         },
+        "inferred_actions": {
+            "type": "array", "maxItems": 4,
+            "items": {
+                "type": "object", "additionalProperties": False,
+                "properties": {
+                    "action": {"type": "string", "maxLength": 220},
+                    "basis": {"type": "string", "maxLength": 260},
+                    "supporting_claim_ids": {"type": "array", "items": {"type": "string"}},
+                    "confidence": {"type": "string", "enum": ["low", "medium", "high"]},
+                },
+                "required": ["action", "basis", "supporting_claim_ids", "confidence"],
+            },
+        },
     },
-    "required": ["highlights", "synthesis_text", "conclusions", "claim_groups", "contradictions"],
+    "required": ["highlights", "synthesis_text", "conclusions", "claim_groups", "contradictions", "inferred_actions"],
     "additionalProperties": False,
 }
 
@@ -357,7 +375,29 @@ def _expand_claim_aliases(data: dict, original_id_by_alias: dict[str, str]) -> d
         group["claim_ids"] = expand(group.get("claim_ids") or [])
     for contradiction in data.get("contradictions") or []:
         contradiction["claim_ids"] = expand(contradiction.get("claim_ids") or [])
+    for action in data.get("inferred_actions") or []:
+        action["supporting_claim_ids"] = expand(action.get("supporting_claim_ids") or [])
     return data
+
+
+def _validated_inferred_actions(
+    raw_actions: list[dict], rule_based_result: TrendSynthesis,
+) -> list[AIRecommendedAction]:
+    known = {claim.synthesis_claim_id for claim in rule_based_result.grounded_claims}
+    actions: list[AIRecommendedAction] = []
+    for item in raw_actions:
+        action = (item.get("action") or "").strip()
+        basis = (item.get("basis") or "").strip()
+        support = list(dict.fromkeys(item.get("supporting_claim_ids") or []))
+        if not action or not basis or not support or any(claim_id not in known for claim_id in support):
+            continue
+        actions.append(AIRecommendedAction(
+            action=action,
+            basis=basis,
+            supporting_claim_ids=support,
+            confidence=item.get("confidence") or "medium",
+        ))
+    return actions
 
 
 def refine_synthesis_ai(rule_based_result: TrendSynthesis, question: str) -> TrendSynthesis:
@@ -446,6 +486,9 @@ def refine_synthesis_ai(rule_based_result: TrendSynthesis, question: str) -> Tre
         conclusions = _validated_conclusions(
             data.get("conclusions") or [], rule_based_result
         )
+        inferred_actions = _validated_inferred_actions(
+            data.get("inferred_actions") or [], rule_based_result
+        )
         emit_ai_usage(
             stage=_STAGE,
             model=_model(),
@@ -469,6 +512,7 @@ def refine_synthesis_ai(rule_based_result: TrendSynthesis, question: str) -> Tre
                 "uncorroborated_points": uncorroborated_points,
                 "contradictions": contradictions,
                 "conclusions": conclusions or rule_based_result.conclusions,
+                "ai_recommended_actions": inferred_actions,
             }
         )
     except Exception as exc:  # noqa: BLE001 - AI refinement is best-effort, never fatal

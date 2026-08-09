@@ -709,6 +709,33 @@ def dashboard_css(dark: bool, accent_theme: str = "orange") -> str:
     [data-testid="stExpander"] summary {{ color:var(--ts-accent); font-weight:700; }}
     .ts-landscape-head {{ margin:.2rem 0 .1rem; font-size:.9rem; font-weight:700;
       color:var(--ts-ink); }}
+    .ts-metric-snapshot {{ display:grid; gap:.35rem; }}
+    .ts-metric-snapshot > b {{ font-size:.76rem; color:var(--ts-muted); }}
+    .ts-metric-snapshot-row {{ display:flex; align-items:baseline; justify-content:space-between;
+      gap:.8rem; padding:.48rem .15rem; border-top:1px solid var(--ts-border); }}
+    .ts-metric-snapshot-row span {{ font-size:.78rem; color:var(--ts-muted); }}
+    .ts-metric-snapshot-row b {{ font-size:.94rem; color:var(--ts-ink);
+      font-variant-numeric:tabular-nums; }}
+    .ts-decision-matrix {{ display:grid; grid-template-columns:18px minmax(0,1fr);
+      grid-template-areas:"y plane" ". x" ". legend"; gap:.35rem .5rem; }}
+    .ts-decision-y {{ grid-area:y; writing-mode:vertical-rl; transform:rotate(180deg);
+      text-align:center; font-size:.72rem; font-weight:750; color:var(--ts-muted); }}
+    .ts-decision-plane {{ grid-area:plane; position:relative; height:180px;
+      border-left:1px solid var(--ts-line); border-bottom:1px solid var(--ts-line);
+      background:linear-gradient(90deg,transparent 49.7%,var(--ts-soft) 50%,transparent 50.3%),
+                 linear-gradient(0deg,transparent 49.7%,var(--ts-soft) 50%,transparent 50.3%); }}
+    .ts-decision-x {{ grid-area:x; text-align:center; font-size:.72rem; font-weight:750;
+      color:var(--ts-muted); }}
+    .ts-decision-dot {{ position:absolute; transform:translate(-50%,50%); display:flex;
+      align-items:center; gap:.25rem; max-width:110px; }}
+    .ts-decision-dot i {{ flex:0 0 auto; width:9px; height:9px; border-radius:50%;
+      background:var(--ts-accent); box-shadow:0 0 0 3px color-mix(in srgb,var(--ts-accent) 18%,transparent); }}
+    .ts-decision-dot span {{ overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+      font-size:.7rem; font-weight:750; color:var(--ts-ink); }}
+    .ts-decision-legend {{ grid-area:legend; display:grid; grid-template-columns:repeat(2,minmax(0,1fr));
+      gap:.25rem .75rem; margin:.35rem 0 0; padding:0; list-style:none; }}
+    .ts-decision-legend li {{ min-width:0; font-size:.68rem; color:var(--ts-muted); }}
+    .ts-decision-legend b {{ display:block; color:var(--ts-ink); }}
     .ts-status-bar {{ display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr));
       gap:1.1rem; margin-top:.65rem; padding:1rem 1.15rem; border:1px solid var(--ts-border);
       border-radius:10px; background:var(--ts-panel); }}

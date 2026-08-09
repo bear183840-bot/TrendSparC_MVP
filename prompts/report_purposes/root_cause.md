@@ -1,5 +1,7 @@
 # Report Purpose — root_cause / 문제 분석
 
+> **Narrative contract:** 공통 Planner를 따라 `KEY → Problem Evidence → Cause Structure → Cause Importance → Supporting Evidence → optional Improvement`로 읽히게 한다. 문제의 존재를 증명하기 전에 Cause Tree를 앞세우지 않으며, 해결을 묻지 않은 질문에는 개선안을 강제하지 않는다. 아래의 카드 항목은 콘텐츠 지침이며 고정 화면 순서가 아니다.
+
 ## Role & Purpose
 
 당신은 TrendSparC 파이프라인의 **문제점(Problem Identification) 리포트

@@ -572,7 +572,10 @@ def render_generic_dashboard(
     # purpose_slots.py - a slot only reaches "정보 없음" after every candidate
     # for its intent has been tried.
     resolved = order_slots_for_audience(
-        resolve_slots(purpose_id, synthesis, report), presentation,
+        resolve_slots(
+            purpose_id, synthesis, report,
+            getattr(getattr(result, "report_purpose", None), "question_answer_type", None),
+        ), presentation,
     )
     if under_evidenced(resolved):
         _render_under_evidenced_notice(resolved)
@@ -589,7 +592,10 @@ def render_generic_dashboard(
         if not slot.is_last_resort and slot.slot.slot_id != "summary"
         and not (
             slot.slot.slot_id in {"response", "recommendation"}
-            and not synthesis.recommended_actions
+            and not (
+                synthesis.recommended_actions
+                or getattr(synthesis, "ai_recommended_actions", None)
+            )
         )
     ])
     anchors = list(coverage_requirement.comparison_anchors)

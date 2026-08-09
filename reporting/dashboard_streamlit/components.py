@@ -61,6 +61,7 @@ from common.block_shapes import (  # noqa: F401
     has_competitor_panels,
     has_grouped_bars,
     has_landscape,
+    landscape_parts,
     has_recurring_terms,
     has_share_split,
     level_matrix,
@@ -73,6 +74,7 @@ from common.block_shapes import (  # noqa: F401
     importance_ranked,
     metric_axis_labels,
     metric_comparison_groups,
+    decision_matrix,
     metric_insight,
     radar_axes,
     timeline_entries,
@@ -724,7 +726,14 @@ def _metric_chart_svg(points: list[Any], title: str) -> str:
     )
     unit_note = f'<span class="ts-chart-unit">단위: {escape(unit)}</span>' if unit else ""
     if any(getattr(point, "is_forecast", False) for point in points):
-        legend += '<span class="ts-chart-key ts-chart-key-forecast"><i></i>전망(출처 제시)</span>'
+        projected_types = list(dict.fromkeys(
+            _VALUE_TYPE_LABELS.get(getattr(point, "value_type", "forecast"), "전망")
+            for point in points if getattr(point, "is_forecast", False)
+        ))
+        legend += (
+            '<span class="ts-chart-key ts-chart-key-forecast"><i></i>'
+            f'{escape("·".join(projected_types))}(출처 제시)</span>'
+        )
     return (
         f'<div class="ts-chart"><div class="ts-chart-head"><b>{escape(title)}</b>{unit_note}</div>'
         f'<div class="ts-chart-legend">{legend}</div>'
@@ -866,6 +875,7 @@ def action_impact_lookup(report: Any) -> dict[str, Any]:
 
 def render_action_list(
     rows: list[tuple[str, str, str | None]], owner: str | None = None,
+    ai_judgements: dict[str, str] | None = None,
 ) -> None:
     """`rows` = (title, expected_impact, evidence_url) already resolved by the caller.
 
@@ -891,6 +901,7 @@ def render_action_list(
         if (size := getattr(impact, "impact_value", None)) is not None
     ]
     max_impact = max(stated_sizes) if stated_sizes else 0
+    ai_judgements = ai_judgements or {}
     body_parts = []
     for index, (title, expected_impact, url) in enumerate(rows, 1):
         link = (
@@ -912,14 +923,17 @@ def render_action_list(
                 f'<i style="width:{abs(impact_value) / max_impact * 100:.1f}%"></i>'
                 f'<b>{escape(_format_number(impact_value))}{escape(unit)}</b></span>'
             )
+        judgement_basis = ai_judgements.get(title)
         impact_cell = (
+            f'<span class="impact"><b>판단 근거</b> {escape(judgement_basis)}</span>'
+            if judgement_basis else
             f'<span class="impact" title="{escape(impact_text)}">{escape(impact_text)}{bar}</span>'
-            if impact_text
-            else '<span class="impact ts-empty">연결된 기대효과 없음</span>'
+            if impact_text else '<span class="impact ts-empty">연결된 기대효과 없음</span>'
         )
+        badge = '<span class="ts-ai-badge">AI 판단</span>' if judgement_basis else ""
         body_parts.append(
             f'<div class="ts-action-row"><span class="num">{index:02d}</span>'
-            f'<span class="action">{escape(title)}</span>'
+            f'<span class="action">{escape(title)}{badge}</span>'
             f"{impact_cell}{link}</div>"
         )
     heading = f"{owner} 실행 제안" if owner else "실행 제안"
@@ -1390,15 +1404,52 @@ def render_landscape(
     is derived from the other, and if either stops qualifying the card falls
     back to whichever half still does.
     """
-    if not has_landscape(metric_points):
+    parts = landscape_parts(metric_points)
+    if parts is None:
         return
+    core_kind, core_points, complement_kind, complement_points = parts
     st.markdown(f'<div class="ts-landscape-head"><b>{escape(title)}</b></div>',
                 unsafe_allow_html=True)
     trend, split = st.columns([1.35, 1])
     with trend:
-        render_metric_chart(metric_points, title="추세", grounded_claims=grounded_claims)
+        if core_kind == "trend":
+            render_metric_chart(core_points, title="추세", grounded_claims=grounded_claims)
+        else:
+            render_kpi_row(core_points, limit=4)
     with split:
-        render_share_split(metric_points)
+        if complement_kind == "share":
+            render_share_split(complement_points)
+        elif complement_kind == "comparison":
+            render_metric_bar(complement_points, grounded_claims, show_insight=False)
+        else:
+            render_kpi_row(complement_points, limit=3)
+
+
+def render_decision_matrix(comparison_points: list[Any]) -> None:
+    """Two-axis placement using only stated numeric values or stated levels."""
+    matrix = decision_matrix(comparison_points)
+    if matrix is None:
+        return
+    entities, x_axis, y_axis, cells = matrix
+    dots = "".join(
+        f'<div class="ts-decision-dot" style="left:{8 + x * 84:.1f}%;bottom:{8 + y * 78:.1f}%" '
+        f'title="{escape(entity)} · {escape(x_axis)} {escape(x_text)} · '
+        f'{escape(y_axis)} {escape(y_text)}"><i></i><span>{escape(entity)}</span></div>'
+        for entity, (x, y, x_text, y_text) in cells.items()
+    )
+    legend = "".join(
+        f'<li><b>{escape(entity)}</b><span>{escape(x_axis)} {escape(cells[entity][2])} · '
+        f'{escape(y_axis)} {escape(cells[entity][3])}</span></li>'
+        for entity in entities
+    )
+    st.markdown(
+        '<div class="ts-decision-matrix">'
+        f'<div class="ts-decision-y">{escape(y_axis)}</div>'
+        f'<div class="ts-decision-plane">{dots}</div>'
+        f'<div class="ts-decision-x">{escape(x_axis)}</div>'
+        f'<ul class="ts-decision-legend">{legend}</ul></div>',
+        unsafe_allow_html=True,
+    )
 
 
 def render_factor_list(items: list[tuple[str, str | None]]) -> None:
@@ -1606,6 +1657,9 @@ def _sparkline_svg(points: list[Any]) -> str:
 # so a run that extracted thirty figures doesn't turn the report into a wall
 # of numbers - it is not a target to pad up to.
 _KPI_MAX_CARDS = 6
+_VALUE_TYPE_LABELS = {
+    "estimate": "추정", "forecast": "전망", "target": "목표", "guidance": "가이던스",
+}
 
 
 def render_kpi_row(
@@ -1661,7 +1715,11 @@ def render_kpi_row(
         # as fact.
         observed = [point for point in points if not getattr(point, "is_forecast", False)]
         latest = (observed or points)[-1]
-        forecast_tag = '<span class="ts-kpi-forecast">전망</span>' if getattr(latest, "is_forecast", False) else ""
+        value_type = getattr(latest, "value_type", "forecast" if getattr(latest, "is_forecast", False) else "actual")
+        type_label = _VALUE_TYPE_LABELS.get(value_type)
+        forecast_tag = (
+            f'<span class="ts-kpi-forecast">{escape(type_label)}</span>' if type_label else ""
+        )
         value_text = f"{_format_number(latest.value)}{latest.unit}"
         if is_chronological and len(observed) >= 2:
             delta = latest.value - observed[0].value
@@ -1843,6 +1901,18 @@ def render_metric_comparison(
     ordered = sorted(points, key=lambda point: point.value, reverse=True)
     if limit is not None:
         ordered = ordered[:limit]
+    units = {(point.unit or "").strip() for point in ordered}
+    if len(units) > 1:
+        rows = "".join(
+            f'<div class="ts-metric-snapshot-row"><span>{escape(point.label)}</span>'
+            f'<b>{escape(_format_number(point.value))}{escape(point.unit or "")}</b></div>'
+            for point in ordered
+        )
+        st.markdown(
+            f'<div class="ts-metric-snapshot"><b>{escape(period)}</b>{rows}</div>',
+            unsafe_allow_html=True,
+        )
+        return
     unit = ordered[0].unit or ""
     largest = max(abs(point.value) for point in ordered) or 1
     rows = "".join(
@@ -1895,10 +1965,10 @@ def render_timeline(
     # several dates; if none exists, show dated evidence events only. Mixing
     # one-off KPIs into an event rail is what produced a sequence of survey
     # size -> viewing hours -> usage rate with no common meaning.
-    dated_by_label: dict[str, list[Any]] = {}
-    for point in metric_points:
-        if is_time_period(point.period):
-            dated_by_label.setdefault(point.label, []).append(point)
+    dated_by_label = {
+        label: [point for point in points if is_time_period(point.period)]
+        for label, points in group_metric_points_by_label(metric_points).items()
+    }
     series = max(
         (points for points in dated_by_label.values() if len({p.period for p in points}) >= 2),
         key=lambda points: len({p.period for p in points}),

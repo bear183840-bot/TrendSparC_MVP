@@ -113,3 +113,37 @@ def test_report_planner_unions_in_secondary_purpose_sections():
     plan = plan_report(synthesis, "_default", purpose)
 
     assert "opportunity" in plan.sections or "strategic_recommendation" in plan.sections
+
+
+def test_recommendation_is_an_answer_type_not_future_business_by_itself():
+    result = classify_report_purpose(
+        "req_recommend",
+        _entities("future_business", keywords=["광고 매체", "모델", "추천"]),
+        question="20대에게 적합한 광고 매체와 모델을 추천해줘",
+    )
+
+    assert result.purpose_id == "current_status"
+    assert result.question_answer_type == "recommend"
+
+
+def test_strong_future_horizon_keeps_strategy_even_when_it_asks_for_a_choice():
+    result = classify_report_purpose(
+        "req_strategy",
+        _entities("future_business"),
+        question="향후 AI 메모리에서 어떤 신사업에 투자해야 하나?",
+    )
+
+    assert result.purpose_id == "future_business"
+    assert result.question_answer_type == "strategy"
+
+
+def test_answer_type_refines_status_compare_and_trend_questions():
+    compare = classify_report_purpose(
+        "req_compare", _entities(), question="삼성과 하이닉스 HBM4를 비교해줘"
+    )
+    trend = classify_report_purpose(
+        "req_trend", _entities(), question="지난 5년간 HBM 시장 추이를 보여줘"
+    )
+
+    assert compare.question_answer_type == "compare"
+    assert trend.question_answer_type == "trend"

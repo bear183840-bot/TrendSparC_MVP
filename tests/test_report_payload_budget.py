@@ -86,7 +86,7 @@ def test_metrics_keep_chart_axes_but_do_not_repeat_evidence_and_urls():
 
     assert set(metric) == {
         "metric_id", "label", "subject", "period", "value", "unit",
-        "is_forecast", "evidence_synthesis_claim_id",
+        "is_forecast", "value_type", "evidence_synthesis_claim_id",
     }
     assert metric["label"] == "플랫폼 이용률"
     assert metric["subject"] == "플랫폼 0"
