@@ -1,24 +1,189 @@
-"""Solar Pro 3 — Coverage/Gap Check, doc1 §6, plus doc2 §7/§8's additive
-extensions (evidence_depth split feeds evidence_depth in contracts.py;
-semantic/structural split is on CoverageDecision directly).
+"""Solar Pro 3 — Coverage/Gap Check (prompt B) and Evidence Verification
+(prompt E), doc1 §6/§10/§12 plus doc2 §7/§8's additive extensions.
 
-Also owns `extract_key_facts` — the "Solar Evidence/Gap Check" step doc1
-§10/§12 runs after an HTML/PDF full-text inspection, turning raw original-
-source text into the same structured KeyFact shape web_search.py produces,
-so router.py can merge summary-level and original-source-level evidence into
-one uniform WebSearchResult list.
+Both prompts now return richer, sometimes loosely-typed JSON than a strict
+schema would (they run through _solar.call_json's `{"type": "json_object"}`
+mode, not OpenAI Structured Outputs, so nothing guarantees an enum field
+actually matches one of its allowed values). Every parser below defensively
+clamps enum-like fields to a known value (never lets an unrecognized string
+reach a Pydantic Literal field, which would raise and crash the router) and
+never invents a URL/id that wasn't in the input it was given.
 """
 
 from __future__ import annotations
 
+import sys
+from typing import Any
+
 from sources.collectors.source_router import _prompts, _solar
 from sources.collectors.source_router.contracts import (
+    ConfirmedFact,
+    Contradiction,
+    CoverageAspect,
     CoverageDecision,
+    CoveredItem,
+    EvidenceVerification,
     KeyFact,
+    NextQuery,
     SearchPlan,
+    SourceAssessment,
     SourceToInspect,
+    SummaryVerification,
     WebSearchResult,
 )
+
+_COVERAGE_STATUSES: set[str] = {"covered", "partially_covered", "missing", "uncertain"}
+_RELEVANCE_LEVELS: set[str] = {"high", "medium", "low"}
+_EVIDENCE_QUALITY_LEVELS: set[str] = {"high", "medium", "low", "unclear"}
+_SUMMARY_VERIFICATION_STATUSES: set[str] = {
+    "accurate",
+    "partially_accurate",
+    "misleading",
+    "unsupported",
+    "unavailable",
+}
+_EVIDENCE_STRENGTHS: set[str] = {"direct", "indirect", "contextual", "insufficient"}
+
+
+def _clamp(value: Any, allowed: set[str], default: str) -> str:
+    text = str(value or "").strip()
+    return text if text in allowed else default
+
+
+def _clamp_optional(value: Any, allowed: set[str]) -> str | None:
+    text = str(value or "").strip()
+    return text if text in allowed else None
+
+
+def _safe_int(value: Any, default: int) -> int:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _str_list(raw: Any) -> list[str]:
+    return [str(value).strip() for value in raw or [] if str(value).strip()]
+
+
+def _parse_next_queries(raw: Any) -> list[NextQuery]:
+    """Accepts either prompt B/E's object shape
+    ({"query","purpose","priority"}) or a bare string, so a hand-built
+    fallback/test fixture and either prompt's real output both work."""
+    parsed: list[NextQuery] = []
+    for item in raw or []:
+        if isinstance(item, dict):
+            query = str(item.get("query", "")).strip()
+            if not query:
+                continue
+            parsed.append(
+                NextQuery(
+                    query=query,
+                    purpose=str(item.get("purpose", "")).strip(),
+                    priority=_safe_int(item.get("priority"), 1),
+                )
+            )
+        else:
+            query = str(item).strip()
+            if query:
+                parsed.append(NextQuery(query=query))
+    return parsed
+
+
+def _grounded_urls(cited: list[str], known_urls: set[str]) -> list[str]:
+    return [url for url in cited if url in known_urls]
+
+
+def _parse_coverage_aspects(raw: Any, known_urls: set[str]) -> list[CoverageAspect]:
+    """Grounds "covered"/"partially_covered" verdicts against known_urls —
+    same anti-fabrication pattern as sources_to_inspect's URL filter, added
+    2026-08-09 after a live run produced a "covered" aspect whose reason
+    cited a claim absent from every result it was given. A status without a
+    real citation surviving the filter is downgraded to "uncertain" rather
+    than trusted at face value."""
+    aspects: list[CoverageAspect] = []
+    for item in raw or []:
+        if not isinstance(item, dict):
+            continue
+        aspect = str(item.get("aspect", "")).strip()
+        if not aspect:
+            continue
+        status = _clamp(item.get("status"), _COVERAGE_STATUSES, "uncertain")
+        grounded = _grounded_urls(_str_list(item.get("source_urls")), known_urls)
+        if status in ("covered", "partially_covered") and not grounded:
+            print(
+                f"[source_router.coverage] UNGROUNDED CLAIM WARNING: aspect {aspect!r} was reported "
+                f"status={status!r} but cited no source_urls actually present in this round's evidence "
+                "pool - downgrading to 'uncertain'.",
+                file=sys.stderr,
+            )
+            status = "uncertain"
+        aspects.append(
+            CoverageAspect(
+                aspect=aspect,
+                status=status,  # type: ignore[arg-type]
+                reason=str(item.get("reason", "")).strip(),
+                source_urls=grounded,
+            )
+        )
+    return aspects
+
+
+def _parse_covered_items(raw: Any, known_urls: set[str]) -> list[CoveredItem]:
+    """Same grounding as _parse_coverage_aspects, for the flat
+    covered_information list — a claim with no real source_urls is dropped
+    entirely rather than kept as an unverified string (there's no status to
+    downgrade to here, unlike CoverageAspect)."""
+    items: list[CoveredItem] = []
+    for entry in raw or []:
+        if isinstance(entry, dict):
+            text = str(entry.get("text", "")).strip()
+            cited = _str_list(entry.get("source_urls"))
+        else:
+            # Bare-string shape (older prompt revision, or the model ignored
+            # the source_urls requirement) - no citation at all, so it can't
+            # be grounded; dropped rather than trusted silently.
+            text = str(entry).strip()
+            cited = []
+        if not text:
+            continue
+        grounded = _grounded_urls(cited, known_urls)
+        if not grounded:
+            print(
+                f"[source_router.coverage] UNGROUNDED CLAIM WARNING: dropping covered_information "
+                f"claim with no real source_urls in this round's evidence pool: {text[:200]!r}",
+                file=sys.stderr,
+            )
+            continue
+        items.append(CoveredItem(text=text, source_urls=grounded))
+    return items
+
+
+def _parse_contradictions(raw: Any) -> list[Contradiction]:
+    parsed: list[Contradiction] = []
+    for item in raw or []:
+        if not isinstance(item, dict):
+            continue
+        issue = str(item.get("issue", "")).strip()
+        if not issue:
+            continue
+        parsed.append(
+            Contradiction(
+                issue=issue,
+                sources=_str_list(item.get("sources")),
+                conflicts_with=str(item.get("conflicts_with", "")).strip() or None,
+                possible_explanation=str(item.get("possible_explanation", "")).strip() or None,
+                needs_resolution=bool(item.get("needs_resolution", True)),
+            )
+        )
+    return parsed
+
+
+# ---------------------------------------------------------------------------
+# Coverage / Gap Check (prompt B)
+# ---------------------------------------------------------------------------
+
+_COVERAGE_SYSTEM_PROMPT_NAME = "coverage"
 
 
 def _fallback_decision(results: list[WebSearchResult], min_results: int) -> CoverageDecision:
@@ -43,6 +208,7 @@ def check_coverage(
     *,
     min_results_for_fallback_sufficiency: int = 2,
     model_override: str | None = None,
+    timeout_seconds: int = 30,
 ) -> CoverageDecision:
     payload = {
         "question": question,
@@ -50,58 +216,130 @@ def check_coverage(
         "results": [result.model_dump() for result in results],
     }
     data = _solar.call_json(
-        _prompts.load("coverage"), payload, caller="coverage", model_override=model_override
+        _prompts.load(_COVERAGE_SYSTEM_PROMPT_NAME),
+        payload,
+        caller="coverage",
+        model_override=model_override,
+        timeout_seconds=timeout_seconds,
     )
     if not data:
         return _fallback_decision(results, min_results_for_fallback_sufficiency)
 
     known_urls = {result.url for result in results}
+
+    coverage_aspects = _parse_coverage_aspects(data.get("coverage"), known_urls)
+
+    # `covered`/`missing` predate this prompt revision; `covered_information`/
+    # `missing_information` is what the current prompt actually names them —
+    # accept either so an older fixture or a future prompt edit both work.
+    covered = _parse_covered_items(data.get("covered_information") or data.get("covered"), known_urls)
+    missing = _str_list(data.get("missing_information") or data.get("missing"))
+
     sources_to_inspect = [
         SourceToInspect(
-            url=str(item.get("url", "")).strip(), reason=str(item.get("reason", "")).strip()
+            url=str(item.get("url", "")).strip(),
+            reason=str(item.get("reason", "")).strip(),
+            target_information=_str_list(item.get("target_information")),
         )
         for item in data.get("sources_to_inspect", []) or []
         if isinstance(item, dict) and str(item.get("url", "")).strip() in known_urls
     ]
+
     return CoverageDecision(
         sufficient=bool(data.get("sufficient", False)),
-        covered=[str(value) for value in data.get("covered", []) if str(value).strip()],
-        missing=[str(value) for value in data.get("missing", []) if str(value).strip()],
+        coverage=coverage_aspects,
+        covered=covered,
+        missing=missing,
+        contradictions=_parse_contradictions(data.get("contradictions")),
         needs_full_text=bool(data.get("needs_full_text", False)) and bool(sources_to_inspect),
         sources_to_inspect=sources_to_inspect,
-        next_queries=[str(value) for value in data.get("next_queries", []) if str(value).strip()],
+        next_queries=_parse_next_queries(data.get("next_queries")),
         semantic_sufficient=data.get("semantic_sufficient"),
         structural_sufficient=data.get("structural_sufficient"),
         reason=str(data.get("reason", "")).strip(),
     )
 
 
-def extract_key_facts(
-    question: str, text: str, *, max_chars: int = 6_000, model_override: str | None = None
-) -> list[KeyFact]:
-    """Turn full original-source text into structured facts. Empty list on
-    missing key/failure — the caller keeps the raw-text summary either way,
-    this only adds structure when it's available."""
+# ---------------------------------------------------------------------------
+# Evidence Verification (prompt E) — runs on one fully-scraped/parsed source
+# ---------------------------------------------------------------------------
+
+
+def verify_evidence(
+    question: str,
+    text: str,
+    *,
+    url: str = "",
+    max_chars: int = 6_000,
+    model_override: str | None = None,
+    timeout_seconds: int = 30,
+) -> EvidenceVerification:
+    """All-empty, sufficient=False EvidenceVerification on missing key or
+    call failure — the caller (router.py) keeps whatever summary/key_facts
+    it already had either way; this only adds structure when available."""
     data = _solar.call_json(
         _prompts.load("evidence_extraction"),
-        {"question": question, "text": text[:max_chars]},
-        caller="coverage.extract_key_facts",
+        {"question": question, "url": url, "text": text[:max_chars]},
+        caller="coverage.verify_evidence",
         model_override=model_override,
+        timeout_seconds=timeout_seconds,
     )
     if not data:
-        return []
-    facts: list[KeyFact] = []
-    for item in data.get("key_facts", []) or []:
-        if not isinstance(item, dict) or not str(item.get("text", "")).strip():
-            continue
-        facts.append(
-            KeyFact(
-                text=str(item.get("text", "")).strip(),
-                metric=item.get("metric") or None,
-                value=item.get("value"),
-                unit=item.get("unit") or None,
-                time=item.get("time") or None,
-                value_type=item.get("value_type") or None,
-            )
+        return EvidenceVerification()
+
+    source_assessment_raw = data.get("source_assessment")
+    source_assessment = (
+        SourceAssessment(
+            url=str(source_assessment_raw.get("url", "")).strip(),
+            relevance=_clamp_optional(source_assessment_raw.get("relevance"), _RELEVANCE_LEVELS),  # type: ignore[arg-type]
+            evidence_quality=_clamp_optional(
+                source_assessment_raw.get("evidence_quality"), _EVIDENCE_QUALITY_LEVELS
+            ),  # type: ignore[arg-type]
         )
-    return facts
+        if isinstance(source_assessment_raw, dict)
+        else None
+    )
+
+    summary_verification_raw = data.get("summary_verification")
+    summary_verification = (
+        SummaryVerification(
+            status=_clamp_optional(
+                summary_verification_raw.get("status"), _SUMMARY_VERIFICATION_STATUSES
+            ),  # type: ignore[arg-type]
+            important_omissions=_str_list(summary_verification_raw.get("important_omissions")),
+        )
+        if isinstance(summary_verification_raw, dict)
+        else None
+    )
+
+    confirmed_facts = [
+        ConfirmedFact(
+            fact=str(item.get("fact", "")).strip(),
+            evidence_strength=_clamp(
+                item.get("evidence_strength"), _EVIDENCE_STRENGTHS, "insufficient"
+            ),  # type: ignore[arg-type]
+            context=str(item.get("context", "")).strip(),
+        )
+        for item in data.get("confirmed_facts", []) or []
+        if isinstance(item, dict) and str(item.get("fact", "")).strip()
+    ]
+
+    return EvidenceVerification(
+        source_assessment=source_assessment,
+        summary_verification=summary_verification,
+        confirmed_facts=confirmed_facts,
+        limitations=_str_list(data.get("limitations")),
+        contradictions=_parse_contradictions(data.get("contradictions")),
+        remaining_gaps=_str_list(data.get("remaining_gaps")),
+        sufficient=bool(data.get("sufficient", False)),
+        next_queries=_parse_next_queries(data.get("next_queries")),
+    )
+
+
+def key_facts_from_verification(verification: EvidenceVerification) -> list[KeyFact]:
+    """Bridges prompt E's qualitative ConfirmedFact list into the same
+    KeyFact shape web_search.py's snippet-level facts use, so
+    WebSearchResult.key_facts stays one consistent list regardless of which
+    stage populated it. No numeric metric/value/unit/time is invented —
+    ConfirmedFact never has one, so KeyFact's numeric fields stay None."""
+    return [KeyFact(text=fact.fact) for fact in verification.confirmed_facts if fact.fact]

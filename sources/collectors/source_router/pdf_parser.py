@@ -1,42 +1,83 @@
 """Upstage Document Parse — PDF → structured document representation, plus
 the Small/Large/Huge progressive-narrowing routing from doc1 §11-§17.
 
-*** API SPEC WARNING ***
-Upstage Document Parse is a different product from the Solar chat-completion
-API used everywhere else in this repo (core/entity/ai_based.py,
-sources/collectors/source_router/_solar.py, etc.) — it is a REST endpoint
-with multipart file upload, not an OpenAI-compatible chat endpoint. The
-endpoint path and response shape below (`_DEFAULT_BASE_URL`, `_call_document_
-parse`, `_parse_response`) are a best-effort reading of Upstage's public
-Document Parse documentation as of this writing and have NOT been
-live-verified — confirm against the current docs at
-https://console.upstage.ai before the first real call, and adjust those two
-functions if the actual response shape differs. Everything downstream of
-`_parse_response` (size classification, section/chunk building, selection)
-is independent of that detail and does not need to change if the endpoint
-shape does.
+*** API SPEC — live-verified 2026-08-09 ***
+Endpoint (`_DEFAULT_BASE_URL`) and `model`/`mode` param names/values were
+confirmed against a real account via scripts/verify_document_parse_pdf.py
+(a user-provided official Upstage sample matched this endpoint exactly) and
+against Upstage's own cookbook (github.com/UpstageAI/cookbook,
+aws/jumpstart/02_document_parse.ipynb). Two real findings from that session
+that shaped the code below:
+
+1. **`output_formats` is required, or markdown/text come back empty.**
+   Every element's `content` object (and the top-level `content` object) has
+   `html`/`markdown`/`text` keys, but `markdown`/`text` are BOTH empty
+   strings unless the request explicitly includes
+   `output_formats: '["markdown", "html", "text"]'` — confirmed identical
+   across standard/enhanced/auto modes, so this isn't mode-specific. Without
+   it, `_parse_response()` always returned None (every real PDF would look
+   un-inspectable).
+2. **Elements nest their text under `element["content"]["markdown"/"text"/
+   "html"]` — never a flat `element["text"]`.** The pre-2026-08-09 version of
+   `_sections_from_elements()` read `element.get("text", "")`, which is
+   always "" against the real response shape — so heading titles fell back
+   to generic "Section N" and every section body was silently empty, even
+   before the output_formats gap above. `_element_text()` below fixes this
+   and doubles as the fallback path if a future Upstage response ever
+   regresses (see model choice note next).
+
+**Model/mode: `document-parse-nightly` + `mode="auto"`, chosen deliberately
+over the pinned `document-parse` (stable, dated `-260630` build).** Compared
+live on the same PDF: `auto` reproduced the stable build's output exactly on
+pages it classified "standard", and produced richer semantic HTML
+(`<th scope=...>`, preserved `<br>` line breaks) only on pages it classified
+"enhanced" — so `auto` costs nothing in quality vs. always-standard while
+adding real value on complex pages, without forcing every page through the
+heavier path the way `mode="enhanced"` would. The tradeoff accepted here:
+`-nightly` is a floating pre-release build that can change behavior without
+a version bump, unlike the dated stable build. `_element_text()`'s
+markdown -> text -> html fallback and its loud stderr warning (search for
+"NIGHTLY MODEL DRIFT") are the safety net for that — if Upstage ever changes
+what the nightly build returns, this fails loud and specific instead of
+silently degrading to empty sections again.
 """
 
 from __future__ import annotations
 
 import os
+import re
 import sys
 from typing import Any
 
 import requests
 
 from sources.collectors.source_router import _prompts, _solar
-from sources.collectors.source_router.contracts import DocumentChunk, DocumentSection, ParsedDocument
+from sources.collectors.source_router.contracts import (
+    ChunkSelection,
+    DocumentChunk,
+    DocumentSection,
+    ParsedDocument,
+    SectionSelection,
+)
 
 _API_KEY_ENV_VAR = "TRENDSPARC_SOURCE_ROUTER_UPSTAGE_DOCPARSE_API_KEY"
 _BASE_URL_ENV_VAR = "TRENDSPARC_SOURCE_ROUTER_UPSTAGE_DOCPARSE_BASE_URL"
 _DEFAULT_BASE_URL = "https://api.upstage.ai/v1/document-digitization"
 
+# See API SPEC docstring above for why nightly+auto was chosen over the
+# pinned stable build, and why output_formats must be sent explicitly.
+_MODEL = "document-parse-nightly"
+_MODE = "auto"
+# markdown listed first: this is our preferred field (readable, preserves
+# table structure as pipe syntax) — _element_text()/_parse_response() read
+# it first and only fall back to text/html if it's missing.
+_OUTPUT_FORMATS = '["markdown", "html", "text"]'
+
 _HEADING_CATEGORIES = {"heading1", "heading2", "title"}
 
 
 # ---------------------------------------------------------------------------
-# Upstage Document Parse call (see API SPEC WARNING above)
+# Upstage Document Parse call (see API SPEC docstring above)
 # ---------------------------------------------------------------------------
 
 
@@ -51,14 +92,63 @@ def _call_document_parse(pdf_bytes: bytes, filename: str, timeout_seconds: int) 
             base_url,
             headers={"Authorization": f"Bearer {api_key}"},
             files={"document": (filename, pdf_bytes, "application/pdf")},
-            data={"model": "document-parse"},
+            data={"model": _MODEL, "mode": _MODE, "output_formats": _OUTPUT_FORMATS},
             timeout=timeout_seconds,
         )
         response.raise_for_status()
-        return response.json()
+        payload = response.json()
     except Exception as exc:  # noqa: BLE001
         print(f"[source_router.pdf_parser] Document Parse call failed: {exc}", file=sys.stderr)
         return None
+    # Always-on visibility into what the nightly build actually did for this
+    # call — the cheapest possible tripwire for "did Upstage change nightly's
+    # behavior underneath us". usage.enhanced/usage.standard show exactly
+    # which pages mode="auto" picked.
+    print(
+        f"[source_router.pdf_parser] Document Parse response: model={payload.get('model')!r} "
+        f"usage={payload.get('usage')!r}",
+        file=sys.stderr,
+    )
+    return payload
+
+
+def _element_text(element: dict[str, Any]) -> str:
+    """Prefer markdown, then plain text, then a naive HTML-tag-strip as a
+    last resort — the fallback chain IS the drift safety net: if a future
+    Upstage response stops populating markdown/text despite output_formats
+    requesting them (nightly-build behavior change), this still recovers
+    something instead of silently producing an empty section, and says so
+    loudly rather than failing quiet."""
+    content = element.get("content") or {}
+    markdown = str(content.get("markdown") or "").strip()
+    if markdown:
+        return markdown
+    text = str(content.get("text") or "").strip()
+    if text:
+        return text
+    html = str(content.get("html") or "")
+    if not html:
+        return ""
+    print(
+        "[source_router.pdf_parser] NIGHTLY MODEL DRIFT WARNING: element "
+        f"id={element.get('id')} page={element.get('page')} category={element.get('category')!r} "
+        "had no markdown/text despite output_formats requesting them - falling back to a naive "
+        "HTML tag strip. Re-run scripts/verify_document_parse_pdf.py if this keeps happening.",
+        file=sys.stderr,
+    )
+    return re.sub(r"<[^>]+>", " ", html).strip()
+
+
+_MARKDOWN_HEADING_PREFIX_RE = re.compile(r"^#{1,6}\s+")
+
+
+def _clean_heading_title(text: str) -> str:
+    """_element_text() returns raw markdown, and a heading element's own
+    markdown is itself markdown heading syntax (e.g. "# 2. Some Title") -
+    strip the leading #'s so DocumentSection.title reads as a plain title,
+    not markdown source. Live-verified 2026-08-09: real heading1 elements
+    from document-parse-nightly come back exactly this way."""
+    return _MARKDOWN_HEADING_PREFIX_RE.sub("", text).strip()
 
 
 def _estimate_token_count(text: str, chars_per_token: float) -> int:
@@ -94,12 +184,12 @@ def _sections_from_elements(
     for element in elements:
         category = str(element.get("category", "")).lower()
         page = element.get("page")
-        text = str(element.get("text", "")).strip()
+        text = _element_text(element)
         if category in _HEADING_CATEGORIES:
             _flush()
             current = {
                 "section_id": f"S{len(sections) + 1}",
-                "title": text or f"Section {len(sections) + 1}",
+                "title": _clean_heading_title(text) or f"Section {len(sections) + 1}",
                 "pages": str(page) if page is not None else "",
             }
             body_parts = []
@@ -113,10 +203,27 @@ def _parse_response(
     payload: dict[str, Any], source_url: str, chars_per_token_estimate: float
 ) -> ParsedDocument | None:
     content = payload.get("content") or {}
-    markdown = content.get("markdown") if isinstance(content, dict) else None
+    markdown = str(content.get("markdown") or "").strip() if isinstance(content, dict) else ""
     if not markdown:
-        print("[source_router.pdf_parser] Document Parse response had no markdown content", file=sys.stderr)
-        return None
+        text = str(content.get("text") or "").strip() if isinstance(content, dict) else ""
+        html = str(content.get("html") or "") if isinstance(content, dict) else ""
+        if text:
+            markdown = text
+        elif html:
+            print(
+                "[source_router.pdf_parser] NIGHTLY MODEL DRIFT WARNING: top-level content.markdown/"
+                "content.text were both empty despite output_formats requesting them - falling back "
+                "to a naive HTML tag strip for the whole document. Re-run "
+                "scripts/verify_document_parse_pdf.py if this keeps happening.",
+                file=sys.stderr,
+            )
+            markdown = re.sub(r"<[^>]+>", " ", html).strip()
+        else:
+            print(
+                "[source_router.pdf_parser] Document Parse response had no markdown/text/html content at all",
+                file=sys.stderr,
+            )
+            return None
     sections = _sections_from_elements(payload.get("elements") or [], chars_per_token_estimate)
     return ParsedDocument(
         source_url=source_url,
@@ -204,16 +311,24 @@ def build_chunk_map(
 # ---------------------------------------------------------------------------
 
 
+def _str_list(raw) -> list[str]:
+    return [str(value).strip() for value in raw or [] if str(value).strip()]
+
+
 def select_sections(
     question: str,
     sections: list[DocumentSection],
     *,
     max_sections: int = 4,
     model_override: str | None = None,
-) -> list[str]:
+    timeout_seconds: int = 30,
+) -> list[SectionSelection]:
     """Falls back to the first `max_sections` sections in document order when
-    no planner key is configured or the call fails — never blocks on this
-    judgment call."""
+    no planner key is configured, the call fails, or every returned id is
+    hallucinated — never blocks on this judgment call. Returns the model's
+    own reasoning/evidence_role per section (prompt C), not just bare ids —
+    the fallback path leaves those fields empty since there's no judgment
+    behind it."""
     if not sections:
         return []
     payload = {
@@ -228,18 +343,23 @@ def select_sections(
         payload,
         caller="pdf_parser.select_sections",
         model_override=model_override,
+        timeout_seconds=timeout_seconds,
     )
     if data:
         valid_ids = {s.section_id for s in sections}
         selected = [
-            str(item.get("section_id", "")).strip()
+            SectionSelection(
+                section_id=str(item.get("section_id", "")).strip(),
+                reason=str(item.get("reason", "")).strip(),
+                evidence_role=_str_list(item.get("evidence_role")),
+                requires_chunk_selection=bool(item.get("requires_chunk_selection", False)),
+            )
             for item in data.get("selected_sections", []) or []
-            if isinstance(item, dict)
-        ]
-        selected = [section_id for section_id in selected if section_id in valid_ids][:max_sections]
+            if isinstance(item, dict) and str(item.get("section_id", "")).strip() in valid_ids
+        ][:max_sections]
         if selected:
             return selected
-    return [s.section_id for s in sections[:max_sections]]
+    return [SectionSelection(section_id=s.section_id) for s in sections[:max_sections]]
 
 
 def select_chunks(
@@ -248,7 +368,8 @@ def select_chunks(
     *,
     max_chunks: int = 3,
     model_override: str | None = None,
-) -> list[str]:
+    timeout_seconds: int = 30,
+) -> list[ChunkSelection]:
     """Same fallback contract as select_sections."""
     if not chunks:
         return []
@@ -260,12 +381,23 @@ def select_chunks(
         ],
     }
     data = _solar.call_json(
-        _prompts.load("chunk_selection"), payload, caller="pdf_parser.select_chunks", model_override=model_override
+        _prompts.load("chunk_selection"),
+        payload,
+        caller="pdf_parser.select_chunks",
+        model_override=model_override,
+        timeout_seconds=timeout_seconds,
     )
     if data:
         valid_ids = {c.chunk_id for c in chunks}
-        selected = [str(chunk_id).strip() for chunk_id in data.get("selected_chunks", []) or []]
-        selected = [chunk_id for chunk_id in selected if chunk_id in valid_ids][:max_chunks]
+        selected = [
+            ChunkSelection(
+                chunk_id=str(item.get("chunk_id", "")).strip(),
+                reason=str(item.get("reason", "")).strip(),
+                evidence_role=_str_list(item.get("evidence_role")),
+            )
+            for item in data.get("selected_chunks", []) or []
+            if isinstance(item, dict) and str(item.get("chunk_id", "")).strip() in valid_ids
+        ][:max_chunks]
         if selected:
             return selected
-    return [c.chunk_id for c in chunks[:max_chunks]]
+    return [ChunkSelection(chunk_id=c.chunk_id) for c in chunks[:max_chunks]]
