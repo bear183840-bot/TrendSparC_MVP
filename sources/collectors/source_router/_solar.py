@@ -16,19 +16,19 @@ returning None (missing key, call failure, bad JSON) — this module never
 raises out of `call_json`, matching the repo-wide silent-fallback contract
 (core/entity/ai_based.py, core/synthesis/ai_based.py).
 
-*** Timeout handling — fixed 2026-08-09, mirrors web_search.py ***
-This function used to give the OpenAI client a hard `timeout=timeout_seconds`
-kwarg — the exact anti-pattern already found and fixed in web_search.py
-(a live run there saw 6/6 calls die with "Request timed out" because a hard
-client-side timeout aborts the request instead of just giving up on waiting
-for it). This module backs all 5 "Solar Pro 3" role call sites (planner,
-coverage's check_coverage/verify_evidence, pdf_parser's select_sections/
-select_chunks) - including check_coverage(), which resends the entire
-accumulated results pool every round and is the single largest-payload call
-in the router - so the same risk applies here, just never audited until
-now. Fixed the same way: no `timeout=` kwarg on the client, the actual call
-runs in a background thread via `_run_with_timeout()`, and only *waiting*
-for it is time-boxed.
+*** Timeout handling ***
+This module backs all 5 "Solar Pro 3" role call sites (planner, coverage's
+check_coverage/verify_evidence, pdf_parser's select_sections/select_chunks) -
+including check_coverage(), which resends the accumulated results pool every
+round and is the largest-payload call in the router.
+
+It went through both extremes. A hard client timeout that was too short
+killed calls that would have succeeded; waiting in a background thread
+instead never severed anything, but an abandoned request is still a billed
+request and nothing stopped it running to completion unheard. What it uses
+now is a real `timeout=` that is *generous* (config.call_timeout_seconds),
+plus `max_retries=0` so a call we already gave up on cannot be billed twice
+behind the router's own budget policy.
 """
 
 from __future__ import annotations
@@ -76,17 +76,12 @@ def call_json(
     if not key:
         return None
     try:
-        # No `timeout=` kwarg here on purpose — see module docstring's
-        # "Timeout handling" note. The client is free to take as long as it
-        # needs; only how long we *wait* for it is bounded, by
-        # _run_with_timeout below. Client construction itself stays inside
-        # this try/except too (mirrors the pre-2026-08-09 behavior) since a
-        # bad base_url/kwarg combination can raise here, before there is
-        # even a call to time-box.
-        # SDK/httpx timeout closes the in-flight request. A daemon-thread
-        # timeout only stopped waiting while the paid call kept running.
-        # max_retries=0 also prevents a timed-out request from being billed
-        # again behind the router's own explicit retry/budget policy.
+        # The SDK/httpx timeout closes the in-flight request; the earlier
+        # daemon-thread version only stopped waiting while the paid call kept
+        # running. max_retries=0 keeps a timed-out request from being billed
+        # again behind the router's own budget policy. Client construction
+        # stays inside this try/except because a bad base_url/kwarg
+        # combination raises here, before there is a call to time-box.
         client = OpenAI(
             api_key=key,
             timeout=timeout_seconds,
