@@ -219,8 +219,10 @@ Bash 힙독(heredoc)에 파이썬을 넣으면 따옴표가 자주 망가진다 
 2. **진단부터.** 실제 실행 JSON / 브라우저 / 직접 호출로 현상을 재현하라. 코드만 읽고
    원인을 추정하지 마라.
 3. **픽스처로 회귀 확인.** `tests/fixtures/synthesis_*.json` 9개 전부.
-4. `pytest -q` 통과. 현재 기준 **878 passed, 2 skipped** (2026-08-09,
-   `2f2ba86`). 숫자는 새 테스트가 추가되면 실제 실행 결과로 갱신한다.
+4. `pytest -q` 통과. 현재 기준 **968 passed, 2 skipped** (2026-08-10, Source Router
+   통합). 숫자는 새 테스트가 추가되면 실제 실행 결과로 갱신한다.
+   외부 호출이 없는지까지 확인하려면 소켓을 막고 키를 지운 채 돌려라 — 통합 시점에
+   이 조건에서 동일하게 통과하는 것을 확인했다.
 5. 프롬프트 규칙을 건드렸으면 `tests/test_prompt_invariants.py`에 불변식 추가.
 6. **커밋·푸시는 같은 대화에서 명시적으로 요청받았을 때만.** 수정 직후라도 자동으로
    하지 않는다.
@@ -238,6 +240,21 @@ Bash 힙독(heredoc)에 파이썬을 넣으면 따옴표가 자주 망가진다 
   adapter는 결과 전달·노출 범위를 담당한다. 청중 차별화 품질 자체는 계속 평가한다.
 - 루트·섹터 README는 `2f2ba86` 구현 기준으로 갱신됐다. 그래도 숫자·상태·CLI가
   의심되면 문서보다 `profile.json`, `sources.json`, 실제 코드와 테스트를 우선한다.
+- **HTML 원문에는 길이 상한이 없다.** PDF 경로는 이미 의미 기반으로 좁힌다(small은
+  전문, large는 선택된 섹션, huge는 선택된 청크). HTML은 Firecrawl이 준 마크다운 전체가
+  `SourceDocument.content`가 되고, analyzer가 12,000자 청크로 나눈 뒤
+  `_chunk_can_answer`로 거른다. PDF에만 있는 청크 수 상한(기본 12)이 HTML에는 없어,
+  아주 긴 페이지 하나가 analyzer 호출 수를 끌어올릴 수 있다. 앞부분 자르기로 때우지
+  마라 — 핵심 수치가 날아간다. 고칠 거면 검증된 passage 중심 excerpt여야 한다.
+- **원문 취득 레이어가 죽으면 결과가 0건이다.** Firecrawl(HTML) / Upstage(PDF)가 키
+  없음·크레딧 소진으로 실패하면 어떤 결과도 original-source 깊이에 도달하지 못하고,
+  DIRECT 요구는 영원히 미충족이라 검색 예산만 태운다. `integration.collect()`가 이
+  경우 "검색 N건, 원문 0건"으로 **수집 단계에서 명시적으로 실패**하게 해뒀다. 이 실패를
+  빈 문서 목록으로 되돌리지 마라 — 세 단계 뒤에 "근거 없음"으로 나타나 엉뚱한 곳을
+  가리킨다.
+- `ai_search_harness.py`와 섹터별 collector는 **production 실행 경로에서 도달 불가**지만
+  아직 저장소에 있다. 자체 단위 테스트와 과거 실행 호환용이며, 삭제는 그 테스트들을
+  어떻게 할지 정한 뒤에 한다.
 
 ---
 
@@ -278,6 +295,13 @@ Bash 힙독(heredoc)에 파이썬을 넣으면 따옴표가 자주 망가진다 
   eligibility 이후의 렌더링 규칙으로 유지한다.
 
 ### 8-2. 수집 예산을 옮기기 전에 **수율부터 비교**한다
+
+> 2026-08-10 갱신: 예산은 이제 **하나로 합쳐졌다.** planner·refiner·follow-up이
+> `max_web_search_calls`(12)를 공유하고 `router._search_budget()`이 질문 복잡도로 실제
+> 예산을 정한다. 파이프라인의 validator/analyzer 재수집 루프는 `source_router`
+> 모드에서 꺼져 있다(router 자체가 bounded follow-up을 돌리므로). 따라서 아래 질문은
+> "1차 수집 대 추가수집"이 아니라 **"같은 예산 안에서 direct 질의와 supporting 질의를
+> 어떻게 나눌 것인가"** 로 바뀌었다. 수율 비교는 그대로 필요하다.
 
 초기 수집 비중을 줄이고 부족 근거 재수집을 강화할지는 아직 결정되지 않았다. 다음
 지표를 같은 실행 JSON에서 1차 수집과 추가수집으로 나눠 비교한 뒤 결정한다.
@@ -360,7 +384,12 @@ evidence requirement**(예: 연령대 × 같은 매체 reach, 회사 × 같은 �
 
 **도혁님 우선 범위**
 
-- `sources/registry/**`, sector collector, 검색 질의 생성·재검색, 문서 관련성/중복 제거
+> 2026-08-10 갱신: 검색·수집 엔진은 `sources/collectors/source_router/`로 일원화됐다.
+> 아래 "sector collector"는 이제 그 패키지(planner / refiner / web_search / coverage /
+> html_extractor / pdf_parser / adapter)를 가리킨다. 섹터 어댑터의 collector 모듈은
+> production에서 호출되지 않는다.
+
+- `sources/registry/**`, Source Router 패키지, 검색 질의 생성·재검색, 문서 관련성/중복 제거
 - 1차 수집과 evidence requirement 보강 수집의 수율 로그 및 비교
 - 팀장 AI를 넣는다면 수집 결과를 지휘·재질의하는 역할로 제한하고, 구조화된
   `answer_requirements`와 부족한 `evidence requirements`를 입력/출력으로 남기기
@@ -429,5 +458,6 @@ evidence requirement**(예: 연령대 × 같은 매체 reach, 회사 × 같은 �
   브랜드 인지도·선호도, 모델 선호·브랜드 적합도, 롱폼·숏폼, 셋톱박스 원가처럼
   서로 다른 측정값은 분리한다. 문자열이 비슷하다는 이유로 통합하지 않는다.
 
-이 상태의 회귀 기준은 `python -m pytest -q`의 **878 passed, 2 skipped**다. 문서만
-고치는 작업에서는 코드·프롬프트·테스트를 함께 바꾸지 않는다.
+이 상태의 회귀 기준은 `python -m pytest -q`의 **968 passed, 2 skipped**다(2026-08-10,
+Source Router 통합 이후). 문서만 고치는 작업에서는 코드·프롬프트·테스트를 함께 바꾸지
+않는다.
