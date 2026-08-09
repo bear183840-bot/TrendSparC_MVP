@@ -52,7 +52,7 @@ from common.contracts import (
 from common.content_quality_validator import needs_generic_topic_search
 from common.errors import PipelineStageError, StageStatus, StageTrace
 from core.attachments.extractor import build_question_context, extract_attachments
-from core.block_priority_planner.planner import plan_block_priorities, target_block_shapes
+from core.block_priority_planner.planner import plan_block_priorities
 from core.block_delivery_trace import build_block_delivery_trace
 from core.collection_progress import bind_collection_events, reset_collection_events
 from core.entity.ai_based import extract_entities_ai
@@ -62,7 +62,7 @@ from core.report_planner.planner import plan_report
 from core.report_generator.generator import generate_report
 from core.question_coverage import (
     assess_question_coverage,
-    coverage_hints,
+    derive_answer_and_evidence_requirements,
     derive_question_coverage,
 )
 from core.report_purpose.classifier import classify_report_purpose
@@ -339,6 +339,16 @@ def _run_pipeline_stages(
             request.request_id, result.report_purpose.purpose_id,
             result.report_purpose.question_answer_type,
         )
+        answer_requirements, evidence_requirements = derive_answer_and_evidence_requirements(
+            request.question,
+            result.report_purpose.question_answer_type,
+            result.entities.answer_requirements,
+            result.entities.evidence_requirements,
+        )
+        result.entities = result.entities.model_copy(update={
+            "answer_requirements": answer_requirements,
+            "evidence_requirements": evidence_requirements,
+        })
         result.trace.append(StageTrace(stage="block_priority_planner", status=StageStatus.OK))
     except PipelineStageError as exc:
         _halt("block_priority_planner", exc.reason, exc.detail)
@@ -367,10 +377,8 @@ def _run_pipeline_stages(
                 ),
                 report_purpose_id=result.report_purpose.purpose_id,
                 information_needs=result.entities.information_needs,
-                target_block_shapes=[
-                    *target_block_shapes(result.block_priority_plan),
-                    *coverage_hints(result.question_coverage),
-                ],
+                answer_requirements=result.entities.answer_requirements,
+                evidence_requirements=result.entities.evidence_requirements,
                 question_coverage=result.question_coverage,
                 suggested_terms=search_terms,
                 as_of_date=request.created_at.date().isoformat(),
@@ -414,8 +422,7 @@ def _run_pipeline_stages(
                     [*documents, *attachment_documents],
                     question_with_context,
                     result.source_plan.information_needs,
-                    [*target_block_shapes(result.block_priority_plan),
-                     *coverage_hints(result.question_coverage or QuestionCoverageRequirement())],
+                    result.source_plan.evidence_requirements,
                 )
             elif role == "validator":
                 args = (documents, result.source_plan.search_context)
@@ -615,15 +622,33 @@ def _run_pipeline_stages(
                     result.trace.append(
                         StageTrace(stage="sector_adapter.validator.analysis_recollection", status=StageStatus.OK)
                     )
-                    retry_output = _call_sector_adapter_stage(
-                        result.sector_route,
-                        "analyzer",
-                        retry_validated,
-                        question_with_context,
-                        retry_plan.information_needs,
-                        [*target_block_shapes(result.block_priority_plan),
-                         *coverage_hints(result.question_coverage or QuestionCoverageRequirement())],
-                    )
+                    try:
+                        retry_output = _call_sector_adapter_stage(
+                            result.sector_route,
+                            "analyzer",
+                            retry_validated,
+                            question_with_context,
+                            retry_plan.information_needs,
+                            retry_plan.evidence_requirements,
+                        )
+                    except PipelineStageError as exc:
+                        # Recollection is an optional depth pass.  It must not
+                        # erase analyses that already cleared grounding and
+                        # relevance gates in the initial pass.
+                        result.trace.append(StageTrace(
+                            stage="sector_adapter.analyzer.recollection",
+                            status=StageStatus.FAILED,
+                            reason=exc.reason,
+                            detail=exc.detail,
+                        ))
+                        print(
+                            "[analyzer] analysis recollection failed; preserving "
+                            f"{len(usable)} previously usable analysis(es): {exc.reason}",
+                            file=sys.stderr,
+                        )
+                        documents.extend(retry_validated)
+                        result.source_plan = retry_plan
+                        break
                     retry_output = _enrich_document_analyses(retry_output, retry_validated)
                     result.trace.append(
                         StageTrace(stage="sector_adapter.analyzer.recollection", status=StageStatus.OK)
@@ -917,6 +942,32 @@ def run_pipeline_from_documents(
     """
     result.question = question
     result.question_coverage = derive_question_coverage(question)
+    answer_requirements, evidence_requirements = derive_answer_and_evidence_requirements(
+        question,
+        result.report_purpose.question_answer_type if result.report_purpose else None,
+        result.entities.answer_requirements if result.entities else (),
+        result.entities.evidence_requirements if result.entities else (),
+    )
+    if result.entities is not None:
+        result.entities = result.entities.model_copy(update={
+            "answer_requirements": answer_requirements,
+            "evidence_requirements": evidence_requirements,
+        })
+    if result.source_plan is not None:
+        search_context = result.source_plan.search_context
+        if search_context is not None:
+            search_context = search_context.model_copy(update={
+                "question": question,
+                "answer_requirements": answer_requirements,
+                "evidence_requirements": evidence_requirements,
+                "target_block_shapes": [],
+                "question_coverage": result.question_coverage,
+            })
+        result.source_plan = result.source_plan.model_copy(update={
+            "answer_requirements": answer_requirements,
+            "evidence_requirements": evidence_requirements,
+            "search_context": search_context,
+        })
     documents = list(result.collected_source_documents or [])
     if not documents:
         raise PipelineStageError(
@@ -951,8 +1002,7 @@ def run_pipeline_from_documents(
         analyses = _call_sector_adapter_stage(
             result.sector_route, "analyzer", documents, question,
             result.source_plan.information_needs if result.source_plan else [],
-            [*target_block_shapes(result.block_priority_plan),
-             *coverage_hints(result.question_coverage)],
+            result.source_plan.evidence_requirements if result.source_plan else [],
         )
         # Same relevance gate the live path applies: a document search matched
         # is not a document that answers the question.

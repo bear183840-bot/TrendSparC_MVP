@@ -298,6 +298,8 @@ def plan_sources(
         registered_sources=list(planned_sources),
         question_keywords=question_keywords or [],
         information_needs=information_needs or [],
+        answer_requirements=(search_context.answer_requirements if search_context else []),
+        evidence_requirements=(search_context.evidence_requirements if search_context else []),
         search_context=search_context,
         notes=notes,
     )

@@ -92,6 +92,21 @@ def test_metrics_keep_chart_axes_but_do_not_repeat_evidence_and_urls():
     assert metric["subject"] == "플랫폼 0"
 
 
+def test_relative_metric_keeps_only_its_small_provenance_extension():
+    payload = _payload(evidence=1)
+    payload["synthesis"]["metric_series"][0].update({
+        "is_relative": True,
+        "comparison_period": "전년 대비",
+        "value_origin": "source",
+    })
+
+    metric = _fit_payload(payload, _plan([]), budget=20_000)["synthesis"]["metric_series"][0]
+
+    assert metric["is_relative"] is True
+    assert metric["comparison_period"] == "전년 대비"
+    assert metric["value_origin"] == "source"
+
+
 def test_evidence_survives_when_something_has_to_go():
     """Evidence is the text every figure is extracted from - a report that
     loses it loses its charts with it."""

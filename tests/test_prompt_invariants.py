@@ -13,6 +13,8 @@ import pytest
 
 from common.content_quality_validator import (
     COMPARISON_COMPLETENESS_INSTRUCTION,
+    QUALITATIVE_LEVEL_EXTRACTION_INSTRUCTION,
+    RELATIVE_METRIC_EXTRACTION_INSTRUCTION,
     SWOT_COMPLETENESS_INSTRUCTION,
     TABLE_COMPLETENESS_INSTRUCTION,
 )
@@ -134,6 +136,21 @@ def test_the_table_rule_says_every_row_not_a_representative_one():
     assert "각 행·항목을 개별" in TABLE_COMPLETENESS_INSTRUCTION
 
 
+def test_relative_and_qualitative_rules_preserve_explicit_evidence_only():
+    assert "is_relative=true" in RELATIVE_METRIC_EXTRACTION_INSTRUCTION
+    assert "100→200" in RELATIVE_METRIC_EXTRACTION_INSTRUCTION
+    assert "직접 평가한 경우에만" in QUALITATIVE_LEVEL_EXTRACTION_INSTRUCTION
+    assert "수치가 크거나" in QUALITATIVE_LEVEL_EXTRACTION_INSTRUCTION
+
+
+@pytest.mark.parametrize("path", _ANALYZERS, ids=lambda p: p.parts[-4])
+def test_every_analyzer_schema_carries_relative_metric_provenance(path):
+    text = path.read_text(encoding="utf-8")
+    assert '"is_relative"' in text
+    assert '"comparison_period"' in text
+    assert '"value_origin"' in text
+
+
 def test_entity_runtime_prompt_is_compact_without_losing_search_guards():
     """The entity call runs for every question, so repeated prose is TPM too.
 
@@ -193,6 +210,9 @@ def test_broadband_analyzer_requests_block_ready_generic_axes():
     assert "각 항목명은 subject" in text
     assert "share_of는 원문이 하나의 전체" in text
     assert "여러 기업·국가·기술을 공통 기준" in text
+    assert "같이 증가하거나 순서대로 언급" in text
+    assert "'~에 따르면'은 인과가 아니다" in text
+    assert "시장 규모나 숫자가 크다는 이유로 level을 만들지 마라" in text
 
 
 def test_solar_stages_choose_provider_appropriate_defaults(monkeypatch):

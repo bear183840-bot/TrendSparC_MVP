@@ -232,7 +232,7 @@ def test_a_three_level_chain_keeps_its_middle_layer():
 def test_landscape_needs_both_halves_to_stand_on_their_own():
     from common.block_shapes import has_landscape
 
-    trend = [MetricPoint(label="시장 규모", period=f"202{y}년", value=v, unit="조원")
+    trend = [MetricPoint(label="HBM 시장 규모", period=f"202{y}년", value=v, unit="조원")
              for y, v in zip(range(3, 8), [12, 21, 32, 43, 57])]
     split = [MetricPoint(label="구성비", subject=s, period="2025년", value=v, unit="%",
                          share_of="HBM 수요")

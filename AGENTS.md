@@ -40,9 +40,11 @@
 ## 3. 이미 내려진 설계 결정 (여기를 모르면 반드시 어긋난다)
 
 ### 3-1. 슬롯은 "블록 1개"가 아니라 "블록 조합"이다
-- 목적별 골격(슬롯 순서)은 고정, **슬롯을 채우는 블록은 데이터가 정한다.**
+- 목적별 슬롯 목록은 기본 narrative reference다. 실제 화면은 질문에 직접 필요한 슬롯과
+  eligibility를 통과한 근거만 사용하므로, 같은 목적이라도 나타나는 블록과 실현된 독해
+  순서는 달라질 수 있다. 이 목록을 수집 명세나 필수 화면 체크리스트로 쓰지 않는다.
 - `common/purpose_slots.py`의 `resolve_slots()`는 **2패스**다.
-  - 1패스: 모든 슬롯이 골격 순서대로 **대표 블록(lead)** 확정
+  - 1패스: reader flow에 포함된 슬롯의 **대표 블록(lead)** 확정
   - 2패스: 남은 후보 중 **리드가 안 그린 데이터**를 가진 것만 companion으로 추가
 - ⚠️ 1패스를 없애고 한 번에 돌리면 앞 슬롯이 뒤 슬롯의 1순위 블록을 뺏는다.
   (실제로 `원인`이 `영향`의 순위막대를 가져가 `영향`이 산문으로 떨어졌다.)
@@ -81,14 +83,24 @@
 - 2유닛 그리드. **넓은 블록은 시간축·사슬·다중 패널을 가진 것만**
   (`timeline`, `cause_map`, `cause_tree`, `competitor_panels`, `matrix`, `landscape`).
   막대와 라인 차트는 반폭으로 충분하다.
-- **카드 순서를 재배치해 빈칸을 메우지 마라.** 골격 순서가 곧 논증 순서다.
+- **카드 순서를 빈칸 메우기 목적으로 재배치하지 마라.** 순서 변경은 질문 직접성과
+  reader flow 때문에만 허용하며, 단순 그리드 패킹이 논증 순서를 뒤집으면 안 된다.
 
-### 3-6. block_priority_planner의 두 역할 (섞지 마라)
-- **수집 계획**: `report_purpose` 직후, `source_planner` 앞(파이프라인 3.5단계).
-  `target_block_shapes`가 검색·분석 프롬프트로 흘러가 "어떤 모양의 데이터를 노려야
-  하는지"를 알려준다. **없애면 안 된다.**
-- **렌더링 규칙이 아니다.** `resolve_slots()`는 이 계획을 **읽지 않는다**(advisory,
-  never enforced). 렌더링을 이 계획에 강제로 맞추는 수정은 잘못이다.
+### 3-6. Source Router / Block Engine / Purpose Flow의 책임을 섞지 마라
+
+- **Source Router**: 질문에 답하려면 무엇을 알아야 하는지 결정한다. 입력은
+  `answer_requirements`와 현재 충족되지 않은 `evidence requirements`다. 목적별 블록명,
+  슬롯 후보 순위나 SWOT/KPI 같은 화면 모양을 검색 요구사항으로 사용하지 않는다.
+- **Block Engine**: 이미 확보·검증된 근거로 무엇을 정직하게 그릴 수 있는지
+  `common/block_shapes.py`의 eligibility 계약으로 판정한다.
+- **Purpose Flow**: 그 블록들을 질문에 직접 답하면서 사람이 이해하기 좋은 순서로
+  읽히게 한다. 목적별 narrative는 reader flow이지 수집 명세가 아니다.
+
+`block_priority_planner`와 `target_block_shapes`는 현재 파이프라인에 남아 있는 호환·진단
+정보다. 새 Source Router에 연결할 때 이를 검색어 생성, 문서 가중치, analyzer 필수 추출
+목표로 승격하지 않는다. 목적표를 맞추려고 evidence requirement를 새로 만들거나
+불필요한 자료를 수집해서는 안 된다. `resolve_slots()`가 이 계획을 읽지 않는 원칙도
+유지한다.
 
 ### 3-7. 최종 블록 선택은 결정론적이다 — LLM에 넘기지 마라
 `common/block_shapes.py`의 술어가 "이 데이터로 이 블록을 정직하게 그릴 수 있나"를
@@ -180,8 +192,8 @@ Bash 힙독(heredoc)에 파이썬을 넣으면 따옴표가 자주 망가진다 
 2. **진단부터.** 실제 실행 JSON / 브라우저 / 직접 호출로 현상을 재현하라. 코드만 읽고
    원인을 추정하지 마라.
 3. **픽스처로 회귀 확인.** `tests/fixtures/synthesis_*.json` 9개 전부.
-4. `pytest -q` 통과. 현재 기준 **835 passed, 2 skipped** (2026-08-09,
-   `a53b775`). 숫자는 새 테스트가 추가되면 실제 실행 결과로 갱신한다.
+4. `pytest -q` 통과. 현재 기준 **878 passed, 2 skipped** (2026-08-09,
+   `2f2ba86`). 숫자는 새 테스트가 추가되면 실제 실행 결과로 갱신한다.
 5. 프롬프트 규칙을 건드렸으면 `tests/test_prompt_invariants.py`에 불변식 추가.
 6. **커밋·푸시는 같은 대화에서 명시적으로 요청받았을 때만.** 수정 직후라도 자동으로
    하지 않는다.
@@ -194,58 +206,75 @@ Bash 힙독(heredoc)에 파이썬을 넣으면 따옴표가 자주 망가진다 
 
 - `sk_broadband` 외 섹터에는 관계 필드(`parent_claim_id`, `importance`)가 아직 없다.
   스키마에 세 필드를 추가하고 `_verified_relations()`를 호출하면 그대로 동작한다.
-- `audience/adapter.py`는 아직 실제로 청중별 재작성을 하지 않는다(`CLAUDE.md`의
-  "Known gaps" 참조).
-- `README.md`는 낡았다. `CLAUDE.md`와 코드를 신뢰하라.
+- `audience/adapter.py`는 생성된 보고서를 다시 LLM으로 재작성하지 않는다. 청중별
+  어조·밀도 지시는 report generator와 `audience/presentation.py`에서 적용하고,
+  adapter는 결과 전달·노출 범위를 담당한다. 청중 차별화 품질 자체는 계속 평가한다.
+- 루트·섹터 README는 `2f2ba86` 구현 기준으로 갱신됐다. 그래도 숫자·상태·CLI가
+  의심되면 문서보다 `profile.json`, `sources.json`, 실제 코드와 테스트를 우선한다.
 
 ---
 
 ## 8. 2026-08-10 작업 인수인계 — 먼저 읽고 진단할 것
 
-### 8-1. 목적별 블록 순위는 **참고 골격**이다
+### 8-1. 목적별 표는 Block Priority가 아니라 **Narrative Reference**다
 
-사용자가 제시한 다음 표는 각 목적에서 먼저 확보할 정보 모양과 읽기 순서를 정하는
-참고 기준이다. 블록을 근거 없이 강제로 채우거나, 데이터가 더 잘 지지하는 블록을
-버리는 렌더링 규칙이 아니다. 3-1, 3-2, 3-6, 3-7의 결정이 계속 우선한다.
+목적별 표는 최종 리포트가 대체로 어떻게 읽혀야 하는지 보여주는 참고 골격이다.
+검색 대상·수집 우선순위·필수 블록·block eligibility를 직접 결정하지 않는다.
 
-| 목적 | 1순위 | 2순위 | 3순위 | 4순위 | 5순위 | 6순위 |
-|---|---|---|---|---|---|---|
-| 현황 파악 | KEY | KPI | LANDSCAPE | BAR | TABLE | SWOT |
-| 원인 분석 | KEY | CAUSE TREE | BAR | TABLE | KPI | LANDSCAPE |
-| 이슈 대응 | KEY | MATRIX | KPI | TABLE | BAR | LANDSCAPE |
-| 미래 사업/전략 | KEY | SWOT | LANDSCAPE | MATRIX | BAR | TABLE |
+| 목적 | 기본적으로 기대하는 독해 흐름 |
+|---|---|
+| 현황 파악 | 핵심 답변 → 현재 핵심 지표/상태 → 변화 → 비교 → 주요 요인 |
+| 원인 분석 | 핵심 답변 → 문제 증거 → 원인 구조 → 중요 원인 → 개선 방향 |
+| 이슈 대응 | 핵심 답변 → 문제/영향 → 원인 → 선택지 → 권장 조치 |
+| 미래 사업/전략 | 핵심 답변 → 현재 위치 → 미래 변화 → 기회 → 전략적 선택 → 실행/위험 |
 
-- `KEY`는 질문에 직접 답하는 핵심 요약/결론이며 항상 첫 독해 지점이다.
-- 표의 순서는 `block_priority_planner`의 수집 힌트와 슬롯의 대표 후보 순위를 검토할 때
-  쓴다. 최종 블록은 `block_shapes.py`의 데이터 계약을 통과해야 한다.
-- 특정 질문 하나의 키워드나 블록을 하드코딩하지 않는다. 목적 × 청중 × 계열사 ×
-  `answer_requirements`로 일반화한다.
-- 슬롯별 대표 블록을 먼저 정한 뒤 companion을 붙이는 2패스와, 화면의 위→아래·
-  왼쪽→오른쪽 논증 순서는 유지한다.
+실제 흐름은 다음 순서를 따른다.
+
+```text
+질문
+  → answer_requirements
+  → 필요한 evidence requirements
+  → 실제 확보·검증된 근거
+  → block eligibility
+  → 질문 직접성 + 목적별 reader flow
+  → block 선택·배치
+```
+
+- 동일한 목적이라도 질문 형태와 확보된 근거에 따라 블록 종류와 순서는 달라질 수 있다.
+- KPI, LANDSCAPE, BAR, TABLE, SWOT 같은 구체 블록명은 narrative 표에 넣지 않는다.
+  같은 의미도 데이터 형태에 따라 chart, landscape, bar, benchmark table, matrix 등으로
+  다르게 표현할 수 있다.
+- 표 순서를 맞추려고 불필요한 정보를 수집하거나 블록을 생성하지 않는다.
+- 질문에 직접 답하는 내용이 첫 독해 지점이다. 이후 위→아래·왼쪽→오른쪽으로 자연스럽게
+  읽히게 배치한다.
+- slot lead를 먼저 정하고 미표현 근거가 있을 때만 companion을 붙이는 2패스는
+  eligibility 이후의 렌더링 규칙으로 유지한다.
 
 ### 8-2. 수집 예산을 옮기기 전에 **수율부터 비교**한다
 
-초기 수집 비중을 줄이고 부족 블록 재수집을 강화할지는 아직 결정되지 않았다. 다음
+초기 수집 비중을 줄이고 부족 근거 재수집을 강화할지는 아직 결정되지 않았다. 다음
 지표를 같은 실행 JSON에서 1차 수집과 추가수집으로 나눠 비교한 뒤 결정한다.
 
 1. `answer_requirements`별 관련 문서 수와 독립 출처 수
 2. analyzer를 통과한 관련 문서 비율
-3. 실제 블록 계약을 충족한 metric/comparison/factor/action 수
+3. evidence requirement를 충족한 metric/comparison/factor/action 수
 4. 최종 lead/companion 블록에 채택된 근거 수
 5. API 호출·문자·토큰당 채택 근거 수
 
-추가수집은 단순히 문서를 더 가져오는 단계가 아니다. **비어 있는 필수 슬롯의 데이터
-계약**(예: 연령대 × 같은 매체 reach, 회사 × 같은 벤치마크 기준)을 검색어와 analyzer
-추출 목표로 넘겨야 한다. 추가수집 문서가 0건이어도 기존의 검증된 근거로 계속하는
+추가수집은 단순히 문서를 더 가져오는 단계가 아니다. **아직 충족되지 않은 질문의
+evidence requirement**(예: 연령대 × 같은 매체 reach, 회사 × 같은 비교 기준)를
+검색어와 analyzer 추출 목표로 넘겨야 한다. 특정 블록을 그리기 위해 검색하지 않는다.
+추가수집 문서가 0건이어도 기존의 검증된 근거로 계속하는
 방어는 `d785cad`에 들어갔다. 반대로 문서가 생겼다는 이유만으로 성공으로 판단하지
 않는다.
 
-### 8-3. 최신 실제 실행은 파이프라인 완주지만 **품질 회귀**다
+### 8-3. 2026-08-09 실제 실행 기록은 파이프라인 완주지만 **품질 회귀**였다
 
 - 재현 결과: `storage/requests/req_ui_bd88e065.result.json`
 - 질문: `SK브로드밴드 브랜드 이미지 개선에 맞는연령층별 광고 매체 및 모델 추천`
 - 조건: 실무진 / SK Broadband / Streamlit 실제 질문창 실행
-- 회귀가 발생한 코드 기준: `d785cad` (현재는 `a53b775`에서 revert 완료)
+- 회귀가 발생한 코드 기준: `d785cad` (`a53b775`에서 revert 완료, 이후
+  `9dfb515`의 목적 라우팅·근거 블록 개선과 `2f2ba86`의 hardening이 추가됨)
 - 실행 결과: 문서 8건, 분석 5건, grounded claim 107건, 파이프라인 전 단계 `ok`
 - 보존된 요구사항:
   1. SK브로드밴드 브랜드 이미지 개선 전략
@@ -305,14 +334,14 @@ Bash 힙독(heredoc)에 파이썬을 넣으면 따옴표가 자주 망가진다 
 **도혁님 우선 범위**
 
 - `sources/registry/**`, sector collector, 검색 질의 생성·재검색, 문서 관련성/중복 제거
-- 1차 수집과 블록 보강 수집의 수율 로그 및 비교
+- 1차 수집과 evidence requirement 보강 수집의 수율 로그 및 비교
 - 팀장 AI를 넣는다면 수집 결과를 지휘·재질의하는 역할로 제한하고, 구조화된
-  `answer_requirements`와 부족한 block data contract를 입력/출력으로 남기기
-- “문서 수 증가”가 아니라 요구사항/블록 계약을 실제로 채운 근거 수로 평가
+  `answer_requirements`와 부족한 `evidence requirements`를 입력/출력으로 남기기
+- “문서 수 증가”가 아니라 질문 요구사항을 실제로 채운 검증 근거 수로 평가
 
 **사용자/Codex 우선 범위**
 
-- 목적 분류와 목적별 슬롯/블록 참고 순위
+- 목적 분류와 목적별 reader flow
 - `block_shapes.py`, `purpose_slots.py`, 블록 렌더링과 한 화면 레이아웃
 - 청중별 표현·정보 밀도·강조 순서
 - synthesis/report/layout 사이의 근거·행동 일치성
@@ -322,8 +351,56 @@ Bash 힙독(heredoc)에 파이썬을 넣으면 따옴표가 자주 망가진다 
 - `common/contracts.py`, `pipeline.py`, analyzer/synthesis 프롬프트처럼 양쪽 경계를
   바꾸는 파일
 - 요구사항 스키마, metric/comparison/action 계약, 수집 trace 필드
-- 목적 슬롯의 순서나 블록 데이터 계약
+- 목적 reader flow, evidence requirement 또는 블록 eligibility 계약
 
 가능하면 담당별 브랜치/작업 트리를 분리하고, 상대 변경을 읽기 전 대규모 리팩터링이나
 공통 파일 수정을 피한다. 팀장 AI도 최종 블록을 임의 선택하거나 근거 없는 값을 채우면
 안 된다. 최종 블록 선택은 계속 결정론적 계약이 담당한다.
+
+### 8-6. `9dfb515` / `2f2ba86` 이후 현재 hardening 상태
+
+아래는 이미 구현됐으므로 다시 별도 구조를 만들거나 과거 방식으로 되돌리지 않는다.
+
+**목적·슬롯·블록**
+
+- `common/purpose_slots.py`가 네 목적의 narrative slot 순서와 후보 블록 우선순위를
+  담당한다. 최종 `resolve_slots()`는 lead-first 2패스를 유지한다.
+- `common/block_shapes.py`는 UI와 분리된 블록 적격성 계약이다. line/bar/KPI뿐 아니라
+  landscape, grouped bar, share split, ranking, benchmark, level/decision matrix,
+  cause tree 등의 입력 조건을 판정한다.
+- `reporting/dashboard_streamlit/blocks/slot_blocks.py`가 live Streamlit 슬롯 렌더러의
+  단일 등록 지점이다. `blocks/purpose_templates.py`는 보조적 선언 문서이며 현재 슬롯
+  선택의 source of truth가 아니다.
+- 질문의 명시 요구(비교·추이·추천·원인·대응)는 purpose만 바꾸는 단일 키워드가 아니라
+  `question_answer_type`과 `answer_requirements`에서 evidence requirement로 구체화한다.
+  수집 이후에는 eligibility와 reader flow가 표현 블록과 순서를 정한다.
+
+**Evidence structuring**
+
+- `MetricPoint`는 절대값 외에 원문이 직접 말한 상대지표를
+  `is_relative` / `comparison_period` / `value_origin`으로 보존한다. 상대지표에서
+  보이지 않는 절대값을 계산하거나 단일 배수를 가짜 시계열로 만들지 않는다.
+- metric grouping은 label alias가 같아도 unit, `share_of`, time basis, 상대/절대 속성이
+  다르면 한 계열로 합치지 않는다.
+- landscape는 같은 topic·geography·time context가 있는 데이터만 결합한다. 관련 없는
+  headline KPI를 붙여 복합 블록을 성립시키지 않는다.
+- 정성 `high/medium/low`는 원문이 직접 수준을 평가한 경우만 허용한다. 수치 크기나
+  긍정 표현만 보고 level을 만들지 않는다.
+- 인과 edge와 importance는 `sk_broadband` analyzer가 근거·대상 claim·cycle·basis를
+  검증한 뒤에만 보존한다. 다른 섹터에 같은 계약을 확장할 때 이 검증을 우회하지 않는다.
+
+**명시 alias 계약**
+
+- 엔터티·지표 통합은 `common/content_quality_validator.py`의 작은 명시 계약으로만 한다.
+  fuzzy matching을 추가하지 않는다.
+- HBM 쪽은 Samsung Electronics/삼성전자, SK hynix/SK하이닉스,
+  Micron Technology/마이크론과 검토된 시장규모 표현을 지원한다.
+- SK브로드밴드 쪽은 SK Broadband/SK브로드밴드/SKB, KT, LG Uplus 및 주요 OTT·숏폼
+  플랫폼의 bilingual alias를 지원한다. 단, `B tv = SK Broadband`,
+  `Genie TV = KT`처럼 서비스와 회사를 같은 엔터티로 합치지 않는다.
+- IPTV/초고속인터넷/OTT 가입자, 이용률·점유율·시청시간, 광고 reach, ARPU, churn,
+  브랜드 인지도·선호도, 모델 선호·브랜드 적합도, 롱폼·숏폼, 셋톱박스 원가처럼
+  서로 다른 측정값은 분리한다. 문자열이 비슷하다는 이유로 통합하지 않는다.
+
+이 상태의 회귀 기준은 `python -m pytest -q`의 **878 passed, 2 skipped**다. 문서만
+고치는 작업에서는 코드·프롬프트·테스트를 함께 바꾸지 않는다.

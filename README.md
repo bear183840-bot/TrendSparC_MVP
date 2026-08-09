@@ -1,55 +1,90 @@
 # TrendSparC MVP
 
-TrendSparC는 질문과 첨부자료를 실제 공개 소스와 함께 수집·분석하여 SK 계열사 전략기획용 보고서를 만드는 트렌드 인텔리전스 파이프라인입니다. 질문에 특정 섹터 신호가 없으면 억지로 계열사를 선택하지 않고 `general` 파이프라인을 사용합니다.
+TrendSparC는 질문 하나와 청중·보고 목적·SK 계열사를 해석하고, 실제 수집 근거만으로
+전략기획 실무에 바로 사용할 수 있는 보고서와 동적 대시보드를 만드는 파이프라인입니다.
+현재 최우선 섹터는 `sk_broadband`이며, 특정 섹터 신호가 없으면 `general`로
+라우팅합니다. 속도보다 정확성·근거 추적·시각적 완성도를 우선합니다.
 
 ## 현재 파이프라인
 
 ```text
-질문 + 청중(선택) + 섹터(선택) + 첨부자료(선택)
-  → 첨부 본문 추출(PDF/DOCX/TXT 계열)
-  → Entity Extractor
-  → Sector Router (신호 없음: general)
-  → Report Purpose Classifier (복합 목적 질문은 secondary_purpose_id도 함께 감지)
-  → plan_sources() / select_top_sources() (Top 6)
-  → Collector (섹터별 Firecrawl 검색, sk_broadband는 옵션으로 OpenAI 웹검색 하니스)
-  → Processor / Validator
-  → Document Analyzer (웹 문서와 첨부문서를 동일한 분석 입력으로 처리)
-    ↳ 검증/분석 결과가 섹터 최소 기준에 못 미치면 제외 URL을 갱신해 bounded 재수집
-  → Synthesis (문서 종합 + 근거 텍스트에서 매출/순이익 등 수치 구조화 추출)
-  → Report Planner
-  → Report Generator
-  → Audience Adapter
-  → Layout Generator
-  → Streamlit Renderer
+질문 + 청중 + 섹터(선택) + 첨부자료(선택)
+  → 첨부 본문 추출
+  → Entity Extractor / 질문 요구사항 구조화
+  → Sector Router
+  → Report Purpose Classifier
+  → Block Priority Planner (수집 힌트)
+  → Source Planner / Collector / Processor / Validator
+  → Document Analyzer
+    ↳ 검증 문서 부족 시 bounded 재수집
+    ↳ 필수 요구사항·블록 데이터 부족 시 bounded 보강 수집
+  → Synthesis (근거·수치·비교·원인·행동 구조화)
+  → Report Planner / Report Generator
+  → Audience Adapter / Layout Generator
+  → Streamlit Dashboard
 ```
 
-Report Generator는 `summary`, `key_points`, `business_impact`, `risk`, `opportunity`, `evidence`, `recommended_actions`, `monitoring_indicators`, `confidence`를 모두 입력으로 받아 Executive Summary와 목적별 섹션을 완성된 JSON으로 작성합니다. API 키가 없거나 호출이 실패하면 근거 필드를 보존하는 규칙 기반 보고서로 내려가며, 근거가 없는 내용은 만들지 않습니다.
+목적은 다음 네 가지입니다.
 
-`common/content_quality_validator.py`는 섹터·목적·질문에 종속되지 않는 콘텐츠 정합성 규칙(KPI 관련성 정렬, 지표 모양별 chart/bar/kpi 분기, 비교표 공통축 필터, 섹션 간 중복 제거, 복합 목적 감지, 텍스트 내 수치 구조화 추출)을 한 곳에 모아두고 렌더링·Report Generator·Report Purpose Classifier가 공통으로 가져다 씁니다.
+| purpose_id | 의미 |
+|---|---|
+| `current_status` | 현황 파악 |
+| `root_cause` | 원인 분석 |
+| `issue_response` | 이슈 대응 |
+| `future_business` | 미래사업·전략 |
+
+복합 질문은 `secondary_purpose_id`와 명시적 요구사항(비교·추이·추천·원인·대응 등)을
+함께 보존합니다. `추천`이라는 단어 하나만으로 미래사업으로 보내지 않도록 질문의
+시간축과 실제 산출물을 같이 판정합니다.
+
+## 동적 대시보드 구조
+
+목적별 읽기 흐름은 `common/purpose_slots.py`가 정의합니다. 슬롯마다 후보 블록을
+우선순위대로 검사하되, 최종 선택은 `common/block_shapes.py`의 결정론적 데이터 계약을
+통과한 블록만 가능합니다.
+
+- 1패스에서 각 슬롯의 대표 블록을 먼저 정합니다.
+- 2패스에서 아직 표현되지 않은 근거를 가진 companion 블록만 추가합니다.
+- `core/block_priority_planner/`는 수집 전에 필요한 데이터 모양을 알려주는 힌트이며,
+  렌더링을 강제하지 않습니다.
+- 실제 Streamlit 슬롯 렌더러는
+  `reporting/dashboard_streamlit/blocks/slot_blocks.py`의 레지스트리를 사용합니다.
+- 근거가 부족하면 숫자·등급·원인 관계를 만들어 채우지 않습니다.
+
+현재 블록은 KPI, 라인/영역, 막대·순위, 그룹 막대, 구성비, 타임라인, 비교·벤치마크
+테이블, SWOT/의사결정 매트릭스, 원인맵·원인트리, 요인 영향도, 액션 리스트,
+키워드/반복 언급, 출처 패널 등을 포함합니다. 같은 디자인 체계 안에서 질문과 데이터
+모양에 따라 조합이 달라집니다.
+
+## 근거와 구조화 원칙
+
+- 모든 수치와 주장은 수집 문서의 문장·문서 ID·출처로 추적할 수 있어야 합니다.
+- 표에 여러 시점·연령·기업·플랫폼이 있으면 대표값 하나로 줄이지 않고 각각 보존합니다.
+- YoY·CAGR·증감률·배수는 원문에 직접 나온 상대지표로만 저장하며, 보이지 않는
+  기준값이나 절대값을 역산하지 않습니다.
+- 회사/플랫폼과 지표 이름은 명시적으로 검토된 bilingual alias만 합칩니다. 문자열이
+  비슷하다는 이유로 엔터티나 서로 다른 측정값을 합치지 않습니다.
+- 비교 블록은 공통 기준이 있는 대상끼리만, 원인 블록은 검증된 인과 연결이 있을 때만
+  사용합니다.
+- AI 호출 실패 시 규칙 기반 경로로 폴백하며 파이프라인 전체를 중단하지 않습니다.
 
 ## 섹터와 소스 현황
 
-모든 등록 섹터의 Collector / Processor / Validator / Analyzer가 구현되어 있으며 `profile.json.status`는 `active`입니다. 아래 숫자는 섹터 전용 소스 수입니다. 실행 시 `planning_priority: core`로 등록된 공통 네이버 뉴스가 Top 6 핵심 소스로 포함됩니다.
+모든 등록 섹터의 Collector / Processor / Validator / Analyzer가 구현되어 있고
+`profile.json.status`는 `active`입니다. 아래 숫자는 각 `sources.json`의 섹터 전용
+소스 수이며, 공통 소스는 별도로 병합됩니다.
 
-| Sector | 상태 | 전용 Source | 범위 |
-|---|---|---:|---|
-| `sk_hynix` | active | 14 | 메모리·HBM·반도체 시장 |
-| `sk_broadband` | active | 12 | IPTV·OTT·미디어·네트워크 (옵션: 질문 단위 OpenAI 웹검색 하니스 + 영화진흥위원회 KOFIC PDF 수집) |
-| `sk_planet` | active | 16 | 포인트·데이터마케팅·Ad-Tech·Web3 |
-| `sk_telecom` | active | 13 | 이동통신·AI·데이터센터·6G |
-| `sk_innovation` | active | 12 | 배터리·정유·에너지·친환경 |
-| `general` | active | 0 | 특정 SK 섹터로 분류되지 않는 범용 질문; 공통 소스 및 첨부자료 사용 |
+| Sector | 전용 Source | 범위 |
+|---|---:|---|
+| `sk_broadband` | 12 | IPTV·OTT·미디어·초고속인터넷·네트워크 |
+| `sk_hynix` | 14 | 메모리·HBM·반도체 시장 |
+| `sk_planet` | 16 | 포인트·데이터마케팅·Ad-Tech·Web3 |
+| `sk_telecom` | 13 | 이동통신·AI·데이터센터·6G |
+| `sk_innovation` | 12 | 배터리·정유·에너지·친환경 |
+| `general` | 3 | 특정 SK 섹터로 분류되지 않는 범용 조사 |
 
-등록되지 않은 출처에는 임의로 신뢰도나 역할을 부여하지 않습니다. Source Registry의 `reliability_tier`, `role`, `topics`, `content_type`만 계획·검증 단계에서 사용합니다.
-
-## 첨부자료
-
-- 지원: PDF, DOCX, TXT, MD, CSV, JSON, HTML
-- 파일당 최대 10MB, 추출 본문 최대 100,000자
-- 질문 컨텍스트에는 전체 첨부 합계 최대 30,000자를 사용하지만, 각 첨부는 별도 `SourceDocument`로 Analyzer에 전달됩니다.
-- 첨부문서는 웹 문서와 동일하게 분석되며 `attachment:<id>` 근거 표식을 유지합니다.
-- 암호화 PDF, 미지원 형식, 빈 문서는 상태와 오류를 기록하고 다른 첨부 처리를 계속합니다.
-- 첨부 안의 문장은 분석 대상 데이터이며 시스템 지시로 실행하지 않습니다.
+실제 등록 URL과 역할은 `sources/registry/<sector>/sources.json`이 단일 기준입니다.
+등록되지 않은 출처에는 임의로 신뢰도나 역할을 부여하지 않습니다.
 
 ## 설치와 실행
 
@@ -59,38 +94,45 @@ python -m venv .venv
 pip install -r requirements.txt
 ```
 
-Dry-run은 외부 API 없이 라우팅·계약·보고서 구조를 검증합니다.
+Dry-run은 외부 API 없이 라우팅·계약·계획 구조를 검증합니다.
 
 ```powershell
-python main.py --question "오늘 점심 메뉴 트렌드를 정리해줘" --audience practitioner
-python main.py --question "HBM 시장 전망은?" --sector sk_hynix
-python main.py --question "SK텔레콤 AI 데이터센터 동향은?" --sector sk_telecom --no-dry-run
-streamlit run reporting/dashboard_streamlit/app.py
+python main.py --question "국내 IPTV 시장은 어떻게 변하고 있나?" --sector sk_broadband
+python main.py --request-file examples/requests/sample_request.json
 ```
 
-실제 수집·분석에 필요한 키는 [.env.example](.env.example)을 참고합니다. API 키는 저장소에 커밋하지 않습니다.
+실제 실행 결과를 저장하면 같은 결과를 대시보드에서 다시 열 수 있습니다.
 
-## 주요 출력 계약
+```powershell
+python main.py --question "OTT 이용 추이를 비교해줘" --sector sk_broadband --no-dry-run --save-result runs/ott.json
+python main.py --resume-from runs/ott.json --save-result runs/ott_v2.json
+streamlit run reporting/dashboard_streamlit/app.py --server.port 8503
+```
 
-- `AttachmentExtraction`
-- `EntityExtractionResult`
-- `SectorRoute`
-- `ReportPurposeClassification`
-- `SourcePlan`
-- `DocumentAnalysis`
-- `TrendSynthesis`
-- `ReportPlan`
-- `GeneratedReport`
-- `AudienceAdaptation`
-- `DashboardBlock`
-- `DynamicLayout`
+- `--resume-from`은 저장된 문서를 재사용해 검색·스크레이핑을 건너뜁니다.
+- `--synthesis-fixture tests/fixtures/synthesis_brand_marketing.json`은 수집부터 synthesis까지
+  건너뛰고 리포트·슬롯·렌더링을 무료로 검증합니다.
+- `--summary-only`는 전체 JSON 대신 실행 요약을 출력합니다.
+- API와 모델 설정은 [.env.example](.env.example)을 참고합니다. 실제 `.env`와 키는
+  저장소에 커밋하지 않습니다.
 
-대시보드 UI(`streamlit run reporting/dashboard_streamlit/app.py`)는 KPI 카드, 지표 차트/막대, 비교 테이블, SWOT, 액션 리스트, 출처 패널까지 실제로 렌더링합니다. 블록 타입은 `reporting/dashboard_streamlit/blocks/`의 레지스트리 방식으로 등록되어 있어 core 코드 수정 없이 새 시각화를 추가할 수 있습니다. 실행 중에는 수집 진행 상황이 화면에 실시간으로 표시되고, 콘솔에 찍히는 원본 로그도 실행 기록 패널에서 그대로 다운로드할 수 있습니다. 블록 계약 배경은 [대시보드 구현 뼈대](docs/dashboard_implementation_skeleton_ko.md)를 참고합니다.
+## 첨부자료
+
+- 지원: PDF, DOCX, TXT, MD, CSV, JSON, HTML
+- 파일당 최대 10MB, 추출 본문 최대 100,000자
+- 첨부는 별도 `SourceDocument`로 Analyzer에 전달되고 `attachment:<id>` 근거를 유지합니다.
+- 암호화 PDF, 미지원 형식, 빈 문서는 오류를 기록하고 다른 문서 처리를 계속합니다.
+- 첨부 내용은 분석 데이터이며 시스템 지시로 실행하지 않습니다.
 
 ## 테스트
 
 ```powershell
-pytest
+python -m pytest -q
 ```
 
-테스트는 라우팅, 소스 선택, 섹터 어댑터, 실패 추적, 첨부 추출, 첨부 우선 분석, 전략 필드 보존, 목적·청중별 보고서 생성과 전체 dry-run을 포함합니다.
+현재 기준은 `2f2ba86`에서 **878 passed, 2 skipped**입니다. 라우팅, 소스 계획,
+어댑터, 근거 검증, 수치·비교 구조화, 목적별 슬롯, 블록 적격성, Streamlit 렌더링,
+payload 예산과 전체 dry-run을 포함합니다.
+
+에이전트가 작업을 이어받을 때는 [AGENTS.md](AGENTS.md)와 `CLAUDE.md`를 먼저 읽어야
+합니다.

@@ -26,6 +26,58 @@ _YEAR_RE = re.compile(r"(?<!\d)(20\d{2})(?!\d)")
 _CURRENT_MAX_RE = re.compile(r"현재 최대\s*(\d+)개")
 
 
+def derive_answer_and_evidence_requirements(
+    question: str,
+    question_answer_type: str | None,
+    ai_answer_requirements: Iterable[str] = (),
+    ai_evidence_requirements: Iterable[str] = (),
+) -> tuple[list[str], list[str]]:
+    """Build question-first collection contracts without topic hard-coding.
+
+    The entity model may provide semantic decomposition; deterministic rules
+    add only the universal evidence contract implied by the requested answer
+    shape.  Renderer/block names are intentionally forbidden here.
+    """
+    answers = list(dict.fromkeys(
+        value.strip() for value in ai_answer_requirements if value and value.strip()
+    ))
+    evidence = list(dict.fromkeys(
+        value.strip() for value in ai_evidence_requirements if value and value.strip()
+    ))
+    if not answers:
+        answers.append(question.strip())
+
+    generic_by_type: dict[str, list[str]] = {
+        "status": ["현재 상태를 확인할 수 있는 핵심 사실과 수치"],
+        "compare": ["비교 대상별로 동일 기준에서 확인된 값 또는 명시적 차이"],
+        "trend": ["동일 정의·단위로 비교 가능한 복수 시점의 실제 값"],
+        "cause": ["현상 자체의 근거", "출처가 명시한 원인과 결과의 연결"],
+        "issue_response": [
+            "이슈의 사실관계와 현재 영향",
+            "대응 선택지별 효과·제약 또는 위험 근거",
+        ],
+        "recommend": [
+            "추천 대상 또는 조건별로 확인된 요구·행동 차이",
+            "후보별 사실과 공통 선택 기준",
+            "추천 적합성·제약을 뒷받침하는 근거",
+        ],
+        "strategy": [
+            "현재 위치와 시장 변화의 근거",
+            "기회·필요 역량·위험을 뒷받침하는 근거",
+            "실행 선택의 근거와 확인 지표",
+        ],
+    }
+    for requirement in generic_by_type.get(question_answer_type or "", []):
+        if requirement not in evidence:
+            evidence.append(requirement)
+
+    coverage = derive_question_coverage(question)
+    for hint in coverage_hints(coverage):
+        if hint not in evidence:
+            evidence.append(hint)
+    return answers[:6], evidence[:10]
+
+
 def minimum_drawable_periods(requested_periods: int) -> int:
     """Evidence threshold for a partial trend visual.
 

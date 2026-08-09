@@ -19,6 +19,7 @@ from common.content_quality_validator import (
     SWOT_COMPLETENESS_INSTRUCTION,
     TABLE_COMPLETENESS_INSTRUCTION,
     metric_value_type,
+    relative_metric_context,
     strip_particle,
 )
 from common.contracts import DocumentAnalysis, SourceDocument
@@ -144,6 +145,20 @@ _ANALYSIS_SCHEMA = {
                         "enum": ["actual", "estimate", "forecast", "target", "guidance"],
                         "description": "원문의 상태. 전망/추정/목표/가이던스를 실제값으로 바꾸지 말 것.",
                     },
+                    "is_relative": {
+                        "type": "boolean",
+                        "description": "YoY/CAGR/전년 대비/배수처럼 원문이 상대 변화로 명시한 수치만 true.",
+                    },
+                    "comparison_period": {
+                        "type": ["string", "null"],
+                        "maxLength": 80,
+                        "description": "원문이 명시한 비교 기준(전년 대비, 2025년 대비 등). 없으면 null.",
+                    },
+                    "value_origin": {
+                        "type": "string",
+                        "enum": ["source"],
+                        "description": "Analyzer는 원문 수치만 추출하므로 항상 source. 계산값 생성 금지.",
+                    },
                     "share_of": {
                         "type": ["string", "null"],
                         "maxLength": 120,
@@ -157,6 +172,7 @@ _ANALYSIS_SCHEMA = {
                 },
                 "required": [
                     "label", "subject", "period", "value", "unit", "is_forecast", "value_type",
+                    "is_relative", "comparison_period", "value_origin",
                     "share_of", "evidence_claim_id",
                 ],
                 "additionalProperties": False,
@@ -932,6 +948,7 @@ def _verified_metric_points(
         if grounded_share_of and _normalized_text(str(grounded_share_of)) not in normalized_local:
             grounded_share_of = None
         grounded_value_type = metric_value_type(quote)
+        grounded_relative, grounded_comparison_period = relative_metric_context(local_context)
         verified.append({
             **point,
             "period": grounded_period,
@@ -940,6 +957,9 @@ def _verified_metric_points(
             "share_of": grounded_share_of,
             "is_forecast": grounded_value_type != "actual",
             "value_type": grounded_value_type,
+            "is_relative": grounded_relative,
+            "comparison_period": grounded_comparison_period,
+            "value_origin": "source",
             "evidence_quote": quote,
         })
     return verified
@@ -1139,6 +1159,12 @@ def _recovered_metric_points(grounded_claims: list[dict]) -> list[dict]:
                 label = local_label or last_label or base_label
                 subject = local_label or None
                 last_label = label
+            is_relative, comparison_period = relative_metric_context(quote)
+            if (
+                is_relative and canonical_unit in {"%", "%p", "배"}
+                and not re.search(r"(?:CAGR|YoY|성장률|증가율|감소율|증감률|증감폭)", label, re.I)
+            ):
+                label = f"{label} 증감률"
             recovered.append({
                 "label": label,
                 "subject": subject,
@@ -1150,6 +1176,9 @@ def _recovered_metric_points(grounded_claims: list[dict]) -> list[dict]:
                     for marker in ("전망", "예상", "목표", "추정", "forecast", "estimate")
                 ),
                 "value_type": metric_value_type(quote),
+                "is_relative": is_relative,
+                "comparison_period": comparison_period,
+                "value_origin": "source",
                 "share_of": None,
                 "evidence_claim_id": claim["claim_id"],
                 "evidence_quote": quote,
@@ -1169,12 +1198,18 @@ def _merge_metric_points(verified: list[dict], recovered: list[dict]) -> list[di
         return unit
 
     verified_value_keys = {
-        (point.get("value"), unit_family(point), point.get("evidence_claim_id"))
+        (
+            point.get("value"), unit_family(point), point.get("evidence_claim_id"),
+            point.get("is_relative", False), point.get("comparison_period"),
+        )
         for point in verified
     }
     supplements = [
         point for point in recovered
-        if (point.get("value"), unit_family(point), point.get("evidence_claim_id"))
+        if (
+            point.get("value"), unit_family(point), point.get("evidence_claim_id"),
+            point.get("is_relative", False), point.get("comparison_period"),
+        )
         not in verified_value_keys
     ]
     for point in [*verified, *supplements]:
@@ -1182,6 +1217,8 @@ def _merge_metric_points(verified: list[dict], recovered: list[dict]) -> list[di
             point.get("period"), point.get("value"),
             unit_family(point),
             point.get("evidence_claim_id"),
+            point.get("is_relative", False),
+            point.get("comparison_period"),
         )
         if key in seen:
             continue
@@ -1281,6 +1318,126 @@ def _namespace_chunk_evidence(
     )
 
 
+_CLAIM_TYPES = {
+    "key_point", "business_impact", "risk", "opportunity", "strength",
+    "weakness", "comparison", "metric", "factor", "action", "monitoring",
+}
+
+
+def _load_analysis_json(content: str | None) -> dict:
+    """Accept JSON-schema output plus harmless provider wrappers.
+
+    Solar's OpenAI-compatible endpoint can return fenced JSON or a short prose
+    prefix even when response_format was supplied. We unwrap those forms but
+    never guess how to complete truncated JSON.
+    """
+    text = (content or "").strip()
+    if text.startswith("```"):
+        text = re.sub(r"^```(?:json)?\s*", "", text, flags=re.IGNORECASE)
+        text = re.sub(r"\s*```$", "", text)
+    try:
+        value = json.loads(text)
+    except json.JSONDecodeError:
+        start, end = text.find("{"), text.rfind("}")
+        if start < 0 or end <= start:
+            raise
+        value = json.loads(text[start:end + 1])
+    if not isinstance(value, dict):
+        raise TypeError("analysis payload must be a JSON object")
+    return value
+
+
+def _normalize_analysis_payload(data: dict) -> dict:
+    """Fill provider-omitted metadata without inventing evidence.
+
+    Items missing factual core fields are discarded. Only schema bookkeeping
+    (null/default flags, confidence, empty arrays) is supplied.
+    """
+    claims: list[dict] = []
+    for raw in data.get("grounded_claims") or []:
+        if not isinstance(raw, dict):
+            continue
+        if raw.get("claim_type") not in _CLAIM_TYPES:
+            continue
+        if not all(isinstance(raw.get(key), str) and raw.get(key).strip()
+                   for key in ("claim_id", "claim", "evidence_quote")):
+            continue
+        claim = dict(raw)
+        claim.setdefault("evidence_passage_id", None)
+        claim.setdefault("evidence_location", None)
+        claim.setdefault("as_of_date", None)
+        if claim.get("confidence") not in {"low", "medium", "high"}:
+            claim["confidence"] = "low"
+        claim.setdefault("parent_claim_id", None)
+        claim.setdefault("importance", None)
+        claim.setdefault("importance_basis", None)
+        claims.append(claim)
+
+    metrics: list[dict] = []
+    for raw in data.get("metric_points") or []:
+        if not isinstance(raw, dict):
+            continue
+        if not isinstance(raw.get("label"), str) or not isinstance(raw.get("period"), str):
+            continue
+        if not isinstance(raw.get("value"), (int, float)) or isinstance(raw.get("value"), bool):
+            continue
+        if not isinstance(raw.get("evidence_claim_id"), str):
+            continue
+        point = dict(raw)
+        point.setdefault("subject", None)
+        point.setdefault("unit", "")
+        point.setdefault("is_forecast", False)
+        value_type = point.get("value_type")
+        if value_type not in {"actual", "estimate", "forecast", "target", "guidance"}:
+            value_type = "forecast" if point["is_forecast"] else "actual"
+        point["value_type"] = value_type
+        point.setdefault("is_relative", False)
+        point.setdefault("comparison_period", None)
+        point["value_origin"] = "source"
+        point.setdefault("share_of", None)
+        metrics.append(point)
+
+    comparisons: list[dict] = []
+    for raw in data.get("comparison_points") or []:
+        if not isinstance(raw, dict):
+            continue
+        if not all(isinstance(raw.get(key), str) and raw.get(key).strip()
+                   for key in ("entity", "criterion", "value", "evidence_claim_id")):
+            continue
+        point = dict(raw)
+        if point.get("level") not in {None, "low", "medium", "high"}:
+            point["level"] = None
+        comparisons.append(point)
+
+    relevance = data.get("relevance_level")
+    if relevance not in {"direct", "partial", "background", "irrelevant"}:
+        relevance = "partial" if claims else "background"
+    sentiment = data.get("sentiment")
+    if sentiment not in {"positive", "neutral", "negative", "mixed"}:
+        sentiment = "neutral"
+    action_level = data.get("action_level")
+    if action_level not in {"Monitor", "Review", "Prepare", "Act", "insufficient_data"}:
+        action_level = "insufficient_data"
+    confidence = data.get("analysis_confidence")
+    if confidence not in {"low", "medium", "high"}:
+        confidence = "low"
+    return {
+        "summary": str(data.get("summary") or "")[:500],
+        "sentiment": sentiment,
+        "relevance_level": relevance,
+        "relevance_reason": str(data.get("relevance_reason") or "")[:300],
+        "grounded_claims": claims,
+        "covered_information_needs": [
+            value for value in (data.get("covered_information_needs") or [])
+            if isinstance(value, str)
+        ],
+        "metric_points": metrics,
+        "comparison_points": comparisons,
+        "action_level": action_level,
+        "analysis_confidence": confidence,
+    }
+
+
 def _analyze_document(
     client: OpenAI,
     system_prompt: str,
@@ -1288,7 +1445,7 @@ def _analyze_document(
     question: str,
     information_needs: list[str],
     *,
-    target_block_shapes: list[str] | None = None,
+    evidence_requirements: list[str] | None = None,
     content_override: str | None = None,
     claim_id_prefix: str | None = None,
     evidence_location_prefix: str | None = None,
@@ -1304,7 +1461,7 @@ def _analyze_document(
         {
             "question": question,
             "required_information_needs": information_needs,
-            "target_block_shapes": target_block_shapes or [],
+            "evidence_requirements": evidence_requirements or [],
             "document": {
                 "doc_id": document.doc_id,
                 "title": document.title,
@@ -1312,7 +1469,7 @@ def _analyze_document(
                 "evidence_passages": evidence_passages,
             },
             "analysis_instruction": (
-                "질문·required_information_needs·target_block_shapes에 직접 필요한 근거를 추출하라. "
+                "질문·required_information_needs·evidence_requirements에 직접 필요한 근거를 추출하라. "
                 "수치·시점·단위, 비교의 양쪽 대상, 순위·요인·날짜 정보를 우선하고 중복 주장은 만들지 마라. "
                 "항목 수를 줄이지 말고 각 claim·인용·이유의 문장만 최소 충분 길이로 간결하게 써라. "
                 "질문이 여러 측면을 요구할 때 문서가 그중 한 측면만 직접 뒷받침해도 partial이며, "
@@ -1324,12 +1481,21 @@ def _analyze_document(
                 "하나의 간결한 공통 metric명으로 정규화하되, 서로 다른 정의를 유사한 단어만으로 합치지 마라. "
                 "각 metric의 value_type은 actual/estimate/forecast/target/guidance 중 원문 표현에 맞게 "
                 "보존하고 미래·목표 수치를 actual로 표시하지 마라. "
+                "YoY/CAGR/전년 대비 증감률/배수처럼 원문이 상대 변화를 명시하면 is_relative=true, "
+                "comparison_period에는 원문 비교 기준만 기록하고 value_origin은 source로 두어라. "
+                "상대값으로 절대 기준값이나 누락 시점을 역산하지 마라. 여러 연도의 성장률이 각각 "
+                "명시된 경우에는 성장률 자체를 동일 label의 시계열로 보존하라. "
                 "share_of는 원문이 하나의 전체와 그 구성요소를 명시한 경우에만 그 전체 이름으로 채워라. "
                 "여러 기업·국가·기술을 공통 기준으로 비교한 자료는 entity와 criterion을 유지해 "
                 "항목별 comparison_points로 분리하라. "
-                "원문이 '때문에', '로 인해', 'driving', 'led to'처럼 인과를 직접 말하면 원인 claim과 "
+                "원문이 후보의 기준을 '매우 높음/높음/중간 수준/낮음/매우 낮음' 또는 "
+                "high/medium/low로 직접 평가한 경우에만 해당 comparison point의 level로 정규화하라. "
+                "시장 규모나 숫자가 크다는 이유로 level을 만들지 마라. "
+                "원문이 '때문에', '로 인해', '영향으로', 'caused', 'due to', 'driven by', "
+                "'resulted in', 'led to'처럼 인과를 직접 말하면 원인 claim과 "
                 "결과 claim을 분리하고 결과의 parent_claim_id를 원인 claim_id로 연결하라. 두 현상이 "
-                "같이 증가했다는 사실만으로 parent_claim_id를 만들지 마라. "
+                "같이 증가하거나 순서대로 언급됐다는 사실만으로 parent_claim_id를 만들지 마라. "
+                "'~에 따라'는 문장 전체가 결과를 주장할 때만 인과로 보고, '~에 따르면'은 인과가 아니다. "
                 f"{SWOT_COMPLETENESS_INSTRUCTION} "
                 f"{COMPARISON_COMPLETENESS_INSTRUCTION} "
                 f"{TABLE_COMPLETENESS_INSTRUCTION} "
@@ -1391,7 +1557,7 @@ def _analyze_document(
         )
         raise PipelineStageError(stage=_STAGE, reason=f"analysis refused for doc '{document.doc_id}'", detail=message.refusal)
     try:
-        data = json.loads(message.content)
+        data = _normalize_analysis_payload(_load_analysis_json(message.content))
         grounded_claims = _verified_claims(data, document, evidence_passages)
         grounded_claims = _repair_failed_claim_quotes(
             client,
@@ -1503,7 +1669,12 @@ def _analyze_document(
             outcome="invalid_response",
             error_type=type(exc).__name__,
         )
-        raise PipelineStageError(stage=_STAGE, reason=f"analysis response for doc '{document.doc_id}' did not match the expected schema", detail=str(exc)) from exc
+        preview = re.sub(r"\s+", " ", str(message.content or ""))[:600]
+        raise PipelineStageError(
+            stage=_STAGE,
+            reason=f"analysis response for doc '{document.doc_id}' did not match the expected schema",
+            detail=f"{type(exc).__name__}: {exc}; response_preview={preview}",
+        ) from exc
 
 
 def _unique_text(values: list[str | None]) -> list[str]:
@@ -1567,9 +1738,13 @@ def _merge_chunk_analyses(
             )
             key = (
                 remapped.label,
+                remapped.subject,
                 remapped.period,
                 remapped.value,
                 remapped.unit,
+                remapped.is_relative,
+                remapped.comparison_period,
+                remapped.value_origin,
                 remapped.evidence_claim_id,
             )
             if key not in seen_metrics:
@@ -1701,7 +1876,7 @@ def _analyze_chunked_document(
     document: SourceDocument,
     question: str,
     information_needs: list[str],
-    target_block_shapes: list[str] | None = None,
+    evidence_requirements: list[str] | None = None,
 ) -> DocumentAnalysis:
     is_pdf = _is_pdf_document(document)
     content = (document.content or "") if is_pdf else _clean_analysis_content(document.content)
@@ -1745,7 +1920,7 @@ def _analyze_chunked_document(
                     document,
                     question,
                     information_needs,
-                    target_block_shapes=target_block_shapes,
+                    evidence_requirements=evidence_requirements,
                     content_override=chunk,
                     claim_id_prefix=prefix,
                     evidence_location_prefix=location,
@@ -1777,7 +1952,7 @@ def analyze(
     source_documents: list[SourceDocument],
     question: str,
     information_needs: list[str] | None = None,
-    target_block_shapes: list[str] | None = None,
+    evidence_requirements: list[str] | None = None,
 ) -> list[DocumentAnalysis]:
     api_key = _api_key()
     if not api_key:
@@ -1785,7 +1960,7 @@ def analyze(
     client = OpenAI(api_key=api_key, **openai_client_kwargs(_BASE_URL_ENV_VAR))
     system_prompt = _load_system_prompt()
     needs = list(information_needs or [])
-    shapes = list(target_block_shapes or [])
+    requirements = list(evidence_requirements or [])
     analyses = []
     failures: list[str] = []
     for document in source_documents:
@@ -1799,19 +1974,20 @@ def analyze(
                 analyses.append(
                     _analyze_chunked_document(
                         client, system_prompt, document, question, needs,
-                        target_block_shapes=shapes,
+                        evidence_requirements=requirements,
                     )
                 )
             else:
                 analyses.append(
                     _analyze_document(
                         client, system_prompt, document, question, needs,
-                        target_block_shapes=shapes,
+                        evidence_requirements=requirements,
                     )
                 )
         except PipelineStageError as exc:
-            failures.append(f"{document.doc_id}: {exc.reason}")
-            print(f"[analyzer] doc '{document.doc_id}' could not be analysed: {exc.reason}",
+            detail = f": {exc.detail}" if exc.detail else ""
+            failures.append(f"{document.doc_id}: {exc.reason}{detail}")
+            print(f"[analyzer] doc '{document.doc_id}' could not be analysed: {exc.reason}{detail}",
                   file=sys.stderr)
     if not analyses:
         # Nothing survived - that genuinely is a stage failure, and the reason

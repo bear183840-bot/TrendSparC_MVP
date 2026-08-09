@@ -1,5 +1,23 @@
-# General source registry
+# General Source Registry
 
-`general` 섹터 전용 Source는 현재 등록하지 않는다.
+특정 SK 계열사·사업 섹터 신호가 없는 범용 조사 질문에 사용하는 실행용 Source를
+관리합니다.
 
-섹터가 명확하지 않은 질문은 `sources/registry/common/`의 공통 Source를 통해 최소한의 검색 범위를 확보한다. 특정 사업 영역이 확인되면 해당 섹터 Source Registry로 라우팅하는 것이 원칙이다.
+## 현재 등록 Source
+
+| 이름 | role | 주요 용도 |
+|---|---|---|
+| 대한민국 정책브리핑 | `regulatory_official` | 정부 정책·공식 발표 |
+| 경향신문 | `search` | 사회·경제·문화·생활 최신 기사 탐색 |
+| KOSIS 국가통계포털 | `market_analysis` | 공식 국가통계 확인 |
+
+공통 Source Registry의 네이버 뉴스도 계획 단계에서 병합됩니다. 실제 URL과
+메타데이터의 단일 기준은 같은 폴더의 `sources.json`입니다.
+
+## 운영 원칙
+
+- `general`은 다른 섹터가 명확하지 않을 때의 조사 fallback이지, 관련 섹터를 무시하는
+  우회 경로가 아닙니다.
+- 고정 KPI를 가정하지 않고 질문에서 필요한 측정값을 구조화합니다.
+- 등록되지 않은 출처에는 임의의 신뢰도나 역할을 부여하지 않습니다.
+- 뉴스 집계·언론 보도는 원 발행처와 본문 근거를 기준으로 검증합니다.

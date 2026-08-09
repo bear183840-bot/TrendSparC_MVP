@@ -2,8 +2,22 @@ from common.contracts import DocumentAnalysis, MetricPoint
 from core.question_coverage import (
     assess_question_coverage,
     coverage_safe_summary,
+    derive_answer_and_evidence_requirements,
     derive_question_coverage,
 )
+
+
+def test_recommendation_requirements_are_question_first_and_block_free():
+    answers, evidence = derive_answer_and_evidence_requirements(
+        "연령층별 광고 매체 및 모델 추천", "recommend",
+        ["연령층별로 적합한 광고 매체와 모델을 추천한다"],
+        ["연령층별 매체 이용 근거"],
+    )
+
+    assert answers == ["연령층별로 적합한 광고 매체와 모델을 추천한다"]
+    assert "연령층별 매체 이용 근거" in evidence
+    assert any("후보별" in item for item in evidence)
+    assert not any(token in " ".join(evidence) for token in ("KPI", "BAR", "TABLE", "블록"))
 
 
 def test_time_and_comparison_axes_are_derived_without_topic_hardcoding():

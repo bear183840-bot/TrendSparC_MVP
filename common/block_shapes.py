@@ -570,6 +570,69 @@ def has_landscape(metric_points: list[Any]) -> bool:
     return landscape_parts(metric_points) is not None
 
 
+_LANDSCAPE_GENERIC_TOKENS = frozenset({
+    "metric_market_size", "market", "시장", "size", "revenue", "매출", "규모", "가치",
+    "share", "점유율", "비중", "구성비", "growth", "rate", "성장률", "증가율", "감소율",
+    "증감률", "cagr", "current", "현재", "전체", "total", "지표", "수치",
+})
+_LANDSCAPE_SCOPE_ALIASES = {
+    "global": frozenset({"global", "worldwide", "글로벌", "세계"}),
+    "korea": frozenset({"korea", "korean", "국내", "한국"}),
+}
+
+
+def _landscape_context(points: list[Any]) -> tuple[set[str], set[str], set[str], set[str]]:
+    """Topic, geography, measurement family and explicit time context."""
+    raw = " ".join(
+        str(value)
+        for point in points
+        for value in (getattr(point, "label", ""), getattr(point, "share_of", ""))
+        if value
+    ).casefold()
+    normalized = re.sub(r"[^0-9a-z가-힣_]+", " ", raw)
+    tokens = set(normalized.split())
+    scopes = {
+        scope for scope, aliases in _LANDSCAPE_SCOPE_ALIASES.items()
+        if tokens & aliases
+    }
+    topics = tokens - _LANDSCAPE_GENERIC_TOKENS
+    for aliases in _LANDSCAPE_SCOPE_ALIASES.values():
+        topics -= aliases
+    families: set[str] = set()
+    semantic = " ".join(semantic_metric_key(getattr(point, "label", "")) for point in points)
+    if "metric_market_size" in semantic or re.search(r"(?:market|시장).*(?:size|규모|가치)", raw):
+        families.add("market_size")
+    if re.search(r"\b(?:share|cagr|growth|rate)\b|점유율|비중|구성비|성장률|증가율|감소율|증감률", raw):
+        families.add("market_structure")
+    periods = {
+        period_sort_key(getattr(point, "period", ""))
+        for point in points if is_time_period(getattr(point, "period", ""))
+    }
+    return topics, scopes, families, periods
+
+
+def _landscape_compatible(core: list[Any], complement: list[Any]) -> bool:
+    """Whether two independently valid blocks describe one environment.
+
+    Missing context is not filled by similarity. Generic market-size + market
+    share/growth is the only topic-free pairing allowed because both labels
+    explicitly state the same market structure.
+    """
+    core_topics, core_scopes, core_families, core_periods = _landscape_context(core)
+    other_topics, other_scopes, other_families, other_periods = _landscape_context(complement)
+    if core_scopes or other_scopes:
+        if core_scopes != other_scopes:
+            return False
+    if core_topics or other_topics:
+        if not core_topics or not other_topics or not (core_topics & other_topics):
+            return False
+    elif not ({"market_size"} <= core_families and "market_structure" in other_families):
+        return False
+    if core_periods and other_periods and not (core_periods & other_periods):
+        return False
+    return True
+
+
 def landscape_parts(metric_points: list[Any]) -> tuple[str, list[Any], str, list[Any]] | None:
     """``(core_kind, core_points, complement_kind, complement_points)``.
 
@@ -586,20 +649,28 @@ def landscape_parts(metric_points: list[Any]) -> tuple[str, list[Any], str, list
     ]
 
     if trend:
-        if shares:
-            return "trend", trend, "share", shares[0][1]
-        if item_groups:
-            return "trend", trend, "comparison", item_groups[0]
-        if kpi_groups:
-            return "trend", trend, "kpi", [points[0] for points in kpi_groups[:3]]
+        for _, share_points in shares:
+            if _landscape_compatible(trend, share_points):
+                return "trend", trend, "share", share_points
+        for item_points in item_groups:
+            if _landscape_compatible(trend, item_points):
+                return "trend", trend, "comparison", item_points
+        compatible_kpis = [
+            points[0] for points in kpi_groups
+            if _landscape_compatible(trend, [points[0]])
+        ][:3]
+        if compatible_kpis:
+            return "trend", trend, "kpi", compatible_kpis
         return None
 
     # Snapshot landscape: at least two distinct headline measures plus a
     # genuine structure. A collection of unrelated one-off figures alone is
     # a KPI grid, not an overview.
     headline = [points[0] for points in kpi_groups[:4]]
-    if len(headline) >= 2 and shares:
-        return "kpi", headline, "share", shares[0][1]
+    if len(headline) >= 2:
+        for _, share_points in shares:
+            if _landscape_compatible(headline, share_points):
+                return "kpi", headline, "share", share_points
     return None
 
 

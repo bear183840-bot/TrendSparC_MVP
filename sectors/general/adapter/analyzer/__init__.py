@@ -9,6 +9,10 @@ from pathlib import Path
 from openai import OpenAI
 
 from common.ai_client import openai_client_kwargs
+from common.content_quality_validator import (
+    QUALITATIVE_LEVEL_EXTRACTION_INSTRUCTION,
+    RELATIVE_METRIC_EXTRACTION_INSTRUCTION,
+)
 from common.contracts import DocumentAnalysis, SourceDocument
 from common.errors import PipelineStageError
 from sources.openai_retry import call_with_retry
@@ -46,8 +50,11 @@ _ANALYSIS_SCHEMA = {
                     "period": {"type": "string"},
                     "value": {"type": "number"},
                     "unit": {"type": "string"},
+                    "is_relative": {"type": "boolean", "description": "True only for an explicitly stated YoY/CAGR/growth/ratio value."},
+                    "comparison_period": {"type": ["string", "null"], "description": "Explicit comparison baseline; null when unstated."},
+                    "value_origin": {"type": "string", "enum": ["source"]},
                 },
-                "required": ["label", "period", "value", "unit"],
+                "required": ["label", "period", "value", "unit", "is_relative", "comparison_period", "value_origin"],
                 "additionalProperties": False,
             },
         },
@@ -120,7 +127,9 @@ def _analyze(client: OpenAI, prompt: str, document: SourceDocument, question: st
                         "estimate or calculate a value the document doesn't state. Financial tables commonly "
                         "show the same line item across several period columns side by side (e.g. 3Q25/3Q24/"
                         "2Q25) — when you see that pattern, extract every period as its own metric_point with "
-                        "the same label, not just one."
+                        "the same label, not just one. "
+                        f"{RELATIVE_METRIC_EXTRACTION_INSTRUCTION} "
+                        f"{QUALITATIVE_LEVEL_EXTRACTION_INSTRUCTION}"
                     ),
                 },
             ],
@@ -147,7 +156,7 @@ def analyze(
     information_needs: list[str] | None = None,
     # Accepted for signature parity with sk_broadband's analyzer (pipeline.py
     # calls every sector's analyze() the same way) - not yet acted on here.
-    target_block_shapes: list[str] | None = None,
+    evidence_requirements: list[str] | None = None,
 ) -> list[DocumentAnalysis]:
     api_key = os.getenv(_API_KEY_ENV_VAR) or os.getenv("OPENAI_API_KEY")
     if not api_key:

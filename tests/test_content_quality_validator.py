@@ -229,10 +229,11 @@ class TestExtractMetricPointsFromEvidence:
 
         points = extract_metric_points_from_evidence(evidence)
 
-        assert len(points) == 3
+        assert len(points) == 6
         assert (points[0].label, points[0].period, points[0].value, points[0].unit) == ("매출", "2025년", 45406.0, "억원")
-        assert (points[1].label, points[1].period, points[1].value) == ("매출", "2024년 2분기", 44540.0)
-        assert (points[2].label, points[2].period, points[2].value) == ("순이익", "2025년", 1414.8)
+        assert (points[1].label, points[1].value, points[1].is_relative) == ("매출 전년 대비 증감률", 3.0, True)
+        assert (points[2].label, points[2].period, points[2].value) == ("매출", "2024년 2분기", 44540.0)
+        assert (points[5].label, points[5].period, points[5].value) == ("순이익 전년 대비 증감률", "2025년", -46.0)
 
     def test_two_periods_of_the_same_label_are_chartable_as_a_bar(self):
         evidence = [
@@ -242,16 +243,22 @@ class TestExtractMetricPointsFromEvidence:
 
         points = extract_metric_points_from_evidence(evidence)
 
-        assert classify_metric_shape(points) == "bar"
+        absolute = [point for point in points if not point.is_relative]
+        assert classify_metric_shape(absolute) == "bar"
 
     def test_never_back_calculates_a_value_from_the_yoy_percentage_alone(self):
-        # Only one dated figure is stated - no second point should ever be
-        # invented from "전년 대비 3% 증가" alone.
+        # The stated relative rate is preserved, but no prior-year absolute
+        # level is invented from it.
         evidence = ["2025년 매출: 4조 5,406억원 (전년 대비 3% 증가)"]
 
         points = extract_metric_points_from_evidence(evidence)
 
-        assert len(points) == 1
+        assert len(points) == 2
+        assert [(point.value, point.unit, point.is_relative) for point in points] == [
+            (45406.0, "억원", False),
+            (3.0, "%", True),
+        ]
+        assert all(point.value_origin == "source" for point in points)
 
     def test_sentence_without_the_pattern_yields_nothing(self):
         evidence = ["특수관계자에 대한 매출액 비중은 15.9%이다 (2025년 1분기말 기준)"]
@@ -361,7 +368,10 @@ class TestExtractionQualifierCoverage:
 
         points = extract_metric_points_from_evidence(sentences)
 
-        assert {point.label for point in points} == {"매출", "영업이익", "순이익"}
+        assert {point.label for point in points if not point.is_relative} == {"매출", "영업이익", "순이익"}
+        assert {point.label for point in points if point.is_relative} == {
+            "매출 전년 대비 증감률", "영업이익 전년 대비 증감률", "순이익 전년 대비 증감률",
+        }
 
     def test_qualifier_alone_is_not_mistaken_for_a_metric(self):
         # No amount -> nothing to extract; never invent a value.
