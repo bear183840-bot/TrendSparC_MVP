@@ -10,7 +10,7 @@ core/request_pipeline/pipeline.py routes the `collector` role here through
 still own processing, validation and analysis. Direct usage:
 
     from sources.collectors.source_router import run_source_router
-    result = run_source_router("질문")
+    result = run_source_router("질문", audience="executive", purpose_id="issue_response")
 """
 
 from __future__ import annotations

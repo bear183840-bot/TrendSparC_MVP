@@ -101,6 +101,14 @@ class SearchPlanQuery(BaseModel):
     # the prompt directly asking for it - a formatting habit turned out to be
     # much less reliable than a plain content judgment ("what are the key
     # terms here?") for the same model.
+    # Capped to planner.py's _MAX_KEY_TERMS_PER_QUERY (2) regardless of how
+    # many the model names - multiple quoted exact-phrase terms in one query
+    # are effectively ANDed by web search, so quoting more than a couple
+    # makes a match across all of them vanishingly unlikely. Live-verified
+    # 2026-08-10: a query with 5 quoted terms returned almost nothing across
+    # 8 search calls. This list always reflects what was actually quoted in
+    # `query`, not everything the model originally named - terms beyond the
+    # cap are dropped before quoting, not just left unquoted.
     key_terms: list[str] = Field(default_factory=list)
     query_role: QueryRole = "direct"
     evidence_need_ids: list[str] = Field(default_factory=list)
@@ -111,6 +119,22 @@ class SearchPlan(BaseModel):
     queries: list[SearchPlanQuery] = Field(default_factory=list)
     evidence_needs: list[EvidenceNeed] = Field(default_factory=list)
     refinement: Optional[QueryRefinement] = None
+    # Which of the 4 report purposes shaped this plan's STEP 2.5 axis
+    # expansion (prompts/planner.md) - the caller's value if one was given,
+    # else the planner model's own classification (defensively clamped to
+    # these 4 values, None if the model returned something else). Recorded
+    # here (not just passed as an argument) so a SearchPlan is self-
+    # describing about what context actually shaped it, same reasoning as
+    # `intent` above.
+    purpose_id: Optional[Literal[
+        "current_status", "issue_response", "future_business", "root_cause"
+    ]] = None
+    # Which of the 4 report audiences shaped this plan's STEP 2.6 axis
+    # adjustment. Always an echo of the caller-supplied value - audience is
+    # never inferred from the question (see planner.py's plan_searches()).
+    audience: Optional[Literal[
+        "practitioner", "executive", "management", "external"
+    ]] = None
 
     def by_priority(self, priority: int) -> list[SearchPlanQuery]:
         return [query for query in self.queries if query.priority == priority]

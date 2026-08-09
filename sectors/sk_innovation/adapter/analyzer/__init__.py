@@ -26,7 +26,7 @@ from common.content_quality_validator import (
 )
 from common.contracts import DocumentAnalysis, SourceDocument
 from common.errors import PipelineStageError
-from sources.openai_retry import call_with_retry
+from sources.openai_retry import call_with_truncation_retry
 
 # SK이노베이션 전용 환경변수 및 스테이지 설정
 _API_KEY_ENV_VAR = "TRENDSPARC_SK_INNOVATION_ANALYZER_API_KEY"
@@ -36,6 +36,11 @@ _API_KEY_ENV_VAR = "TRENDSPARC_SK_INNOVATION_ANALYZER_API_KEY"
 _BASE_URL_ENV_VAR = "TRENDSPARC_SK_INNOVATION_ANALYZER_BASE_URL"
 _MODEL = "gpt-4o"  # 필요 시 사용 중인 OpenAI 모델로 변경 가능
 _STAGE = "sectors.sk_innovation.adapter.analyzer"
+_ANALYSIS_MAX_TOKENS = 4096
+# Escalation rung tried only when the first attempt is actually cut off
+# (finish_reason == "length") - see call_with_truncation_retry. Matches
+# sk_broadband's dense-content ceiling for consistency across sectors.
+_ANALYSIS_MAX_TOKENS_ESCALATED = 7000
 
 # SK이노베이션 디렉토리 구조 반영
 _SECTOR_ROOT = Path(__file__).resolve().parent.parent.parent
@@ -182,22 +187,25 @@ def _analyze_document(client: OpenAI, system_prompt: str, document: SourceDocume
     )
 
     try:
-        response = call_with_retry(lambda: client.chat.completions.create(
-            model=_MODEL,
-            max_tokens=4096,
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_content},
-            ],
-            response_format={
-                "type": "json_schema",
-                "json_schema": {
-                    "name": "document_analysis",
-                    "schema": _ANALYSIS_SCHEMA,
-                    "strict": True,
+        response, _ = call_with_truncation_retry(
+            lambda max_tokens: client.chat.completions.create(
+                model=_MODEL,
+                max_tokens=max_tokens,
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_content},
+                ],
+                response_format={
+                    "type": "json_schema",
+                    "json_schema": {
+                        "name": "document_analysis",
+                        "schema": _ANALYSIS_SCHEMA,
+                        "strict": True,
+                    },
                 },
-            },
-        ))
+            ),
+            [_ANALYSIS_MAX_TOKENS, _ANALYSIS_MAX_TOKENS_ESCALATED],
+        )
     except Exception as exc:  # API/네트워크 실패 시 예외 처리
         raise PipelineStageError(
             stage=_STAGE,

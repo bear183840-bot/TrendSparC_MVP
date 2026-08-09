@@ -39,6 +39,8 @@ def emit_ai_usage(
     guessed from characters.
     """
     usage = getattr(response, "usage", None) if response is not None else None
+    choices = getattr(response, "choices", None) if response is not None else None
+    finish_reason = getattr(choices[0], "finish_reason", None) if choices else None
     record = {
         "stage": stage,
         "model": model,
@@ -50,6 +52,12 @@ def emit_ai_usage(
         "prompt_tokens": _usage_value(usage, "prompt_tokens"),
         "completion_tokens": _usage_value(usage, "completion_tokens"),
         "total_tokens": _usage_value(usage, "total_tokens"),
+        # finish_reason == "length" means the response was cut off at
+        # requested_max_tokens - the direct signal call_with_truncation_retry
+        # (sources/openai_retry.py) acts on, surfaced here so a still-
+        # truncated response is visible from the log alone, without having
+        # to compare completion_tokens to requested_max_tokens by hand.
+        "finish_reason": finish_reason,
     }
     if error_type:
         record["error_type"] = error_type

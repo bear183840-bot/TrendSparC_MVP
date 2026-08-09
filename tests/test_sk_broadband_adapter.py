@@ -1335,6 +1335,49 @@ def test_broadband_analyzer_uses_structured_schema(monkeypatch):
     assert user_payload["document"]["evidence_passages"][0]["passage_id"] == "P001"
 
 
+def _with_finish_reason(response, finish_reason):
+    return types.SimpleNamespace(
+        choices=[
+            types.SimpleNamespace(message=response.choices[0].message, finish_reason=finish_reason)
+        ]
+    )
+
+
+def test_broadband_analyzer_escalates_max_tokens_after_truncated_response(monkeypatch):
+    """2026-08-10 regression: a truncated response (finish_reason == "length")
+    at the default 4,500-token ceiling used to be a lost document entirely
+    (JSONDecodeError, no retry) - a live pilot run lost 2 of 4 documents this
+    way. Now escalates once to the dense ceiling (7,000) before giving up -
+    see sources/openai_retry.py's call_with_truncation_retry."""
+    monkeypatch.setenv("TRENDSPARC_SK_BROADBAND_ANALYZER_API_KEY", "test-key")
+    truncated = _with_finish_reason(_make_response(), "length")
+    complete = _make_response()
+    fake_openai = _SequenceFakeOpenAI([truncated, complete])
+    monkeypatch.setattr(analyzer_module, "OpenAI", lambda api_key: fake_openai)
+    monkeypatch.setattr(analyzer_module, "_load_system_prompt", lambda: "system prompt")
+
+    result = analyze(
+        [_document()],
+        "OTT 시장 변화가 SK브로드밴드에 주는 영향은?",
+        ["OTT와 IPTV 경쟁 변화"],
+    )
+
+    calls = fake_openai.chat.completions.calls
+    assert [call["max_tokens"] for call in calls] == [4500, 7000]
+    assert result[0].summary == "요약"
+
+
+def test_broadband_analyzer_does_not_escalate_when_response_is_not_truncated(monkeypatch):
+    monkeypatch.setenv("TRENDSPARC_SK_BROADBAND_ANALYZER_API_KEY", "test-key")
+    fake_openai = _FakeOpenAI(_make_response())
+    monkeypatch.setattr(analyzer_module, "OpenAI", lambda api_key: fake_openai)
+    monkeypatch.setattr(analyzer_module, "_load_system_prompt", lambda: "system prompt")
+
+    analyze([_document()], "OTT 시장 변화가 SK브로드밴드에 주는 영향은?", ["OTT와 IPTV 경쟁 변화"])
+
+    assert fake_openai.chat.completions.last_kwargs["max_tokens"] == 4500
+
+
 def test_broadband_analyzer_uses_compact_stage_specific_prompt():
     prompt = analyzer_module._load_system_prompt()
 

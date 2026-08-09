@@ -25,7 +25,7 @@ from common.content_quality_validator import (
 from common.contracts import DocumentAnalysis, SourceDocument
 from common.errors import PipelineStageError
 from common.metric_quality import clean_dimension
-from sources.openai_retry import call_with_retry
+from sources.openai_retry import call_with_retry, call_with_truncation_retry
 
 _API_KEY_ENV_VAR = "TRENDSPARC_SK_BROADBAND_ANALYZER_API_KEY"
 _FALLBACK_API_KEY_ENV_VAR = "OPENAI_API_KEY"
@@ -1511,24 +1511,37 @@ def _analyze_document(
         },
         ensure_ascii=False,
     )
+    # Escalates to the dense ceiling only if the first attempt is actually
+    # cut off (finish_reason == "length") - see call_with_truncation_retry's
+    # docstring. If _analysis_max_tokens() already picked the dense ceiling,
+    # there is nowhere higher to escalate to; the ladder stays one rung and
+    # behavior is unchanged from before this fix.
+    token_ceilings = (
+        [analysis_max_tokens]
+        if analysis_max_tokens >= _DENSE_ANALYSIS_MAX_TOKENS
+        else [analysis_max_tokens, _DENSE_ANALYSIS_MAX_TOKENS]
+    )
     try:
-        response = call_with_retry(lambda: client.chat.completions.create(
-            model=_model(),
-            max_tokens=analysis_max_tokens,
-            temperature=0,
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_content},
-            ],
-            response_format={
-                "type": "json_schema",
-                "json_schema": {
-                    "name": "sk_broadband_document_analysis",
-                    "schema": _ANALYSIS_SCHEMA,
-                    "strict": True,
+        response, analysis_max_tokens = call_with_truncation_retry(
+            lambda max_tokens: client.chat.completions.create(
+                model=_model(),
+                max_tokens=max_tokens,
+                temperature=0,
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_content},
+                ],
+                response_format={
+                    "type": "json_schema",
+                    "json_schema": {
+                        "name": "sk_broadband_document_analysis",
+                        "schema": _ANALYSIS_SCHEMA,
+                        "strict": True,
+                    },
                 },
-            },
-        ))
+            ),
+            token_ceilings,
+        )
     except Exception as exc:  # noqa: BLE001
         emit_ai_usage(
             stage=_STAGE,

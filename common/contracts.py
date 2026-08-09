@@ -297,6 +297,12 @@ class WebSearchContext(BaseModel):
     # company's own coverage and the underlying research is never found.
     needs_generic_topic_round: bool = False
     report_purpose_id: Optional[str] = None
+    # The audience the resulting report will be shown to (practitioner/
+    # executive/management/external, or None if unspecified) - lets the
+    # search planner adjust query axes for who will read the report, not
+    # just what it's about. Never inferred here; echoes whatever the
+    # pipeline resolved request.target_audience to (see pipeline.py).
+    audience: Optional[str] = None
     information_needs: list[str] = Field(default_factory=list)
     answer_requirements: list[str] = Field(default_factory=list)
     evidence_requirements: list[str] = Field(default_factory=list)
