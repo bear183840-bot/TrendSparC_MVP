@@ -65,7 +65,10 @@ def test_synthesis_extracts_metric_points_from_revenue_prose_in_evidence():
     synthesis = synthesize("req_revenue", "sk_broadband", [analysis])
 
     labels = {point.label for point in synthesis.metric_series}
-    assert labels == {"매출", "순이익"}
+    assert labels == {
+        "매출", "순이익", "매출 전년 대비 증감률", "순이익 전년 대비 증감률",
+    }
+    assert all(point.value_origin == "source" for point in synthesis.metric_series)
     revenue_point = next(point for point in synthesis.metric_series if point.label == "매출")
     assert revenue_point.period == "2025년"
     assert revenue_point.value == 45406.0
@@ -88,7 +91,18 @@ def test_synthesis_does_not_duplicate_a_metric_the_analyzer_already_extracted():
 
     synthesis = synthesize("req_both", "sk_broadband", [analysis])
 
-    assert len(synthesis.metric_series) == 1
+    # The absolute level is deduplicated. The explicitly stated YoY rate is a
+    # second source fact, not a duplicate and not a derived endpoint.
+    assert len(synthesis.metric_series) == 2
+    absolute = [point for point in synthesis.metric_series if not point.is_relative]
+    relative = [point for point in synthesis.metric_series if point.is_relative]
+    assert len(absolute) == 1 and len(relative) == 1
+    assert (absolute[0].label, absolute[0].period, absolute[0].value, absolute[0].unit) == (
+        "매출", "2025년", 45406.0, "억원"
+    )
+    assert (relative[0].value, relative[0].unit, relative[0].comparison_period) == (
+        3.0, "%", "전년 대비"
+    )
 
 
 def test_synthesis_leaves_structured_fields_empty_when_no_document_provides_them():

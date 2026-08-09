@@ -207,16 +207,19 @@ def _blocks_for(fixture_name: str, purpose_id: str) -> tuple[list[str], dict[str
     return blocks, structured
 
 
-def test_revenue_trend_fixture_draws_the_quantitative_blocks():
+def test_mixed_annual_and_quarterly_revenue_does_not_draw_a_false_trend():
     blocks, structured = _blocks_for("analysis_revenue_trend", "current_status")
 
-    assert "chart" in blocks
+    # Q3 cumulative, full-year and Q1 revenue are different time bases. They
+    # remain available as quantitative blocks, but must not share one line.
+    assert "chart" not in blocks
+    assert "bar" in blocks
     assert "timeline" in blocks
     assert "metric_comparison" in blocks
     # Purely quantitative evidence - no entity-vs-entity comparison to draw.
     assert "table" not in blocks and "radar" not in blocks
     # The figures reach a report section rather than staying in evidence prose.
-    assert structured["metric_points"] == 4
+    assert structured["metric_points"] == 5
 
 
 def test_iptv_competition_fixture_draws_the_qualitative_blocks():

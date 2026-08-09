@@ -15,6 +15,7 @@ from common.content_quality_validator import (
     dedupe_across_blocks,
     dedupe_structured_across_sections,
     metric_value_type,
+    relative_metric_context,
 )
 from common.contracts import (
     ActionImpact,
@@ -110,12 +111,15 @@ _REPORT_SCHEMA = {
                         "type": "string",
                         "enum": ["actual", "estimate", "forecast", "target", "guidance"],
                     },
+                    "is_relative": {"type": "boolean"},
+                    "comparison_period": {"type": ["string", "null"]},
+                    "value_origin": {"type": "string", "enum": ["source"]},
                     "share_of": {"type": ["string", "null"]},
                     "source_sentence": {"type": "string"},
                 },
                 "required": [
                     "label", "subject", "period", "value", "unit", "is_forecast", "value_type",
-                    "share_of", "source_sentence",
+                    "is_relative", "comparison_period", "value_origin", "share_of", "source_sentence",
                 ],
             },
         },
@@ -374,6 +378,7 @@ def _metric_points_with_failures(
         if not supported:
             failures.append({"item_id": f"m{index}", "kind": "metric", "raw": raw})
             continue
+        is_relative, comparison_period = relative_metric_context(sentence)
         verified.append(
             MetricPoint(
                 label=normalize_metric_label(label) or label,
@@ -383,6 +388,9 @@ def _metric_points_with_failures(
                 unit=(raw.get("unit") or "").strip() or None,
                 is_forecast=_is_stated_forecast(raw),
                 value_type=metric_value_type(raw.get("source_sentence", "")),
+                is_relative=is_relative,
+                comparison_period=comparison_period,
+                value_origin="source",
                 share_of=(raw.get("share_of") or "").strip() or None,
             )
         )
@@ -1036,7 +1044,7 @@ def _metric_for_writer(point: dict) -> dict:
     sentence already exists once in `synthesis.evidence`; the report writer
     only needs the structured axes plus a stable reference to it.
     """
-    return {
+    compact = {
         "metric_id": point.get("metric_id"),
         "label": point.get("label"),
         "subject": point.get("subject"),
@@ -1047,6 +1055,13 @@ def _metric_for_writer(point: dict) -> dict:
         "value_type": point.get("value_type", "actual"),
         "evidence_synthesis_claim_id": point.get("evidence_synthesis_claim_id"),
     }
+    if point.get("is_relative"):
+        compact.update({
+            "is_relative": True,
+            "comparison_period": point.get("comparison_period"),
+            "value_origin": point.get("value_origin", "source"),
+        })
+    return compact
 
 
 def _referenced_claim_ids(report_plan: Any) -> set[str]:

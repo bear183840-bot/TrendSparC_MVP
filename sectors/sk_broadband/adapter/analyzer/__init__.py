@@ -19,6 +19,7 @@ from common.content_quality_validator import (
     SWOT_COMPLETENESS_INSTRUCTION,
     TABLE_COMPLETENESS_INSTRUCTION,
     metric_value_type,
+    relative_metric_context,
     strip_particle,
 )
 from common.contracts import DocumentAnalysis, SourceDocument
@@ -144,6 +145,20 @@ _ANALYSIS_SCHEMA = {
                         "enum": ["actual", "estimate", "forecast", "target", "guidance"],
                         "description": "원문의 상태. 전망/추정/목표/가이던스를 실제값으로 바꾸지 말 것.",
                     },
+                    "is_relative": {
+                        "type": "boolean",
+                        "description": "YoY/CAGR/전년 대비/배수처럼 원문이 상대 변화로 명시한 수치만 true.",
+                    },
+                    "comparison_period": {
+                        "type": ["string", "null"],
+                        "maxLength": 80,
+                        "description": "원문이 명시한 비교 기준(전년 대비, 2025년 대비 등). 없으면 null.",
+                    },
+                    "value_origin": {
+                        "type": "string",
+                        "enum": ["source"],
+                        "description": "Analyzer는 원문 수치만 추출하므로 항상 source. 계산값 생성 금지.",
+                    },
                     "share_of": {
                         "type": ["string", "null"],
                         "maxLength": 120,
@@ -157,6 +172,7 @@ _ANALYSIS_SCHEMA = {
                 },
                 "required": [
                     "label", "subject", "period", "value", "unit", "is_forecast", "value_type",
+                    "is_relative", "comparison_period", "value_origin",
                     "share_of", "evidence_claim_id",
                 ],
                 "additionalProperties": False,
@@ -932,6 +948,7 @@ def _verified_metric_points(
         if grounded_share_of and _normalized_text(str(grounded_share_of)) not in normalized_local:
             grounded_share_of = None
         grounded_value_type = metric_value_type(quote)
+        grounded_relative, grounded_comparison_period = relative_metric_context(local_context)
         verified.append({
             **point,
             "period": grounded_period,
@@ -940,6 +957,9 @@ def _verified_metric_points(
             "share_of": grounded_share_of,
             "is_forecast": grounded_value_type != "actual",
             "value_type": grounded_value_type,
+            "is_relative": grounded_relative,
+            "comparison_period": grounded_comparison_period,
+            "value_origin": "source",
             "evidence_quote": quote,
         })
     return verified
@@ -1139,6 +1159,12 @@ def _recovered_metric_points(grounded_claims: list[dict]) -> list[dict]:
                 label = local_label or last_label or base_label
                 subject = local_label or None
                 last_label = label
+            is_relative, comparison_period = relative_metric_context(quote)
+            if (
+                is_relative and canonical_unit in {"%", "%p", "배"}
+                and not re.search(r"(?:CAGR|YoY|성장률|증가율|감소율|증감률|증감폭)", label, re.I)
+            ):
+                label = f"{label} 증감률"
             recovered.append({
                 "label": label,
                 "subject": subject,
@@ -1150,6 +1176,9 @@ def _recovered_metric_points(grounded_claims: list[dict]) -> list[dict]:
                     for marker in ("전망", "예상", "목표", "추정", "forecast", "estimate")
                 ),
                 "value_type": metric_value_type(quote),
+                "is_relative": is_relative,
+                "comparison_period": comparison_period,
+                "value_origin": "source",
                 "share_of": None,
                 "evidence_claim_id": claim["claim_id"],
                 "evidence_quote": quote,
@@ -1169,12 +1198,18 @@ def _merge_metric_points(verified: list[dict], recovered: list[dict]) -> list[di
         return unit
 
     verified_value_keys = {
-        (point.get("value"), unit_family(point), point.get("evidence_claim_id"))
+        (
+            point.get("value"), unit_family(point), point.get("evidence_claim_id"),
+            point.get("is_relative", False), point.get("comparison_period"),
+        )
         for point in verified
     }
     supplements = [
         point for point in recovered
-        if (point.get("value"), unit_family(point), point.get("evidence_claim_id"))
+        if (
+            point.get("value"), unit_family(point), point.get("evidence_claim_id"),
+            point.get("is_relative", False), point.get("comparison_period"),
+        )
         not in verified_value_keys
     ]
     for point in [*verified, *supplements]:
@@ -1182,6 +1217,8 @@ def _merge_metric_points(verified: list[dict], recovered: list[dict]) -> list[di
             point.get("period"), point.get("value"),
             unit_family(point),
             point.get("evidence_claim_id"),
+            point.get("is_relative", False),
+            point.get("comparison_period"),
         )
         if key in seen:
             continue
@@ -1324,12 +1361,21 @@ def _analyze_document(
                 "하나의 간결한 공통 metric명으로 정규화하되, 서로 다른 정의를 유사한 단어만으로 합치지 마라. "
                 "각 metric의 value_type은 actual/estimate/forecast/target/guidance 중 원문 표현에 맞게 "
                 "보존하고 미래·목표 수치를 actual로 표시하지 마라. "
+                "YoY/CAGR/전년 대비 증감률/배수처럼 원문이 상대 변화를 명시하면 is_relative=true, "
+                "comparison_period에는 원문 비교 기준만 기록하고 value_origin은 source로 두어라. "
+                "상대값으로 절대 기준값이나 누락 시점을 역산하지 마라. 여러 연도의 성장률이 각각 "
+                "명시된 경우에는 성장률 자체를 동일 label의 시계열로 보존하라. "
                 "share_of는 원문이 하나의 전체와 그 구성요소를 명시한 경우에만 그 전체 이름으로 채워라. "
                 "여러 기업·국가·기술을 공통 기준으로 비교한 자료는 entity와 criterion을 유지해 "
                 "항목별 comparison_points로 분리하라. "
-                "원문이 '때문에', '로 인해', 'driving', 'led to'처럼 인과를 직접 말하면 원인 claim과 "
+                "원문이 후보의 기준을 '매우 높음/높음/중간 수준/낮음/매우 낮음' 또는 "
+                "high/medium/low로 직접 평가한 경우에만 해당 comparison point의 level로 정규화하라. "
+                "시장 규모나 숫자가 크다는 이유로 level을 만들지 마라. "
+                "원문이 '때문에', '로 인해', '영향으로', 'caused', 'due to', 'driven by', "
+                "'resulted in', 'led to'처럼 인과를 직접 말하면 원인 claim과 "
                 "결과 claim을 분리하고 결과의 parent_claim_id를 원인 claim_id로 연결하라. 두 현상이 "
-                "같이 증가했다는 사실만으로 parent_claim_id를 만들지 마라. "
+                "같이 증가하거나 순서대로 언급됐다는 사실만으로 parent_claim_id를 만들지 마라. "
+                "'~에 따라'는 문장 전체가 결과를 주장할 때만 인과로 보고, '~에 따르면'은 인과가 아니다. "
                 f"{SWOT_COMPLETENESS_INSTRUCTION} "
                 f"{COMPARISON_COMPLETENESS_INSTRUCTION} "
                 f"{TABLE_COMPLETENESS_INSTRUCTION} "
@@ -1567,9 +1613,13 @@ def _merge_chunk_analyses(
             )
             key = (
                 remapped.label,
+                remapped.subject,
                 remapped.period,
                 remapped.value,
                 remapped.unit,
+                remapped.is_relative,
+                remapped.comparison_period,
+                remapped.value_origin,
                 remapped.evidence_claim_id,
             )
             if key not in seen_metrics:

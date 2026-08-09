@@ -269,9 +269,9 @@ def canonical_time_id(period: str | None) -> str:
 
 
 _SEMANTIC_NOISE_RE = re.compile(
-    r"\b(?:global|worldwide|expected|estimated|forecast|forecasted|projected|"
+    r"\b(?:expected|estimated|forecast|forecasted|projected|"
     r"actual|estimate|guidance|target|current)\b|"
-    r"(?:글로벌|세계|전망치?|예상치?|추정치?|실적|가이던스|목표치?|현재)",
+    r"(?:전망치?|예상치?|추정치?|실적|가이던스|목표치?|현재)",
     re.I,
 )
 _MARKET_SIZE_PATTERNS = (
@@ -281,15 +281,8 @@ _MARKET_SIZE_PATTERNS = (
 )
 
 
-def semantic_metric_key(label: str | None) -> str:
-    """Conservative, deterministic identity for a metric label.
-
-    It only removes presentation/status words and normalizes a small set of
-    bilingual *measurement phrases*.  Topic-bearing tokens remain, so
-    ``HBM market size`` and ``DRAM market size`` cannot collapse together.
-    This is intentionally not fuzzy string matching: similarity alone is not
-    evidence that two measurements share a definition.
-    """
+def _lexical_metric_key(label: str | None) -> str:
+    """Meaning-preserving lexical normalization before explicit aliases."""
     text = unicodedata.normalize("NFKC", label or "").casefold()
     for pattern in _MARKET_SIZE_PATTERNS:
         text = pattern.sub(" metric_market_size ", text)
@@ -302,12 +295,287 @@ def semantic_metric_key(label: str | None) -> str:
     return " ".join(text.split())
 
 
-def semantic_entity_key(entity: str | None) -> str:
-    """Conservative identity across punctuation and legal-suffix variants."""
+# Small, explicit and auditable semantic contracts. Add an entry only when
+# domain owners are willing to assert identity; unresolved wording stays a
+# separate metric. Scope-bearing words (global/Korea, revenue/shipments,
+# product names) are deliberately not generic noise.
+_EXPLICIT_METRIC_ALIAS_CONTRACTS: tuple[tuple[str, tuple[str, ...]], ...] = (
+    (
+        "hbm metric_market_size",
+        ("HBM market size", "HBM market revenue", "HBM 시장 규모", "HBM 시장 가치"),
+    ),
+    (
+        "global hbm metric_market_size",
+        (
+            "global HBM market size", "global HBM market revenue",
+            "worldwide HBM market size", "글로벌 HBM 시장 규모", "세계 HBM 시장 규모",
+        ),
+    ),
+    (
+        "iptv subscribers",
+        ("IPTV subscribers", "IPTV subscriber count", "IPTV 가입자", "IPTV 가입자 수"),
+    ),
+    (
+        "broadband subscribers",
+        (
+            "broadband subscribers", "fixed broadband subscribers",
+            "초고속인터넷 가입자", "초고속 인터넷 가입자 수",
+        ),
+    ),
+    (
+        "ott subscribers",
+        ("OTT subscribers", "OTT subscriber count", "OTT 가입자", "OTT 가입자 수"),
+    ),
+    (
+        "paid ott usage rate",
+        (
+            "paid OTT usage rate", "paid OTT platform usage rate",
+            "유료 OTT 이용률", "유료 OTT 플랫폼 이용률",
+        ),
+    ),
+    (
+        "ott market share",
+        ("OTT market share", "OTT 시장 점유율", "OTT 점유율"),
+    ),
+    (
+        "iptv market share",
+        ("IPTV market share", "IPTV 시장 점유율", "IPTV 점유율"),
+    ),
+    (
+        "ott viewing time",
+        ("OTT viewing time", "OTT 시청 시간", "OTT 이용 시간"),
+    ),
+    (
+        "media reach",
+        ("media reach", "advertising reach", "광고 도달률", "매체 도달률"),
+    ),
+    (
+        "platform usage rate",
+        ("platform usage rate", "플랫폼 이용률", "동영상 플랫폼 이용률"),
+    ),
+    (
+        "arpu",
+        ("ARPU", "average revenue per user", "가입자당 평균 매출", "가입자당평균매출"),
+    ),
+    (
+        "churn rate",
+        ("churn rate", "subscriber churn rate", "해지율", "가입자 이탈률"),
+    ),
+    (
+        "sports subscription intent",
+        (
+            "sports subscription intent", "스포츠 중계 가입 의향",
+            "스포츠 포함 상품 가입 의향",
+        ),
+    ),
+    (
+        "brand awareness",
+        ("brand awareness", "브랜드 인지도"),
+    ),
+    (
+        "brand preference",
+        ("brand preference", "브랜드 선호도"),
+    ),
+    (
+        "model preference",
+        ("advertising model preference", "광고 모델 선호도", "모델 선호도"),
+    ),
+    (
+        "brand fit",
+        ("brand fit", "brand-model fit", "브랜드 적합도", "브랜드-모델 적합도"),
+    ),
+    (
+        "long form usage rate",
+        ("long-form usage rate", "longform usage rate", "롱폼 이용률"),
+    ),
+    (
+        "short form usage rate",
+        ("short-form usage rate", "shortform usage rate", "숏폼 이용률"),
+    ),
+    (
+        "set top box unit cost",
+        ("set-top box unit cost", "STB unit cost", "셋톱박스 원가", "셋톱박스 단위원가"),
+    ),
+)
+_EXPLICIT_METRIC_ALIAS_INDEX = {
+    _lexical_metric_key(alias): canonical
+    for canonical, aliases in _EXPLICIT_METRIC_ALIAS_CONTRACTS
+    for alias in aliases
+}
+
+
+def semantic_metric_key(label: str | None) -> str:
+    """Conservative, deterministic identity for a metric label.
+
+    It only removes presentation/status words and normalizes a small set of
+    bilingual *measurement phrases*.  Topic-bearing tokens remain, so
+    ``HBM market size`` and ``DRAM market size`` cannot collapse together.
+    This is intentionally not fuzzy string matching: similarity alone is not
+    evidence that two measurements share a definition.
+    """
+    key = _lexical_metric_key(label)
+    return _EXPLICIT_METRIC_ALIAS_INDEX.get(key, key)
+
+
+def _lexical_entity_key(entity: str | None) -> str:
     text = unicodedata.normalize("NFKC", entity or "").casefold()
     text = re.sub(r"\b(?:incorporated|inc|corporation|corp|company|co|ltd|limited)\b\.?", " ", text)
     text = re.sub(r"(?:주식회사|㈜)", " ", text)
     return re.sub(r"[^0-9a-z가-힣]+", "", text)
+
+
+# Cross-script names are never fuzzy-matched. Each group is an explicit
+# contract with audit metadata. Ambiguous abbreviations such as "Samsung" or
+# "SK" are intentionally absent.
+_EXPLICIT_ENTITY_ALIAS_CONTRACTS: tuple[dict[str, Any], ...] = (
+    {
+        "canonical": "Samsung Electronics",
+        "aliases": ("Samsung Electronics", "Samsung Electronics, Inc.", "삼성전자"),
+        "entity_type": "company",
+        "sectors": ("sk_hynix",),
+    },
+    {
+        "canonical": "SK hynix",
+        "aliases": ("SK hynix", "SK하이닉스", "에스케이하이닉스"),
+        "entity_type": "company",
+        "sectors": ("sk_hynix",),
+    },
+    {
+        "canonical": "Micron Technology",
+        "aliases": ("Micron Technology", "Micron", "마이크론"),
+        "entity_type": "company",
+        "sectors": ("sk_hynix",),
+    },
+    {
+        "canonical": "SK Broadband",
+        "aliases": (
+            "SK Broadband", "SK브로드밴드", "SK 브로드밴드",
+            "에스케이브로드밴드", "SKB",
+        ),
+        "entity_type": "company",
+        "sectors": ("sk_broadband",),
+    },
+    {
+        "canonical": "KT",
+        "aliases": ("KT", "KT Corporation", "케이티"),
+        "entity_type": "company",
+        "sectors": ("sk_broadband",),
+    },
+    {
+        "canonical": "LG Uplus",
+        "aliases": ("LG Uplus", "LG U+", "LG유플러스", "LG 유플러스"),
+        "entity_type": "company",
+        "sectors": ("sk_broadband",),
+    },
+    {
+        "canonical": "Netflix",
+        "aliases": ("Netflix", "넷플릭스"),
+        "entity_type": "platform",
+        "sectors": ("sk_broadband",),
+    },
+    {
+        "canonical": "YouTube",
+        "aliases": ("YouTube", "유튜브"),
+        "entity_type": "platform",
+        "sectors": ("sk_broadband",),
+    },
+    {
+        "canonical": "TVING",
+        "aliases": ("TVING", "Tving", "티빙"),
+        "entity_type": "platform",
+        "sectors": ("sk_broadband",),
+    },
+    {
+        "canonical": "Wavve",
+        "aliases": ("Wavve", "웨이브"),
+        "entity_type": "platform",
+        "sectors": ("sk_broadband",),
+    },
+    {
+        "canonical": "Coupang Play",
+        "aliases": ("Coupang Play", "쿠팡플레이", "쿠팡 플레이"),
+        "entity_type": "platform",
+        "sectors": ("sk_broadband",),
+    },
+    {
+        "canonical": "Disney+",
+        "aliases": ("Disney+", "Disney Plus", "디즈니플러스", "디즈니 플러스"),
+        "entity_type": "platform",
+        "sectors": ("sk_broadband",),
+    },
+    {
+        "canonical": "Instagram Reels",
+        "aliases": ("Instagram Reels", "인스타그램 릴스", "릴스"),
+        "entity_type": "platform",
+        "sectors": ("sk_broadband",),
+    },
+    {
+        "canonical": "YouTube Shorts",
+        "aliases": ("YouTube Shorts", "유튜브 쇼츠"),
+        "entity_type": "platform",
+        "sectors": ("sk_broadband",),
+    },
+    {
+        "canonical": "TikTok",
+        "aliases": ("TikTok", "틱톡"),
+        "entity_type": "platform",
+        "sectors": ("sk_broadband",),
+    },
+    {
+        "canonical": "Naver Clip",
+        "aliases": ("Naver Clip", "네이버 클립"),
+        "entity_type": "platform",
+        "sectors": ("sk_broadband",),
+    },
+)
+_EXPLICIT_ENTITY_ALIAS_INDEX = {
+    _lexical_entity_key(alias): _lexical_entity_key(contract["canonical"])
+    for contract in _EXPLICIT_ENTITY_ALIAS_CONTRACTS
+    for alias in contract["aliases"]
+}
+
+
+def semantic_entity_key(entity: str | None) -> str:
+    """Deterministic identity across legal suffixes and explicit aliases."""
+    key = _lexical_entity_key(entity)
+    return _EXPLICIT_ENTITY_ALIAS_INDEX.get(key, key)
+
+
+_RELATIVE_METRIC_RE = re.compile(
+    r"(?:\b(?:yoy|year[- ]on[- ]year|cagr)\b|전년(?:\s*동기)?\s*대비|"
+    r"증가율|감소율|성장률|증감률|\d+(?:\.\d+)?\s*배(?:\s*(?:증가|성장|확대))?|"
+    r"두\s*배(?:\s*(?:증가|성장|확대)))",
+    re.I,
+)
+_COMPARISON_PERIOD_RE = re.compile(
+    r"((?:20\d{2}\s*년?|전년(?:\s*동기)?|직전(?:\s*분기|\s*연도)?|전월)\s*대비)",
+    re.I,
+)
+
+
+def relative_metric_context(text: str | None) -> tuple[bool, str | None]:
+    """Return an explicit relative-metric signal and stated baseline.
+
+    No absolute value is calculated. This lexical gate validates analyzer
+    output from the evidence text; magnitude alone can never make a point
+    relative.
+    """
+    source = unicodedata.normalize("NFKC", text or "")
+    if not _RELATIVE_METRIC_RE.search(source):
+        return False, None
+    comparison = _COMPARISON_PERIOD_RE.search(source)
+    return True, comparison.group(1).strip() if comparison else None
+
+
+def _period_basis(period: str | None) -> str:
+    text = canonical_time_id(period) if is_time_period(period) else (period or "")
+    if re.search(r"\d{1,2}\s*월", text):
+        return "month"
+    if re.search(r"[1-4]\s*분기", text):
+        return "quarter"
+    if re.search(r"20\d{2}", text):
+        return "year"
+    return "category"
 
 
 _UNIT_SCALES: dict[str, tuple[str, float]] = {
@@ -508,6 +776,19 @@ COMPARISON_COMPLETENESS_INSTRUCTION = (
     "적용됩니다."
 )
 
+RELATIVE_METRIC_EXTRACTION_INSTRUCTION = (
+    "YoY·CAGR·전년 대비 증감률·배수처럼 원문이 상대 변화를 직접 수치로 말하면 그 상대값도 "
+    "metric_point로 보존하고 is_relative=true로 표시하세요. comparison_period에는 원문이 "
+    "명시한 비교 기준만 쓰고 value_origin은 source로 두세요. 여러 연도의 성장률이 각각 "
+    "명시되면 성장률 자체를 같은 label의 시계열로 추출할 수 있습니다. 단일 '두 배 전망'을 "
+    "100→200으로 바꾸거나 기준값과 증감률로 절대값을 계산하면 안 됩니다."
+)
+
+QUALITATIVE_LEVEL_EXTRACTION_INSTRUCTION = (
+    "문서가 후보의 특정 기준을 매우 높음·높음·중간 수준·낮음·매우 낮음 또는 "
+    "high/medium/low로 직접 평가한 경우에만 comparison_point.level을 high/medium/low로 "
+    "정규화하세요. 일반 수치가 크거나 표현이 긍정적이라는 이유로 level을 만들지 마세요."
+)
 
 def rank_by_relevance(items: list[str], question_terms: list[str]) -> list[str]:
     """Reorder `items` so the ones sharing a term with `question_terms` come
@@ -583,10 +864,20 @@ def classify_metric_shape(points_for_one_label: list[Any]) -> MetricShape:
 
 
 def group_metric_points_by_label(metric_points: list[Any]) -> dict[str, list[Any]]:
-    semantic_groups: dict[tuple[str, str], list[tuple[Any, str, float]]] = {}
+    semantic_groups: dict[tuple[Any, ...], list[tuple[Any, str, float]]] = {}
     for point in metric_points:
         canonical_unit, scale = comparable_unit(getattr(point, "unit", None))
-        key = (semantic_metric_key(point.label), canonical_unit)
+        # Metric identity and series compatibility are separate checks. Even
+        # an explicit alias must not merge a different denominator or time
+        # basis onto one series.
+        denominator = semantic_metric_key(getattr(point, "share_of", None))
+        key = (
+            semantic_metric_key(point.label), canonical_unit, denominator,
+            _period_basis(getattr(point, "period", None)),
+            getattr(point, "is_relative", False),
+            getattr(point, "comparison_period", None),
+            getattr(point, "value_origin", "source"),
+        )
         semantic_groups.setdefault(key, []).append((point, canonical_unit, scale))
 
     grouped: dict[str, list[Any]] = {}
@@ -605,11 +896,18 @@ def group_metric_points_by_label(metric_points: list[Any]) -> dict[str, list[Any
             for point, unit, scale in rows
         ]
         # Preserve the historic public key wherever possible. If the same
-        # display label genuinely occurs with incompatible units, keep both
-        # groups distinct rather than merging them onto one false axis.
+        # display label genuinely occurs with incompatible units, denominator
+        # or time basis, keep every group distinct rather than overwriting or
+        # merging it onto one false axis.
         key = display_label
         if key in grouped:
-            key = f"{display_label} [{rows[0][1]}]"
+            suffix = rows[0][1] or "별도 기준"
+            candidate = f"{display_label} [{suffix}]"
+            serial = 2
+            while candidate in grouped:
+                candidate = f"{display_label} [{suffix} {serial}]"
+                serial += 1
+            key = candidate
             normalized = [
                 _normalized_metric_copy(
                     point, label=key, unit=unit, scale=scale,
@@ -623,6 +921,7 @@ def group_metric_points_by_label(metric_points: list[Any]) -> dict[str, list[Any
             identity = (
                 getattr(point, "subject", None), point.period, float(point.value), point.unit,
                 getattr(point, "value_type", "actual"),
+                getattr(point, "share_of", None),
             )
             if identity in seen:
                 continue
@@ -936,9 +1235,9 @@ def extract_metric_points_from_evidence(evidence: list[str]) -> list[MetricPoint
     <amount>원" facts out of prose evidence sentences into MetricPoint
     objects, so a stated financial figure becomes chartable/rankable
     structured data instead of only ever appearing as an unstructured
-    sentence. A YoY percentage in the same sentence, if present, is not
-    turned into a second point - only literal, directly-stated period+value
-    pairs are extracted (see module docstring above)."""
+    sentence. An explicit YoY percentage in the same sentence is preserved as
+    a separate relative metric; it is never used to reconstruct an unstated
+    prior-year or endpoint value."""
     extracted: list[MetricPoint] = []
     for text in evidence:
         if not text:
@@ -951,4 +1250,15 @@ def extract_metric_points_from_evidence(evidence: list[str]) -> list[MetricPoint
             label = _METRIC_LABEL_NORMALIZATION.get(label, label)
             period = re.sub(r"\s+", " ", match.group("period")).strip()
             extracted.append(MetricPoint(label=label, period=period, value=amount, unit="억원"))
+            if match.group("pct"):
+                direction = -1.0 if match.group("direction") == "감소" else 1.0
+                extracted.append(MetricPoint(
+                    label=f"{label} 전년 대비 증감률",
+                    period=period,
+                    value=float(match.group("pct")) * direction,
+                    unit="%",
+                    is_relative=True,
+                    comparison_period="전년 대비",
+                    value_origin="source",
+                ))
     return extracted

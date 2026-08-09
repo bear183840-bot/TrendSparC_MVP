@@ -431,6 +431,19 @@ class MetricPoint(BaseModel):
     # target or company guidance from being flattened into one generic future
     # bucket. No pipeline stage may promote a non-actual value to actual.
     value_type: Literal["actual", "estimate", "forecast", "target", "guidance"] = "actual"
+    # Relative measurements are still real source-stated metrics, but they are
+    # not absolute levels. ``value``/``unit`` carry the stated rate or ratio
+    # (for example 40 + "%" or 2 + "배"); this flag prevents downstream code
+    # from treating it as market size or reconstructing a synthetic baseline.
+    # ``comparison_period`` is copied only when the source names the base
+    # ("전년 대비", "2025년 대비", ...). It may remain None for an explicit
+    # CAGR whose baseline period is not stated.
+    is_relative: bool = False
+    comparison_period: Optional[str] = None
+    # Normalization changes representation without creating a fact, so it
+    # remains ``source``. ``derived`` is reserved for a future deterministic
+    # calculation contract; current analyzers are not allowed to emit it.
+    value_origin: Literal["source", "derived"] = "source"
     # The whole this figure is a share of ("스포츠 시청 이용자 전체"), where
     # the source frames it that way. A donut claims its slices partition one
     # population, and nothing in a plain percentage says whether it does -

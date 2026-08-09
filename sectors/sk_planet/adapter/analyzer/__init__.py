@@ -19,6 +19,8 @@ from openai import OpenAI
 from common.ai_client import openai_client_kwargs
 from common.content_quality_validator import (
     COMPARISON_COMPLETENESS_INSTRUCTION,
+    QUALITATIVE_LEVEL_EXTRACTION_INSTRUCTION,
+    RELATIVE_METRIC_EXTRACTION_INSTRUCTION,
     SWOT_COMPLETENESS_INSTRUCTION,
     TABLE_COMPLETENESS_INSTRUCTION,
 )
@@ -92,8 +94,11 @@ _ANALYSIS_SCHEMA = {
                     "period": {"type": "string", "description": "문서에 명시된 시점 그대로, 예: '2023년 2분기'"},
                     "value": {"type": "number"},
                     "unit": {"type": "string", "description": "예: '만 명', '억원'. 없으면 빈 문자열."},
+                    "is_relative": {"type": "boolean", "description": "원문이 YoY/CAGR/전년 대비/배수로 명시한 상대 수치만 true."},
+                    "comparison_period": {"type": ["string", "null"], "description": "원문이 명시한 비교 기준. 없으면 null."},
+                    "value_origin": {"type": "string", "enum": ["source"]},
                 },
-                "required": ["label", "period", "value", "unit"],
+                "required": ["label", "period", "value", "unit", "is_relative", "comparison_period", "value_origin"],
                 "additionalProperties": False,
             },
         },
@@ -165,7 +170,9 @@ def _analyze_document(client: OpenAI, system_prompt: str, document: SourceDocume
         "실제 주제가 질문과 무관한 경우(키워드만 겹치고 본문 내용은 다른 경우)에만 false로 판단하세요. "
         f"{SWOT_COMPLETENESS_INSTRUCTION} "
         f"{COMPARISON_COMPLETENESS_INSTRUCTION} "
-                f"{TABLE_COMPLETENESS_INSTRUCTION} "
+        f"{TABLE_COMPLETENESS_INSTRUCTION} "
+        f"{RELATIVE_METRIC_EXTRACTION_INSTRUCTION} "
+        f"{QUALITATIVE_LEVEL_EXTRACTION_INSTRUCTION} "
         "문서에 수치와 시점이 함께 명시되어 있으면(예: '2023년 매출 500억원') "
         "metric_points에 그대로 추출하고, 두 대상을 비교하는 서술이 있으면(예: 'A사가 B사보다 저렴하다') "
         "comparison_points에 추출하세요. 단, 문서에 명시되지 않은 값은 추정하거나 계산하지 마세요. "
