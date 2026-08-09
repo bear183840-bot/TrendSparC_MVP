@@ -262,6 +262,11 @@ not make a market question company_update.
 - information_needs selects 1-4 from {information_need_categories}, describing needed
 evidence: financial results; customers/demand; product/technology; operations/supply;
 strategy/investment; competition; regulation/risk; or user sentiment.
+- answer_requirements: 1-5 concise deliverables the user's question explicitly asks
+the report to answer. Split compound asks; do not mention charts, blocks, or layouts.
+- evidence_requirements: 1-8 concrete kinds of evidence needed to support those
+deliverables (for example segment-level facts, common comparison criteria, or a
+same-definition time series). Do not mention KPI/BAR/TABLE or invent facts.
 
 Search fields:
 - organizations: named or clearly implied companies, agencies, institutions.
@@ -322,11 +327,19 @@ def _schema(sector_ids: list[str]) -> dict:
                 "minItems": 0,
                 "maxItems": 4,
             },
+            "answer_requirements": {
+                "type": "array", "items": {"type": "string", "maxLength": 180},
+                "minItems": 1, "maxItems": 5,
+            },
+            "evidence_requirements": {
+                "type": "array", "items": {"type": "string", "maxLength": 180},
+                "minItems": 1, "maxItems": 8,
+            },
         },
         "required": [
             "response_mode", "direct_answer", "sector_id", "routing_confidence",
             "primary_intent", "perspective", "organizations", "technologies",
-            "keywords", "information_needs",
+            "keywords", "information_needs", "answer_requirements", "evidence_requirements",
         ],
         "additionalProperties": False,
     }
@@ -380,7 +393,7 @@ def extract_entities_ai(
         client = OpenAI(api_key=api_key, **openai_client_kwargs(_BASE_URL_ENV_VAR))
         response = client.chat.completions.create(
             model=_model(),
-            max_tokens=500,
+            max_tokens=750,
             temperature=0,
             messages=[
                 {"role": "system", "content": system_content},
@@ -488,6 +501,8 @@ def extract_entities_ai(
             technologies=list(dict.fromkeys(technologies)),
             keywords=list(dict.fromkeys(clean_keywords)),
             information_needs=list(dict.fromkeys(data.get("information_needs", []))),
+            answer_requirements=list(dict.fromkeys(data.get("answer_requirements", []))),
+            evidence_requirements=list(dict.fromkeys(data.get("evidence_requirements", []))),
             response_mode=data.get("response_mode", "report"),
             direct_answer=data.get("direct_answer"),
             sector_id=selected_sector_id,
@@ -502,13 +517,15 @@ def extract_entities_ai(
             system_content=system_content,
             user_content=request.question,
             schema=_schema(sector_ids),
-            requested_max_tokens=500,
+            requested_max_tokens=750,
             response=response,
             counts={
                 "organizations": len(result.organizations),
                 "technologies": len(result.technologies),
                 "keywords": len(result.keywords),
                 "information_needs": len(result.information_needs),
+                "answer_requirements": len(result.answer_requirements),
+                "evidence_requirements": len(result.evidence_requirements),
             },
         )
         return result
@@ -519,7 +536,7 @@ def extract_entities_ai(
             system_content=locals().get("system_content", _COMPACT_SYSTEM_PROMPT),
             user_content=request.question,
             schema=_schema(locals().get("sector_ids", ["general"])),
-            requested_max_tokens=500,
+            requested_max_tokens=750,
             response=locals().get("response"),
             outcome="failed",
             error_type=type(exc).__name__,

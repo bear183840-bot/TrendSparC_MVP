@@ -59,6 +59,14 @@ class EntityExtractionResult(BaseModel):
     # Evidence categories required to answer the question. These are shared
     # across sectors and matched against registry-owned source capabilities.
     information_needs: list[str] = Field(default_factory=list)
+    # Concrete deliverables requested by the question, expressed without
+    # dashboard/block vocabulary.  These answer "what must the report answer?"
+    # while information_needs remains the coarser registry capability axis.
+    answer_requirements: list[str] = Field(default_factory=list)
+    # Evidence shapes needed to support the deliverables above.  These are
+    # semantic requirements (comparable figures, segment facts, causal links,
+    # candidate criteria...), never renderer names such as KPI or BAR.
+    evidence_requirements: list[str] = Field(default_factory=list)
     # Conversational questions do not enter the report pipeline. Report-worthy
     # questions without an SK-sector match continue through the general route.
     response_mode: Optional[Literal["report", "direct_answer"]] = None
@@ -110,15 +118,13 @@ class ReportPurposeClassification(BaseModel):
 
 
 class SlotTarget(BaseModel):
-    """One purpose_slots.Slot, seen before collection instead of after it.
+    """One purpose_slots.Slot restated for narrative/layout diagnostics.
 
     `priority_block_types` is that slot's own `candidates` tuple, copied
     verbatim - not a second, independently-authored priority table. The one
-    new judgement made here is `required_data_hint`: a plain-language
-    restatement of what the top candidate's block_shapes predicate actually
-    requires (e.g. "chart" needs a label with 3+ distinct periods), handed to
-    the collector/analyzer as a target to search and extract *for*, before
-    any document has been read.
+    `required_data_hint` documents what each candidate would require if the
+    evidence later makes it eligible.  It is never handed to source search or
+    the analyzer: questions determine collection, evidence determines blocks.
     """
 
     slot_id: str
@@ -292,18 +298,14 @@ class WebSearchContext(BaseModel):
     needs_generic_topic_round: bool = False
     report_purpose_id: Optional[str] = None
     information_needs: list[str] = Field(default_factory=list)
+    answer_requirements: list[str] = Field(default_factory=list)
+    evidence_requirements: list[str] = Field(default_factory=list)
     # Structural evidence explicitly requested by the question itself.  This
     # is separate from optional dashboard-shape hints: "지난 5년" and
     # "A vs B" are answer requirements even if a prose answer is possible.
     question_coverage: Optional[QuestionCoverageRequirement] = None
-    # Natural-language hints from block_priority_planner about which data
-    # *shapes* (a 3+ period trend, a 2+ entity comparison, ...) would let the
-    # final report draw a real chart/table instead of falling back to plain
-    # bullet text - see common/purpose_slots.py. Unlike information_needs,
-    # missing entries never block the harness's sufficient=True gate (see
-    # sources/collectors/ai_search_harness.py); a report can always answer
-    # the question in prose, so this only biases which follow-up queries get
-    # tried, never halts collection.
+    # Deprecated compatibility field for old saved runs. Runtime collection
+    # must not read it; block eligibility is evaluated only after analysis.
     target_block_shapes: list[str] = Field(default_factory=list)
     suggested_terms: list[str] = Field(default_factory=list)
     as_of_date: Optional[str] = None
@@ -325,6 +327,8 @@ class SourcePlan(BaseModel):
     registered_sources: list[PlannedSource] = Field(default_factory=list)
     question_keywords: list[str] = Field(default_factory=list)
     information_needs: list[str] = Field(default_factory=list)
+    answer_requirements: list[str] = Field(default_factory=list)
+    evidence_requirements: list[str] = Field(default_factory=list)
     search_context: Optional[WebSearchContext] = None
     notes: Optional[str] = None
 
@@ -378,10 +382,9 @@ class EvidenceCoverageAssessment(BaseModel):
     relevant_doc_ids: list[str]
     covered_information_needs: list[str]
     missing_information_needs: list[str]
-    # Which of WebSearchContext.target_block_shapes the scraped text so far
-    # actually supports/doesn't. Tracked the same way as information needs,
-    # but deliberately excluded from `sufficient` - see target_block_shapes'
-    # docstring on WebSearchContext.
+    covered_evidence_requirements: list[str] = Field(default_factory=list)
+    missing_evidence_requirements: list[str] = Field(default_factory=list)
+    # Deprecated compatibility fields for previously archived assessments.
     covered_block_shapes: list[str] = Field(default_factory=list)
     missing_block_shapes: list[str] = Field(default_factory=list)
     next_queries: list[str]
@@ -393,6 +396,8 @@ class WebSearchHarnessResult(BaseModel):
     sufficient: bool = False
     covered_information_needs: list[str] = Field(default_factory=list)
     missing_information_needs: list[str] = Field(default_factory=list)
+    covered_evidence_requirements: list[str] = Field(default_factory=list)
+    missing_evidence_requirements: list[str] = Field(default_factory=list)
     covered_block_shapes: list[str] = Field(default_factory=list)
     missing_block_shapes: list[str] = Field(default_factory=list)
     rounds_completed: int = 0

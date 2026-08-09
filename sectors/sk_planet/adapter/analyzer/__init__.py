@@ -265,7 +265,7 @@ def analyze(
     information_needs: list[str] | None = None,
     # Accepted for signature parity with sk_broadband's analyzer (pipeline.py
     # calls every sector's analyze() the same way) - not yet acted on here.
-    target_block_shapes: list[str] | None = None,
+    evidence_requirements: list[str] | None = None,
 ) -> list[DocumentAnalysis]:
     """입력된 SK플래닛 관련 문서 목록을 분석하여 DocumentAnalysis 리스트로 반환합니다."""
     api_key = os.environ.get(_API_KEY_ENV_VAR)

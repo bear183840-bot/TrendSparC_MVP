@@ -1,19 +1,9 @@
-"""Decide, before any collection happens, which block shapes are worth
-searching for.
+"""Restate the configured purpose/answer narrative for diagnostics.
 
-This sits between report_purpose and source_planner. It answers a narrower
-question than `purpose_slots.resolve_slots()` does at render time: not "what
-can we draw with what we have" (resolve_slots, unchanged, still the final
-arbiter) but "what would be worth having, given only the purpose we already
-know". The two intentionally share one table (`common.purpose_slots.
-PURPOSE_SLOTS`) rather than each keeping their own - see that module's
-docstring for why a second, independently-authored priority table is exactly
-the kind of drift this project has already been bitten by once.
-
-The plan produced here is advisory, never enforced: `included=False` just
-means source_planner/collector should not spend a supplementary search round
-chasing that slot, not that the slot is forbidden from appearing later if the
-data shows up anyway (resolve_slots doesn't consult this plan at all).
+Collection must not consult this plan. The question's answer/evidence
+requirements drive source search; `resolve_slots()` later chooses only blocks
+whose evidence contracts pass. This module keeps one inspectable view of the
+reader flow and candidate order without owning either decision.
 """
 
 from __future__ import annotations
@@ -28,7 +18,7 @@ from common.purpose_slots import (
 
 # Plain-language restatement of each block_type's block_shapes predicate -
 # never a new judgement, just what common/block_shapes.py already requires,
-# said in words a search/extraction prompt can act on. Every block_type that
+# exposed for audit and UI diagnostics. Every block_type that
 # appears in any Slot.candidates across common/purpose_slots.py must have an
 # entry here (see tests/test_block_priority_planner.py).
 _REQUIRED_DATA_HINTS: dict[str, str] = {
@@ -63,50 +53,6 @@ _REQUIRED_DATA_HINTS: dict[str, str] = {
 }
 
 
-# Shapes a search round can actually go looking for. The rest are real
-# blocks, just not *search targets*: narrative prose and recommended actions
-# come out of whatever documents arrive, `recurring_terms` is measured across
-# whatever was collected, and a single KPI needs no shape a query could ask
-# for. Spending one of the harness's three follow-up queries on "서술형 근거
-# 문장" would displace a query for a shape that genuinely depends on finding
-# the right document.
-_SEARCHABLE_BLOCK_TYPES = frozenset({
-    "chart", "landscape", "bar", "item_bar", "ranking_list", "grouped_bar", "share_split",
-    "composition_breakdown",
-    "metric_comparison", "kpi_grid", "timeline", "table", "segment_table",
-    "competitor_panels", "benchmark_table", "level_matrix", "radar", "matrix",
-    "cause_tree", "driver_bars", "factor_list",
-    # `status_bar` is deliberately absent: a grade is something an analyzer
-    # assigns while reading, not a document shape a query can go and find.
-})
-
-# How many block-shape targets one plan may carry. The harness proposes at
-# most three follow-up queries per round, so a longer list doesn't buy more
-# searching - it just makes the tail of the list silently unreachable while
-# looking like it was requested.
-_MAX_TARGETS = 5
-
-
-def _searchable_candidates(slot) -> list[str]:
-    """The slot's own candidates, in its own order, minus the ones no query
-    can target. Two are taken rather than one: a slot's first choice is its
-    most demanding shape (현황파악's 순위 slot leads with `share_split`, which
-    needs a source that framed its figures as parts of one whole), and
-    searching only for that misses the far more findable second choice
-    (`item_bar`) that answers the same slot."""
-    searchable: list[str] = []
-    for block_type in slot.candidates:
-        # Stop at the first candidate no query can target, rather than
-        # skipping past it. A slot whose own first choice is prose or a list
-        # of recommendations is not asking for a document of a particular
-        # shape; reaching further down its list would target 원인분석's
-        # 개선 slot at a comparison table, which is not what that slot is for.
-        if block_type not in _SEARCHABLE_BLOCK_TYPES:
-            break
-        searchable.append(block_type)
-    return searchable[:2]
-
-
 def _hint_for(block_type: str) -> str:
     return _REQUIRED_DATA_HINTS.get(block_type, "")
 
@@ -114,8 +60,7 @@ def _hint_for(block_type: str) -> str:
 def plan_block_priorities(
     request_id: str, purpose_id: str, question_answer_type: str | None = None,
 ) -> BlockPriorityPlan:
-    """Read purpose_slots' fixed skeleton for `purpose_id` and restate each
-    slot's top-priority block as a search/extraction target.
+    """Read purpose_slots' narrative and restate each candidate contract.
 
     Pure lookup - no API call, no question text read. `purpose_id` is already
     resolved by the time this runs (report_purpose classified it); this stage
@@ -127,41 +72,23 @@ def plan_block_priorities(
         if issues:
             raise ValueError("invalid narrative slot configuration: " + "; ".join(issues))
     targets: list[SlotTarget] = []
-    claimed_shapes: set[str] = set()
-    included_count = 0
     for slot in slots:
-        searchable = _searchable_candidates(slot)
-        # Never target the same shape twice. 문제대응's 문제 and 선택지 slots
-        # both lead with `matrix`, so the plan used to spend two of three
-        # follow-up queries hunting the same SWOT material. Once is right -
-        # the purpose skeleton put a SWOT-shaped slot there because the
-        # question type calls for one - but the second is pure waste.
-        fresh = [block_type for block_type in searchable if block_type not in claimed_shapes]
-        # `optional` is a *rendering* flag ("hide this card when the data
-        # isn't there"), not a statement that the data isn't worth looking
-        # for. Reading it as the latter excluded exactly the slots added for
-        # list-shaped questions - 순위, 요인, 반복 언급 - so a question about
-        # a ranking never searched for one. Inclusion is decided here by
-        # whether a query could plausibly find the shape, and by the budget.
-        included = bool(fresh) and included_count < _MAX_TARGETS
-        if included:
-            claimed_shapes.update(fresh)
-            included_count += 1
+        # included now describes the baseline reader flow, not a search
+        # budget. Optional slots remain eligible later but are not required
+        # to occupy dashboard space when their evidence is absent.
+        included = not slot.optional
         targets.append(
             SlotTarget(
                 slot_id=slot.slot_id,
                 title=slot.title,
                 priority_block_types=list(slot.candidates),
-                # Carry the actual block id with its contract.  A prose-only
-                # hint tells a collector what to look for, but leaves the
-                # analyzer guessing whether the same figures are meant for a
-                # grouped bar, a share split, or another compatible shape.
-                # This stays question-agnostic: the ids come from the
-                # purpose slot table, never from words in the question.
+                # Keep the slot's two leading alternatives inspectable without
+                # turning a long fallback chain into a second priority table;
+                # source search and analyzer inputs never consume this field.
                 required_data_hint=" / ".join(
                     f"block_type={block_type}; required_data={_hint_for(block_type)}"
-                    for block_type in fresh
-                ) if included else "",
+                    for block_type in slot.candidates[:2]
+                ),
                 included=included,
                 role=slot.role if slot.role in {"answer", "evidence", "analysis", "decision", "action", "support"} else "support",
                 question_answered=slot.question_answered,
@@ -172,14 +99,9 @@ def plan_block_priorities(
 
 
 def target_block_shapes(plan: BlockPriorityPlan | None) -> list[str]:
-    """Flatten an included plan into the string hints WebSearchContext and
-    the analyzer consume - the one formatting rule shared by every caller
-    (source_planner and the analyzer invocation in pipeline.py) so it is
-    written once, not copy-pasted at each call site."""
-    if plan is None:
-        return []
-    return [
-        f"slot_id={slot.slot_id}; title={slot.title}; {slot.required_data_hint}"
-        for slot in plan.slots
-        if slot.included and slot.required_data_hint
-    ]
+    """Deprecated compatibility hook.
+
+    Runtime collection intentionally receives no block targets. Returning an
+    empty list makes accidental old callers evidence-first as well.
+    """
+    return []

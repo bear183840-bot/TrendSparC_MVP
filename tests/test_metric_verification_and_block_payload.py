@@ -11,6 +11,8 @@ from __future__ import annotations
 import pytest
 
 from sectors.sk_broadband.adapter.analyzer import (
+    _load_analysis_json,
+    _normalize_analysis_payload,
     _number_is_in_content,
     _recover_missing_metric_claims,
     _recovered_metric_points,
@@ -18,6 +20,22 @@ from sectors.sk_broadband.adapter.analyzer import (
     _displayable_metric_points,
     _verified_metric_points,
 )
+
+
+def test_solar_wrapped_json_and_missing_metadata_are_normalized_without_new_facts():
+    raw = _load_analysis_json('```json\n{"grounded_claims": [{"claim_id": "c1", '
+                              '"claim_type": "metric", "claim": "이용률 37.2%", '
+                              '"evidence_quote": "이용률은 37.2%였다"}], '
+                              '"metric_points": [{"label": "이용률", "period": "2025", '
+                              '"value": 37.2, "evidence_claim_id": "c1"}]}\n```')
+    normalized = _normalize_analysis_payload(raw)
+
+    assert normalized["grounded_claims"][0]["evidence_passage_id"] is None
+    assert normalized["grounded_claims"][0]["confidence"] == "low"
+    assert normalized["metric_points"][0]["value"] == 37.2
+    assert normalized["metric_points"][0]["value_origin"] == "source"
+    assert normalized["metric_points"][0]["is_forecast"] is False
+    assert normalized["comparison_points"] == []
 
 _QUOTE = "올 상반기 유료방송 가입자 수는 36,226,100으로 작년 하반기 대비 138,546이 줄어"
 _CLAIMS = [{"claim_id": "c1", "claim_type": "metric", "evidence_quote": _QUOTE}]

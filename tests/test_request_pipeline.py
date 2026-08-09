@@ -12,7 +12,7 @@ from common.contracts import (
     SourceDocument,
     UserRequest,
 )
-from common.errors import StageStatus
+from common.errors import PipelineStageError, StageStatus
 from core.request_pipeline.pipeline import run_pipeline
 
 
@@ -380,6 +380,58 @@ def test_pipeline_recollects_when_analyzer_leaves_fewer_than_profile_minimum(mon
         trace.stage == "sector_adapter.collector.analysis_recollection"
         for trace in result.trace
     )
+
+
+def test_failed_analysis_recollection_preserves_initial_usable_analyses(monkeypatch):
+    initial = [
+        SourceDocument(doc_id=f"d{i}", source_id=f"s{i}", title=f"자료 {i}",
+                       url=f"https://{i}.example/a", content="근거 " * 100)
+        for i in range(1, 4)
+    ]
+    replacements = [
+        SourceDocument(doc_id="d4", source_id="s4", title="대체 자료",
+                       url="https://4.example/a", content="대체 근거 " * 100)
+    ]
+    collect_count = 0
+    analyze_count = 0
+
+    def fake_collect(source_plan):
+        nonlocal collect_count
+        collect_count += 1
+        return initial if collect_count == 1 else replacements
+
+    def fake_analyze(documents, question, information_needs=None, evidence_requirements=None):
+        nonlocal analyze_count
+        analyze_count += 1
+        if analyze_count == 2:
+            raise PipelineStageError(
+                stage="sector_adapter.analyzer", reason="no document could be analysed",
+                detail="d4: schema mismatch",
+            )
+        return [
+            DocumentAnalysis(doc_id=document.doc_id, relevant_to_question=True,
+                             usable_for_synthesis=True)
+            for document in documents
+        ]
+
+    monkeypatch.setattr(sk_broadband_collector, "collect", fake_collect)
+    monkeypatch.setattr(sk_broadband_processor, "process", lambda documents: documents)
+    monkeypatch.setattr(sk_broadband_validator, "validate", lambda documents, search_context=None: documents)
+    monkeypatch.setattr(sk_broadband_analyzer, "analyze", fake_analyze)
+
+    result = run_pipeline(
+        _make_request("SK브로드밴드 IPTV 경쟁 현황", requested_sector_id="sk_broadband"),
+        dry_run=False,
+    )
+
+    assert result.halted_at_stage is None
+    assert {analysis.doc_id for analysis in result.document_analyses} == {"d1", "d2", "d3"}
+    failed_retry = next(
+        trace for trace in result.trace
+        if trace.stage == "sector_adapter.analyzer.recollection"
+    )
+    assert failed_retry.status == StageStatus.FAILED
+    assert "schema mismatch" in (failed_retry.detail or "")
 
 
 def test_pipeline_halts_when_analyzer_still_has_fewer_than_minimum_after_recollection(monkeypatch):

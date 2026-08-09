@@ -342,11 +342,7 @@ def test_question_harness_uses_scraped_evidence_gaps_for_follow_up_search():
     assert second_search_payload["current_round_query"] == "SK브로드밴드 B tv 전략 투자"
 
 
-def test_missing_block_shapes_alone_never_flips_sufficient_to_false():
-    """target_block_shapes is a bias for which follow-up query gets tried,
-    never a hard gate - see WebSearchContext.target_block_shapes' docstring.
-    A report can always fall back to prose, so an unmet shape must not make
-    the whole harness fail the way an unmet information need does."""
+def test_deprecated_block_shapes_do_not_influence_collection():
     source = _source()
     url = "https://news.sktelecom.com/tag/skbroadband/report"
     doc_id = _doc_id(source.name, url)
@@ -385,15 +381,11 @@ def test_missing_block_shapes_alone_never_flips_sufficient_to_false():
     )
 
     assert result.sufficient is True
-    assert result.missing_block_shapes == ["지표: 확인된 수치(metric) 2개 이상"]
+    assert result.missing_block_shapes == []
     assert result.rounds_completed == 1
 
 
-def test_missing_block_shapes_earns_one_more_round_when_model_proposes_a_query():
-    """A block-shape gap the model is willing to chase gets exactly one more
-    round even after `sufficient` (information needs only) is already true -
-    otherwise the harness stops the instant a prose answer is possible and
-    the chart the question asked for never gets searched for."""
+def test_missing_evidence_requirement_drives_follow_up_round():
     source_a = _source()
     source_b = _source(name="전자신문 (통신)", url="https://www.etnews.com/news/section.html?id1=03",
                         role="search", topics=["IPTV"], reliability_tier="analyst_media")
@@ -401,7 +393,7 @@ def test_missing_block_shapes_earns_one_more_round_when_model_proposes_a_query()
     url_2 = "https://www.etnews.com/report-2"
     doc_1 = _doc_id(source_a.name, url_1)
     doc_2 = _doc_id(source_b.name, url_2)
-    shape_hint = "지표: 확인된 수치(metric) 2개 이상"
+    evidence_requirement = "동일 정의로 비교 가능한 IPTV 가입자 시계열"
     openai_client = _FakeOpenAI(
         [
             _response(citations=[_citation_annotation(url_1)], sufficient=True),
@@ -413,8 +405,8 @@ def test_missing_block_shapes_earns_one_more_round_when_model_proposes_a_query()
                 relevant_doc_ids=[doc_1],
                 covered_information_needs=["competition"],
                 missing_information_needs=[],
-                covered_block_shapes=[],
-                missing_block_shapes=[shape_hint],
+                covered_evidence_requirements=[],
+                missing_evidence_requirements=[evidence_requirement],
                 next_queries=["SK브로드밴드 IPTV 가입자 수 추이"],
                 reason="정보 요구는 충족했으나 수치 추이가 부족함",
             ),
@@ -423,8 +415,8 @@ def test_missing_block_shapes_earns_one_more_round_when_model_proposes_a_query()
                 relevant_doc_ids=[doc_1, doc_2],
                 covered_information_needs=["competition"],
                 missing_information_needs=[],
-                covered_block_shapes=[shape_hint],
-                missing_block_shapes=[],
+                covered_evidence_requirements=[evidence_requirement],
+                missing_evidence_requirements=[],
                 next_queries=[],
                 reason="수치 추이까지 확보함",
             ),
@@ -434,7 +426,7 @@ def test_missing_block_shapes_earns_one_more_round_when_model_proposes_a_query()
     context = WebSearchContext(
         question="IPTV 경쟁 현황은?",
         information_needs=["competition"],
-        target_block_shapes=[shape_hint],
+        evidence_requirements=[evidence_requirement],
         suggested_terms=["IPTV"],
     )
 
@@ -444,8 +436,8 @@ def test_missing_block_shapes_earns_one_more_round_when_model_proposes_a_query()
     )
 
     assert result.sufficient is True
-    assert result.covered_block_shapes == [shape_hint]
-    assert result.missing_block_shapes == []
+    assert result.covered_evidence_requirements == [evidence_requirement]
+    assert result.missing_evidence_requirements == []
     assert result.rounds_completed == 2
 
 

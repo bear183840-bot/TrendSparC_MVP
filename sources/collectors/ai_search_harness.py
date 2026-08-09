@@ -581,7 +581,7 @@ def _call_round(
             "type": "approximate",
             "country": search_context.country_code,
         }
-    context_payload = search_context.model_dump() if search_context else {
+    context_payload = search_context.model_dump(exclude={"target_block_shapes"}) if search_context else {
         "question": query,
         "suggested_terms": [query],
     }
@@ -675,7 +675,8 @@ def _assess_scraped_evidence(
         "perspective": search_context.perspective,
         "report_purpose_id": search_context.report_purpose_id,
         "required_information_needs": search_context.information_needs,
-        "target_block_shapes": search_context.target_block_shapes,
+        "answer_requirements": search_context.answer_requirements,
+        "evidence_requirements": search_context.evidence_requirements,
         "minimum_relevant_document_count": config.min_scraped_docs_for_sufficient,
         "documents": [
             {
@@ -699,26 +700,16 @@ def _assess_scraped_evidence(
                     "content": (
                         "Evaluate only the supplied Firecrawl source text. Mark a document relevant "
                         "only when it contains substantive evidence for the original question, not a "
-                        "passing mention. Identify which required information needs are actually covered. "
-                        "Also identify, separately, which target_block_shapes items the evidence supports - "
-                        "e.g. a hint asking for '같은 라벨로 서로 다른 시점 3개 이상의 수치' is covered only "
-                        "if some document actually states that metric at 3+ distinct points in time, not "
-                        "merely on-topic. Report these as covered_block_shapes/missing_block_shapes. "
+                        "passing mention. Identify which required information needs and semantic "
+                        "evidence_requirements are actually covered. A requirement asking for comparable "
+                        "segment values is covered only when the text states values or explicit differences "
+                        "for those segments, not merely when it mentions the topic. Report exact supplied "
+                        "strings as covered_evidence_requirements/missing_evidence_requirements. "
                         "Set sufficient=true only when the evidence can support a defensible answer and "
-                        "the supplied minimum_relevant_document_count is met - target_block_shapes gaps "
-                        "alone must NEVER make sufficient=false; a report can always answer in prose. "
+                        "the supplied minimum_relevant_document_count is met and no required evidence gap remains. "
                         "If evidence is missing, propose 1-3 focused web queries targeting only those gaps. "
-                        "target_block_shapes describes what the final report will actually be able to show "
-                        "as a chart/table/ranked comparison - without it, the report falls back to plain "
-                        "bullet text even when every information need is technically covered. Treat an "
-                        "unmet target_block_shapes item as MORE important than an unmet information need, "
-                        "not equally important. When you propose next_queries: first write one query for "
-                        "every still-unmet target_block_shapes item; only spend any remaining query slots "
-                        "(up to the 1-3 total) on missing_information_needs once every target_block_shapes "
-                        "item already has a query addressing it. Do not interleave them - fill block-shape "
-                        "queries first, ordinary information-need queries last, and drop the lowest-priority "
-                        "information-need query before dropping any block-shape query if you must stay "
-                        "within 3."
+                        "Prioritize missing evidence needed for an explicit answer requirement. Never search "
+                        "for renderer names, dashboard slots, or a preferred chart shape."
                     ),
                 },
                 {"role": "user", "content": json.dumps(payload, ensure_ascii=False)},
@@ -738,7 +729,7 @@ def _validate_assessment(
     documents: list[SourceDocument],
     config: HarnessConfig,
     information_needs: list[str],
-    target_block_shapes: list[str] | None = None,
+    evidence_requirements: list[str] | None = None,
 ) -> EvidenceCoverageAssessment:
     document_by_id = {document.doc_id: document for document in documents}
     relevant_doc_ids = [
@@ -748,18 +739,21 @@ def _validate_assessment(
     required_needs = list(dict.fromkeys(information_needs))
     covered = [need for need in required_needs if need in assessment.covered_information_needs]
     missing = [need for need in required_needs if need not in covered]
-    # Same covered/missing bookkeeping as information needs, but - unlike
-    # them - never subtracted into `sufficient` below. A missing block shape
-    # means the report falls back to prose for that slot, not that the
-    # question went unanswered; see WebSearchContext.target_block_shapes.
-    required_shapes = list(dict.fromkeys(target_block_shapes or []))
-    covered_shapes = [shape for shape in required_shapes if shape in assessment.covered_block_shapes]
-    missing_shapes = [shape for shape in required_shapes if shape not in covered_shapes]
+    required_evidence = list(dict.fromkeys(evidence_requirements or []))
+    covered_evidence = [
+        requirement for requirement in required_evidence
+        if requirement in assessment.covered_evidence_requirements
+    ]
+    missing_evidence = [
+        requirement for requirement in required_evidence
+        if requirement not in covered_evidence
+    ]
     sufficient = (
         assessment.sufficient
         and len(relevant_doc_ids) >= config.min_scraped_docs_for_sufficient
         and len(relevant_sources) >= config.min_independent_sources_for_sufficient
         and not missing
+        and not missing_evidence
     )
     return assessment.model_copy(
         update={
@@ -767,8 +761,10 @@ def _validate_assessment(
             "relevant_doc_ids": relevant_doc_ids,
             "covered_information_needs": covered,
             "missing_information_needs": missing,
-            "covered_block_shapes": covered_shapes,
-            "missing_block_shapes": missing_shapes,
+            "covered_evidence_requirements": covered_evidence,
+            "missing_evidence_requirements": missing_evidence,
+            "covered_block_shapes": [],
+            "missing_block_shapes": [],
         }
     )
 
@@ -807,8 +803,8 @@ def _run_search_harness_result(
     accepted_doc_ids: set[str] = set()
     covered_information_needs: list[str] = []
     missing_information_needs = list(search_context.information_needs) if search_context else []
-    covered_block_shapes: list[str] = []
-    missing_block_shapes = list(search_context.target_block_shapes) if search_context else []
+    covered_evidence_requirements: list[str] = []
+    missing_evidence_requirements = list(search_context.evidence_requirements) if search_context else []
     maximum_documents = _maximum_documents(config)
     round_kinds = plan_round_kinds(search_context, config.max_rounds)
 
@@ -919,7 +915,7 @@ def _run_search_harness_result(
                     documents,
                     config,
                     search_context.information_needs if search_context else [],
-                    search_context.target_block_shapes if search_context else [],
+                    search_context.evidence_requirements if search_context else [],
                 )
                 relevant_ids = set(assessment.relevant_doc_ids)
                 accepted_doc_ids.update(relevant_ids)
@@ -932,8 +928,8 @@ def _run_search_harness_result(
                 documents = list(final_documents)
                 covered_information_needs = assessment.covered_information_needs
                 missing_information_needs = assessment.missing_information_needs
-                covered_block_shapes = assessment.covered_block_shapes
-                missing_block_shapes = assessment.missing_block_shapes
+                covered_evidence_requirements = assessment.covered_evidence_requirements
+                missing_evidence_requirements = assessment.missing_evidence_requirements
                 sufficient = assessment.sufficient
                 next_queries = assessment.next_queries
                 if (
@@ -950,23 +946,7 @@ def _run_search_harness_result(
                 next_queries = []
             if sufficient:
                 final_sufficient = True
-                # `sufficient` only measures information_needs/document-count
-                # - stopping here unconditionally meant a block-shape gap
-                # (see WebSearchContext.target_block_shapes) never got its
-                # promised follow-up query the instant a prose answer became
-                # possible, even though the system prompt tells the model to
-                # prioritize exactly that gap. One more round is spent
-                # chasing it only when the model actually proposed a query
-                # for it. Note what this does *not* bound: if the next round
-                # still reports a missing shape and still proposes an untried
-                # query, this test passes again, so a run that used to stop
-                # at round 1 can now use all of max_rounds. The real bounds
-                # are max_rounds / max_total_scrape_calls and the untried-query
-                # requirement below - not this branch - so a block-shape gap
-                # the model keeps proposing queries for does cost extra
-                # rounds. That is the intended trade; it is not free.
-                if not (missing_block_shapes and next_queries):
-                    break
+                break
         else:
             final_documents = list(documents)
             if len(documents) >= config.target_docs:
@@ -1010,8 +990,10 @@ def _run_search_harness_result(
         sufficient=final_sufficient,
         covered_information_needs=covered_information_needs,
         missing_information_needs=missing_information_needs,
-        covered_block_shapes=covered_block_shapes,
-        missing_block_shapes=missing_block_shapes,
+        covered_evidence_requirements=covered_evidence_requirements,
+        missing_evidence_requirements=missing_evidence_requirements,
+        covered_block_shapes=[],
+        missing_block_shapes=[],
         rounds_completed=rounds_completed,
         scrape_call_count=scrape_call_count,
     )

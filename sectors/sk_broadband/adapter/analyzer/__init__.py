@@ -1318,6 +1318,126 @@ def _namespace_chunk_evidence(
     )
 
 
+_CLAIM_TYPES = {
+    "key_point", "business_impact", "risk", "opportunity", "strength",
+    "weakness", "comparison", "metric", "factor", "action", "monitoring",
+}
+
+
+def _load_analysis_json(content: str | None) -> dict:
+    """Accept JSON-schema output plus harmless provider wrappers.
+
+    Solar's OpenAI-compatible endpoint can return fenced JSON or a short prose
+    prefix even when response_format was supplied. We unwrap those forms but
+    never guess how to complete truncated JSON.
+    """
+    text = (content or "").strip()
+    if text.startswith("```"):
+        text = re.sub(r"^```(?:json)?\s*", "", text, flags=re.IGNORECASE)
+        text = re.sub(r"\s*```$", "", text)
+    try:
+        value = json.loads(text)
+    except json.JSONDecodeError:
+        start, end = text.find("{"), text.rfind("}")
+        if start < 0 or end <= start:
+            raise
+        value = json.loads(text[start:end + 1])
+    if not isinstance(value, dict):
+        raise TypeError("analysis payload must be a JSON object")
+    return value
+
+
+def _normalize_analysis_payload(data: dict) -> dict:
+    """Fill provider-omitted metadata without inventing evidence.
+
+    Items missing factual core fields are discarded. Only schema bookkeeping
+    (null/default flags, confidence, empty arrays) is supplied.
+    """
+    claims: list[dict] = []
+    for raw in data.get("grounded_claims") or []:
+        if not isinstance(raw, dict):
+            continue
+        if raw.get("claim_type") not in _CLAIM_TYPES:
+            continue
+        if not all(isinstance(raw.get(key), str) and raw.get(key).strip()
+                   for key in ("claim_id", "claim", "evidence_quote")):
+            continue
+        claim = dict(raw)
+        claim.setdefault("evidence_passage_id", None)
+        claim.setdefault("evidence_location", None)
+        claim.setdefault("as_of_date", None)
+        if claim.get("confidence") not in {"low", "medium", "high"}:
+            claim["confidence"] = "low"
+        claim.setdefault("parent_claim_id", None)
+        claim.setdefault("importance", None)
+        claim.setdefault("importance_basis", None)
+        claims.append(claim)
+
+    metrics: list[dict] = []
+    for raw in data.get("metric_points") or []:
+        if not isinstance(raw, dict):
+            continue
+        if not isinstance(raw.get("label"), str) or not isinstance(raw.get("period"), str):
+            continue
+        if not isinstance(raw.get("value"), (int, float)) or isinstance(raw.get("value"), bool):
+            continue
+        if not isinstance(raw.get("evidence_claim_id"), str):
+            continue
+        point = dict(raw)
+        point.setdefault("subject", None)
+        point.setdefault("unit", "")
+        point.setdefault("is_forecast", False)
+        value_type = point.get("value_type")
+        if value_type not in {"actual", "estimate", "forecast", "target", "guidance"}:
+            value_type = "forecast" if point["is_forecast"] else "actual"
+        point["value_type"] = value_type
+        point.setdefault("is_relative", False)
+        point.setdefault("comparison_period", None)
+        point["value_origin"] = "source"
+        point.setdefault("share_of", None)
+        metrics.append(point)
+
+    comparisons: list[dict] = []
+    for raw in data.get("comparison_points") or []:
+        if not isinstance(raw, dict):
+            continue
+        if not all(isinstance(raw.get(key), str) and raw.get(key).strip()
+                   for key in ("entity", "criterion", "value", "evidence_claim_id")):
+            continue
+        point = dict(raw)
+        if point.get("level") not in {None, "low", "medium", "high"}:
+            point["level"] = None
+        comparisons.append(point)
+
+    relevance = data.get("relevance_level")
+    if relevance not in {"direct", "partial", "background", "irrelevant"}:
+        relevance = "partial" if claims else "background"
+    sentiment = data.get("sentiment")
+    if sentiment not in {"positive", "neutral", "negative", "mixed"}:
+        sentiment = "neutral"
+    action_level = data.get("action_level")
+    if action_level not in {"Monitor", "Review", "Prepare", "Act", "insufficient_data"}:
+        action_level = "insufficient_data"
+    confidence = data.get("analysis_confidence")
+    if confidence not in {"low", "medium", "high"}:
+        confidence = "low"
+    return {
+        "summary": str(data.get("summary") or "")[:500],
+        "sentiment": sentiment,
+        "relevance_level": relevance,
+        "relevance_reason": str(data.get("relevance_reason") or "")[:300],
+        "grounded_claims": claims,
+        "covered_information_needs": [
+            value for value in (data.get("covered_information_needs") or [])
+            if isinstance(value, str)
+        ],
+        "metric_points": metrics,
+        "comparison_points": comparisons,
+        "action_level": action_level,
+        "analysis_confidence": confidence,
+    }
+
+
 def _analyze_document(
     client: OpenAI,
     system_prompt: str,
@@ -1325,7 +1445,7 @@ def _analyze_document(
     question: str,
     information_needs: list[str],
     *,
-    target_block_shapes: list[str] | None = None,
+    evidence_requirements: list[str] | None = None,
     content_override: str | None = None,
     claim_id_prefix: str | None = None,
     evidence_location_prefix: str | None = None,
@@ -1341,7 +1461,7 @@ def _analyze_document(
         {
             "question": question,
             "required_information_needs": information_needs,
-            "target_block_shapes": target_block_shapes or [],
+            "evidence_requirements": evidence_requirements or [],
             "document": {
                 "doc_id": document.doc_id,
                 "title": document.title,
@@ -1349,7 +1469,7 @@ def _analyze_document(
                 "evidence_passages": evidence_passages,
             },
             "analysis_instruction": (
-                "질문·required_information_needs·target_block_shapes에 직접 필요한 근거를 추출하라. "
+                "질문·required_information_needs·evidence_requirements에 직접 필요한 근거를 추출하라. "
                 "수치·시점·단위, 비교의 양쪽 대상, 순위·요인·날짜 정보를 우선하고 중복 주장은 만들지 마라. "
                 "항목 수를 줄이지 말고 각 claim·인용·이유의 문장만 최소 충분 길이로 간결하게 써라. "
                 "질문이 여러 측면을 요구할 때 문서가 그중 한 측면만 직접 뒷받침해도 partial이며, "
@@ -1437,7 +1557,7 @@ def _analyze_document(
         )
         raise PipelineStageError(stage=_STAGE, reason=f"analysis refused for doc '{document.doc_id}'", detail=message.refusal)
     try:
-        data = json.loads(message.content)
+        data = _normalize_analysis_payload(_load_analysis_json(message.content))
         grounded_claims = _verified_claims(data, document, evidence_passages)
         grounded_claims = _repair_failed_claim_quotes(
             client,
@@ -1549,7 +1669,12 @@ def _analyze_document(
             outcome="invalid_response",
             error_type=type(exc).__name__,
         )
-        raise PipelineStageError(stage=_STAGE, reason=f"analysis response for doc '{document.doc_id}' did not match the expected schema", detail=str(exc)) from exc
+        preview = re.sub(r"\s+", " ", str(message.content or ""))[:600]
+        raise PipelineStageError(
+            stage=_STAGE,
+            reason=f"analysis response for doc '{document.doc_id}' did not match the expected schema",
+            detail=f"{type(exc).__name__}: {exc}; response_preview={preview}",
+        ) from exc
 
 
 def _unique_text(values: list[str | None]) -> list[str]:
@@ -1751,7 +1876,7 @@ def _analyze_chunked_document(
     document: SourceDocument,
     question: str,
     information_needs: list[str],
-    target_block_shapes: list[str] | None = None,
+    evidence_requirements: list[str] | None = None,
 ) -> DocumentAnalysis:
     is_pdf = _is_pdf_document(document)
     content = (document.content or "") if is_pdf else _clean_analysis_content(document.content)
@@ -1795,7 +1920,7 @@ def _analyze_chunked_document(
                     document,
                     question,
                     information_needs,
-                    target_block_shapes=target_block_shapes,
+                    evidence_requirements=evidence_requirements,
                     content_override=chunk,
                     claim_id_prefix=prefix,
                     evidence_location_prefix=location,
@@ -1827,7 +1952,7 @@ def analyze(
     source_documents: list[SourceDocument],
     question: str,
     information_needs: list[str] | None = None,
-    target_block_shapes: list[str] | None = None,
+    evidence_requirements: list[str] | None = None,
 ) -> list[DocumentAnalysis]:
     api_key = _api_key()
     if not api_key:
@@ -1835,7 +1960,7 @@ def analyze(
     client = OpenAI(api_key=api_key, **openai_client_kwargs(_BASE_URL_ENV_VAR))
     system_prompt = _load_system_prompt()
     needs = list(information_needs or [])
-    shapes = list(target_block_shapes or [])
+    requirements = list(evidence_requirements or [])
     analyses = []
     failures: list[str] = []
     for document in source_documents:
@@ -1849,19 +1974,20 @@ def analyze(
                 analyses.append(
                     _analyze_chunked_document(
                         client, system_prompt, document, question, needs,
-                        target_block_shapes=shapes,
+                        evidence_requirements=requirements,
                     )
                 )
             else:
                 analyses.append(
                     _analyze_document(
                         client, system_prompt, document, question, needs,
-                        target_block_shapes=shapes,
+                        evidence_requirements=requirements,
                     )
                 )
         except PipelineStageError as exc:
-            failures.append(f"{document.doc_id}: {exc.reason}")
-            print(f"[analyzer] doc '{document.doc_id}' could not be analysed: {exc.reason}",
+            detail = f": {exc.detail}" if exc.detail else ""
+            failures.append(f"{document.doc_id}: {exc.reason}{detail}")
+            print(f"[analyzer] doc '{document.doc_id}' could not be analysed: {exc.reason}{detail}",
                   file=sys.stderr)
     if not analyses:
         # Nothing survived - that genuinely is a stage failure, and the reason
