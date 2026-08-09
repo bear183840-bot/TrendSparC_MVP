@@ -1,11 +1,11 @@
-"""Self-contained Pydantic contracts for the standalone Source Router.
+"""Self-contained Pydantic contracts for the Source Router package.
 
 Deliberately NOT common/contracts.py's MetricPoint/ComparisonPoint/
-GroundedClaim, even though those already cover most of this shape. This is a
-tracked, non-blocking warning (see
-C:\\Users\\noogs\\.claude\\plans\\query-gentle-sketch.md, "경고 사항") — the
-user explicitly prioritized building doc1's design as a new parallel system
-over reusing existing downstream contracts for this first pass.
+GroundedClaim. These describe what a *search and retrieval* run knows - a
+query, a URL, whether the original text was read and verified - which is a
+different subject from the evidence contracts the report is built out of.
+`adapter.py` is the single translation point between the two, so the router
+can change its own shapes without touching downstream contracts.
 
 Shapes follow final_research_router.md §22, with two additive fields the
 attached doc2/doc3 alignment notes asked for (both optional, so a strict
@@ -25,7 +25,7 @@ prompts ask the model to produce.
 
 from __future__ import annotations
 
-from typing import Literal, Optional
+from typing import Any, Literal, Optional
 
 from pydantic import BaseModel, Field
 
@@ -50,6 +50,36 @@ SummaryVerificationStatus = Literal[
     "accurate", "partially_accurate", "misleading", "unsupported", "unavailable"
 ]
 EvidenceStrength = Literal["direct", "indirect", "contextual", "insufficient"]
+QueryRole = Literal["direct", "supporting"]
+RefinerAction = Literal["KEEP", "ADD", "REWRITE"]
+
+
+class EvidenceNeed(BaseModel):
+    """Short semantic evidence requirement used by query refinement.
+
+    This deliberately contains no block or renderer vocabulary.  ``direct``
+    needs come from the user's explicit answer requirements; ``supporting``
+    needs add only the comparison/time/impact structure needed to make the
+    answer useful and verifiable.
+    """
+
+    evidence_need_id: str
+    text: str
+    requirement_type: Literal["direct", "supporting", "optional"] = "supporting"
+    priority: int = Field(default=2, ge=1, le=3)
+    answer_requirement_ids: list[str] = Field(default_factory=list)
+
+
+class QueryRefinement(BaseModel):
+    """Auditable result of the small slot-aware query refinement stage."""
+
+    action: RefinerAction = "KEEP"
+    added_queries: list[str] = Field(default_factory=list)
+    rewritten_queries: list[str] = Field(default_factory=list)
+    covered_evidence_need_ids: list[str] = Field(default_factory=list)
+    missing_evidence_need_ids: list[str] = Field(default_factory=list)
+    method: Literal["ai", "rule_fallback"] = "rule_fallback"
+    reason: str = ""
 
 
 class SearchPlanQuery(BaseModel):
@@ -72,11 +102,15 @@ class SearchPlanQuery(BaseModel):
     # much less reliable than a plain content judgment ("what are the key
     # terms here?") for the same model.
     key_terms: list[str] = Field(default_factory=list)
+    query_role: QueryRole = "direct"
+    evidence_need_ids: list[str] = Field(default_factory=list)
 
 
 class SearchPlan(BaseModel):
     intent: str = ""
     queries: list[SearchPlanQuery] = Field(default_factory=list)
+    evidence_needs: list[EvidenceNeed] = Field(default_factory=list)
+    refinement: Optional[QueryRefinement] = None
 
     def by_priority(self, priority: int) -> list[SearchPlanQuery]:
         return [query for query in self.queries if query.priority == priority]
@@ -221,6 +255,17 @@ class WebSearchResult(BaseModel):
     # Populated only when evidence_depth == "original_source" — the full
     # prompt-E judgment behind this result's key_facts/summary.
     verification: Optional[EvidenceVerification] = None
+    # Query lineage is attached mechanically by router._run_queries(), never
+    # inferred from the search model's prose.
+    search_query: str = ""
+    query_role: QueryRole = "supporting"
+    evidence_need_ids: list[str] = Field(default_factory=list)
+    # Exact source material retained after HTML/PDF inspection so the existing
+    # Analyzer can re-check claims against real passages. Search summaries are
+    # never copied into this field.
+    original_content: Optional[str] = None
+    media_type: Optional[str] = None
+    retrieval_metadata: dict[str, Any] = Field(default_factory=dict)
 
 
 class SourceToInspect(BaseModel):
@@ -318,7 +363,9 @@ class ChunkSelection(BaseModel):
 
 class SourceRouterResult(BaseModel):
     """Final output of `research()` — the router's own accumulated evidence
-    pool. Not consumed by anything downstream yet (see plan file)."""
+    pool. `adapter.source_router_result_to_collection()` turns the entries
+    that reached original-source depth into the SourceDocument list the
+    existing processor/validator/analyzer consume."""
 
     question: str
     search_plan: SearchPlan

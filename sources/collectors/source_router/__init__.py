@@ -1,14 +1,13 @@
-"""Standalone, sector-agnostic Source Router.
+"""Sector-agnostic Source Router — the production search and collection engine.
 
-Implements final_research_router.md ("doc1") as a NEW system, kept
-deliberately parallel to sources/collectors/ai_search_harness.py (the
-existing sk_broadband harness, left untouched) per explicit user decision —
-see C:\\Users\\noogs\\.claude\\plans\\query-gentle-sketch.md for the full
-context and the tracked, non-blocking warnings against the current system
-and against doc2/doc3's alignment requirements.
+Implements final_research_router.md ("doc1"). It was built parallel to
+sources/collectors/ai_search_harness.py; since the pipeline integration it is
+the only engine the production collector boundary calls, and the harness
+remains only for its own unit tests and for reading older runs.
 
-Not wired into core/request_pipeline/pipeline.py or any sector adapter yet.
-Usage:
+core/request_pipeline/pipeline.py routes the `collector` role here through
+`sources.collectors.source_router.integration.collect()`; the sector adapters
+still own processing, validation and analysis. Direct usage:
 
     from sources.collectors.source_router import run_source_router
     result = run_source_router("질문")
@@ -21,10 +20,12 @@ from sources.collectors.source_router.contracts import (
     CoverageDecision,
     DocumentChunk,
     DocumentSection,
+    EvidenceNeed,
     KeyFact,
     ParsedDocument,
     SearchPlan,
     SearchPlanQuery,
+    QueryRefinement,
     SourceRouterResult,
     SourceToInspect,
     WebSearchResult,
@@ -36,10 +37,12 @@ __all__ = [
     "CoverageDecision",
     "DocumentChunk",
     "DocumentSection",
+    "EvidenceNeed",
     "KeyFact",
     "ParsedDocument",
     "SearchPlan",
     "SearchPlanQuery",
+    "QueryRefinement",
     "SourceRouterResult",
     "SourceToInspect",
     "WebSearchResult",

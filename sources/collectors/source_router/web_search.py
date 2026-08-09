@@ -11,16 +11,16 @@ reimplemented locally so this package stays self-contained.
 *** Timeout handling — live-verified 2026-08-09 ***
 A `tool_choice="required"` web_search call does a real live search round-trip
 before it can reply, so it routinely takes longer than a plain chat
-completion. An earlier version of this module gave the OpenAI client a hard
-`timeout=30` kwarg (a real HTTP client-side timeout that aborts the request);
-a live run against 15 queries in a row saw 6/6 fail with "Request timed
-out." ai_search_harness.py's `_run_with_timeout()` already solved this for
-the exact same call shape (same nominal 30s) by never imposing a hard client
-timeout at all — it runs the call in a background thread and simply stops
-*waiting* after timeout_seconds, letting the request finish or fail on its
-own instead of severing it mid-flight. Reused here verbatim (`_run_with_
-timeout`) rather than reinvented, and the OpenAI client below is
-deliberately constructed with no `timeout=` kwarg to match.
+completion. This module used to wait on it in a daemon thread and simply stop
+*waiting* after timeout_seconds, which kept a slow-but-fine search from being
+severed mid-flight - but an abandoned request is still a billed request, and
+nothing stopped it from running to completion in the background.
+
+The client now takes a real `timeout=` and `max_retries=0`: the timeout
+closes the in-flight request rather than orphaning it, and no automatic retry
+can silently double the cost of a call we already decided to give up on. The
+timeout itself is generous (config.call_timeout_seconds) precisely because
+this call shape is slow.
 """
 
 from __future__ import annotations
@@ -29,8 +29,6 @@ import json
 import os
 import re
 import sys
-import threading
-from queue import Queue
 
 from openai import OpenAI
 
@@ -45,25 +43,8 @@ _DEFAULT_MODEL = "gpt-5-mini"
 _DEFAULT_MAX_URLS_PER_QUERY = 2
 
 
-def _run_with_timeout(func, timeout_seconds: int):
-    """Same pattern as ai_search_harness.py's helper of the same name — runs
-    `func` in a daemon thread and stops *waiting* after timeout_seconds
-    rather than aborting the underlying HTTP request. Returns
-    ("ok", result) | ("error", exception) | ("timeout", None)."""
-    result: Queue = Queue(maxsize=1)
-
-    def _run() -> None:
-        try:
-            result.put(("ok", func()))
-        except Exception as exc:  # noqa: BLE001
-            result.put(("error", exc))
-
-    thread = threading.Thread(target=_run, daemon=True)
-    thread.start()
-    thread.join(timeout=timeout_seconds)
-    if thread.is_alive():
-        return "timeout", None
-    return result.get()
+def is_configured() -> bool:
+    return bool(os.environ.get(_API_KEY_ENV_VAR, "").strip())
 
 
 def _system_prompt(max_urls: int) -> str:
@@ -199,13 +180,14 @@ def execute_web_search(
     if not api_key or not query:
         return []
 
-    # No `timeout=` kwarg here on purpose — see module docstring's "Timeout
-    # handling" note. The client is free to take as long as it needs; only
-    # how long we *wait* for it is bounded, by _run_with_timeout below.
-    client = OpenAI(api_key=api_key, **openai_client_kwargs(_BASE_URL_ENV_VAR))
-
-    def _call():
-        return client.responses.create(
+    try:
+        client = OpenAI(
+            api_key=api_key,
+            timeout=timeout_seconds,
+            max_retries=0,
+            **openai_client_kwargs(_BASE_URL_ENV_VAR),
+        )
+        response = client.responses.create(
             model=_model(model_override),
             tools=[{"type": "web_search"}],
             tool_choice="required",
@@ -215,15 +197,9 @@ def execute_web_search(
                 {"role": "user", "content": query},
             ],
         )
-
-    status, payload = _run_with_timeout(_call, timeout_seconds)
-    if status == "timeout":
-        print(f"[source_router.web_search] search timed out after {timeout_seconds}s for {query!r}", file=sys.stderr)
+    except Exception as exc:  # noqa: BLE001 - one query must not abort the router
+        print(f"[source_router.web_search] search failed for {query!r}: {exc}", file=sys.stderr)
         return []
-    if status == "error":
-        print(f"[source_router.web_search] search failed for {query!r}: {payload}", file=sys.stderr)
-        return []
-    response = payload
     grounded = _grounded_urls(response)
     text = getattr(response, "output_text", None) or ""
     return _parse_results(text, grounded)[:max_urls]

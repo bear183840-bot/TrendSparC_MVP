@@ -36,8 +36,6 @@ from __future__ import annotations
 import json
 import os
 import sys
-import threading
-from queue import Queue
 from typing import Any
 
 from openai import OpenAI
@@ -49,28 +47,6 @@ MODEL_ENV_VAR = "TRENDSPARC_SOURCE_ROUTER_PLANNER_MODEL"
 BASE_URL_ENV_VAR = "TRENDSPARC_SOURCE_ROUTER_PLANNER_BASE_URL"
 _DEFAULT_UPSTAGE_MODEL = "solar-pro3"
 _DEFAULT_OPENAI_MODEL = "gpt-4o-mini"
-
-
-def _run_with_timeout(func, timeout_seconds: int):
-    """Same pattern as web_search.py's helper of the same name (itself
-    ported from ai_search_harness.py) — runs `func` in a daemon thread and
-    stops *waiting* after timeout_seconds rather than aborting the
-    underlying HTTP request. Returns
-    ("ok", result) | ("error", exception) | ("timeout", None)."""
-    result: Queue = Queue(maxsize=1)
-
-    def _run() -> None:
-        try:
-            result.put(("ok", func()))
-        except Exception as exc:  # noqa: BLE001
-            result.put(("error", exc))
-
-    thread = threading.Thread(target=_run, daemon=True)
-    thread.start()
-    thread.join(timeout=timeout_seconds)
-    if thread.is_alive():
-        return "timeout", None
-    return result.get()
 
 
 def api_key() -> str:
@@ -107,28 +83,25 @@ def call_json(
         # this try/except too (mirrors the pre-2026-08-09 behavior) since a
         # bad base_url/kwarg combination can raise here, before there is
         # even a call to time-box.
-        client = OpenAI(api_key=key, **openai_client_kwargs(BASE_URL_ENV_VAR))
-
-        def _call():
-            return client.chat.completions.create(
-                model=model_override or model(),
-                response_format={"type": "json_object"},
-                messages=[
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": json.dumps(payload, ensure_ascii=False)},
-                ],
-            )
-
-        status, payload_or_exc = _run_with_timeout(_call, timeout_seconds)
-        if status == "timeout":
-            print(
-                f"[source_router.{caller}] Solar call timed out after {timeout_seconds}s, falling back",
-                file=sys.stderr,
-            )
-            return None
-        if status == "error":
-            raise payload_or_exc
-        content = payload_or_exc.choices[0].message.content or "{}"
+        # SDK/httpx timeout closes the in-flight request. A daemon-thread
+        # timeout only stopped waiting while the paid call kept running.
+        # max_retries=0 also prevents a timed-out request from being billed
+        # again behind the router's own explicit retry/budget policy.
+        client = OpenAI(
+            api_key=key,
+            timeout=timeout_seconds,
+            max_retries=0,
+            **openai_client_kwargs(BASE_URL_ENV_VAR),
+        )
+        response = client.chat.completions.create(
+            model=model_override or model(),
+            response_format={"type": "json_object"},
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": json.dumps(payload, ensure_ascii=False)},
+            ],
+        )
+        content = response.choices[0].message.content or "{}"
         data = json.loads(content)
         return data if isinstance(data, dict) else None
     except Exception as exc:  # noqa: BLE001

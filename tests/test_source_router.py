@@ -8,7 +8,6 @@ Upstage Document Parse, PDF download) is faked or monkeypatched.
 from __future__ import annotations
 
 import json
-import time
 import types
 
 from sources.collectors.source_router import _prompts as prompts_module
@@ -21,6 +20,7 @@ from sources.collectors.source_router import web_search as web_search_module
 from sources.collectors.source_router.config import SourceRouterConfig
 from sources.collectors.source_router.contracts import (
     CoverageDecision,
+    ConfirmedFact,
     DocumentChunk,
     DocumentSection,
     EvidenceVerification,
@@ -130,36 +130,29 @@ def test_prompts_load_returns_non_empty_text_for_every_stage():
 # ---------------------------------------------------------------------------
 
 
-def test_call_json_stops_waiting_after_timeout_without_hanging(monkeypatch):
-    """2026-08-09 fix: call_json used to give the OpenAI client a hard
-    timeout= kwarg — the exact anti-pattern already found and fixed in
-    web_search.py (see that module's identical test), left unaudited in
-    this sibling module until now even though it backs all 5 Solar-role
-    call sites (planner/coverage x2/pdf_parser x2). Proves call_json
-    returns promptly instead of blocking for the full call duration."""
+def test_call_json_uses_cancellable_sdk_timeout_without_background_retry(monkeypatch):
+    captured = {}
+    response = types.SimpleNamespace(
+        choices=[types.SimpleNamespace(message=types.SimpleNamespace(content='{"ok": true}'))]
+    )
 
-    class _SlowFakeCompletions:
-        def create(self, **kwargs):
-            time.sleep(2)  # much longer than the 0.2s timeout_seconds below
-            raise AssertionError("should never be reached - the wait should have given up first")
-
-    class _SlowFakeChat:
+    class _FakeOpenAI:
         def __init__(self):
-            self.completions = _SlowFakeCompletions()
+            self.chat = types.SimpleNamespace(
+                completions=types.SimpleNamespace(create=lambda **_: response)
+            )
 
-    class _SlowFakeOpenAI:
-        def __init__(self):
-            self.chat = _SlowFakeChat()
+    def _fake_openai(**kwargs):
+        captured.update(kwargs)
+        return _FakeOpenAI()
 
     monkeypatch.setenv(solar_module.API_KEY_ENV_VAR, "solar-test-key")
-    monkeypatch.setattr(solar_module, "OpenAI", lambda **_: _SlowFakeOpenAI())
-
-    started = time.monotonic()
+    monkeypatch.setattr(solar_module, "OpenAI", _fake_openai)
     result = solar_module.call_json("system prompt", {"q": "x"}, caller="test", timeout_seconds=0.2)
-    elapsed = time.monotonic() - started
 
-    assert result is None
-    assert elapsed < 1.5  # returned promptly, did not wait out the 2s sleep
+    assert result == {"ok": True}
+    assert captured["timeout"] == 0.2
+    assert captured["max_retries"] == 0
 
 
 # ---------------------------------------------------------------------------
@@ -382,32 +375,25 @@ def test_execute_web_search_handles_call_exception_gracefully(monkeypatch):
     assert web_search_module.execute_web_search("query") == []
 
 
-def test_execute_web_search_stops_waiting_after_timeout_without_hanging(monkeypatch):
-    """2026-08-09 fix: a live run saw 6/6 web_search calls fail with
-    "Request timed out" because the old code gave the OpenAI client a hard
-    timeout= kwarg. Now the client itself is unbounded and only *waiting*
-    for it is time-boxed (ai_search_harness.py's _run_with_timeout pattern)
-    - this test proves execute_web_search returns promptly (well under the
-    fake call's own sleep duration) instead of blocking for it."""
+def test_execute_web_search_uses_cancellable_sdk_timeout_without_retry(monkeypatch):
+    captured = {}
+    response = _search_response([], [])
 
-    class _SlowFakeResponses:
-        def create(self, **kwargs):
-            time.sleep(2)  # much longer than the 0.2s timeout_seconds below
-            raise AssertionError("should never be reached - the wait should have given up first")
-
-    class _SlowFakeOpenAI:
+    class _FakeOpenAI:
         def __init__(self):
-            self.responses = _SlowFakeResponses()
+            self.responses = types.SimpleNamespace(create=lambda **_: response)
+
+    def _fake_openai(**kwargs):
+        captured.update(kwargs)
+        return _FakeOpenAI()
 
     monkeypatch.setenv(web_search_module._API_KEY_ENV_VAR, "search-test-key")
-    monkeypatch.setattr(web_search_module, "OpenAI", lambda **_: _SlowFakeOpenAI())
-
-    started = time.monotonic()
+    monkeypatch.setattr(web_search_module, "OpenAI", _fake_openai)
     results = web_search_module.execute_web_search("query", timeout_seconds=0.2)
-    elapsed = time.monotonic() - started
 
     assert results == []
-    assert elapsed < 1.5  # returned promptly, did not wait out the 2s sleep
+    assert captured["timeout"] == 0.2
+    assert captured["max_retries"] == 0
 
 
 # ---------------------------------------------------------------------------
@@ -999,7 +985,12 @@ def test_research_stops_when_sufficient_after_priority1(monkeypatch):
     monkeypatch.setattr(
         web_search_module,
         "execute_web_search",
-        lambda query, **_: [_result(f"https://a.example.com/{query}")],
+        lambda query, **_: [_result(f"https://a.example.com/{query}").model_copy(update={
+            "evidence_depth": "original_source", "original_content": "verified source text",
+            "verification": EvidenceVerification(confirmed_facts=[
+                ConfirmedFact(fact="verified", evidence_strength="direct")
+            ]),
+        })],
     )
     monkeypatch.setattr(
         coverage_module,
@@ -1011,7 +1002,7 @@ def test_research_stops_when_sufficient_after_priority1(monkeypatch):
 
     assert result.stop_reason == "sufficient"
     assert result.rounds_completed == 1
-    assert len(result.results) == 2
+    assert len(result.results) == 1
 
 
 def test_research_runs_priority2_after_insufficient_then_stops(monkeypatch):
@@ -1022,7 +1013,12 @@ def test_research_runs_priority2_after_insufficient_then_stops(monkeypatch):
 
     def _fake_search(query, **_):
         call_count["n"] += 1
-        return [_result(f"https://a.example.com/{call_count['n']}")]
+        return [_result(f"https://a.example.com/{call_count['n']}").model_copy(update={
+            "evidence_depth": "original_source", "original_content": "verified source text",
+            "verification": EvidenceVerification(confirmed_facts=[
+                ConfirmedFact(fact="verified", evidence_strength="direct")
+            ]),
+        })]
 
     monkeypatch.setattr(web_search_module, "execute_web_search", _fake_search)
 
@@ -1196,7 +1192,8 @@ def test_research_reassesses_coverage_after_last_round_inspects_sources(monkeypa
     result = router_module.research("질문", config)
 
     assert result.stop_reason == "gap_loop_iterations_exhausted"
-    assert result.final_coverage.reason == "post-inspection, still not enough"  # not the stale pre-inspection one
+    assert result.final_coverage.reason != "pre-inspection"
+    assert "verified original source" in result.final_coverage.reason
     assert result.rounds_completed == 2  # 1 allotted iteration + 1 free re-assessment
     inspected = next(r for r in result.results if r.url == "https://a.example.com")
     assert inspected.evidence_depth == "original_source"

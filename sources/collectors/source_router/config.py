@@ -39,8 +39,11 @@ class SourceRouterConfig:
     # used per question (strict "simple question" criteria added there so
     # this higher ceiling doesn't just pad every question with filler
     # queries). Real enforcement backstop stays max_web_search_calls below.
-    max_priority1_queries: int = 15
-    max_priority2_queries: int = 15
+    max_priority1_queries: int = 8
+    max_priority2_queries: int = 6
+    # Planner + refiner share this plan-level cap. It is intentionally lower
+    # than the old 15+15 parallel prototype; direct queries are reserved first.
+    max_planned_queries: int = 12
 
     # doc1 §25/§27 stop policy. The loop always terminates within these
     # bounds, however the model behaves. max_gap_loop_iterations deliberately
@@ -61,10 +64,12 @@ class SourceRouterConfig:
     # ~10-11 req/min (see CLAUDE.md) — 15 sequential inspections in one run
     # can approach that limit; not currently paced/throttled here.
     max_sources_to_inspect: int = 15
-    # Real backstop on total GPT-5 mini web_search calls per run, regardless
-    # of how many queries the planner proposes across both priority tiers.
-    # 30 = worst case 15+15 candidate queries all actually get run.
-    max_web_search_calls: int = 30
+    # Hard ceiling on total GPT-5 mini web_search calls per run - planner,
+    # refiner and every gap-loop follow-up draw on this one allowance, so a
+    # long run cannot spend a fresh budget per tier. router._search_budget()
+    # then picks the run's actual budget below this, from the question's own
+    # comparison/trend/response complexity and its evidence-need count.
+    max_web_search_calls: int = 12
 
     # Cost guards added after a live-cost review found two uncapped points:
     # a single execute_web_search() call could return an unbounded number of

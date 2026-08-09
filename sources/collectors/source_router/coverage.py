@@ -213,7 +213,10 @@ def check_coverage(
     payload = {
         "question": question,
         "search_plan": search_plan.model_dump(),
-        "results": [result.model_dump() for result in results],
+        # Exact source text is retained for downstream Analyzer, not resent to
+        # the coverage model. Verification already contains the compact source
+        # judgment and this avoids duplicating potentially large HTML/PDF text.
+        "results": [result.model_dump(exclude={"original_content"}) for result in results],
     }
     data = _solar.call_json(
         _prompts.load(_COVERAGE_SYSTEM_PROMPT_NAME),

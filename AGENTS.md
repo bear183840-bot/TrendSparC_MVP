@@ -88,6 +88,33 @@
 
 ### 3-6. Source Router / Block Engine / Purpose Flow의 책임을 섞지 마라
 
+**Source Router는 production의 유일한 검색·수집 엔진이다.**
+`core/request_pipeline/pipeline.py`의 collector 경계가
+`sources.collectors.source_router.integration.collect()`만 호출한다
+(`_call_sector_adapter_stage`가 `role == "collector"`에서 단락). 재수집 경로까지 같은
+경계를 지나므로 검색 엔진은 실행 경로에 하나뿐이다. processor / validator / analyzer는
+**계속 섹터 어댑터가 담당한다** — 이 경계를 옮기지 마라.
+
+- 흐름: question-first planner → slot-aware refiner(KEEP/ADD/REWRITE) → web search →
+  coverage/gap → bounded follow-up → HTML/PDF 원문 취득 → registry 매칭 →
+  `adapter.py`가 `SourceDocument`로 변환 → 기존 analyzer.
+- **원문은 downstream까지 간다.** `WebSearchResult.original_content`가
+  `SourceDocument.content`가 되므로 analyzer가 passage를 다시 검증할 수 있다.
+  단 coverage 프롬프트에는 다시 보내지 않는다(`exclude={"original_content"}`).
+- **DIRECT 요구는 검색 요약으로 충족되지 않는다.** 원문 + verification + `direct` 강도의
+  confirmed fact까지 있어야 sufficient가 될 수 있다(`_enforce_direct_original_sources`).
+- **Registry는 whitelist가 아니라 attribution/trust 레이어다.** 도메인이 일치하면
+  `source_id`/`reliability_tier`를 가져오고, 등록 밖 소스도 수집하되 tier를 지어내지
+  않는다.
+- **검색 예산은 하나다.** planner + refiner + follow-up이 `max_web_search_calls`를 공유하고,
+  `router._search_budget()`이 질문 복잡도로 실제 예산을 정한다. 티어별로 예산을 새로
+  주지 마라.
+- Router가 이미 bounded follow-up을 돌리므로, `collection_mode == "source_router"`에서는
+  파이프라인의 validator/analyzer 재수집 루프를 **끈다**(각각
+  `minimum_validated_documents=0`, `max_recollections=0`). 이중 검색 루프를 되살리지 마라.
+- `ai_search_harness.py`와 섹터별 legacy collector는 **production 실행 경로에서 도달하지
+  않는다.** 자체 단위 테스트와 과거 실행 호환을 위해 남아 있을 뿐이다.
+
 - **Source Router**: 질문에 답하려면 무엇을 알아야 하는지 결정한다. 입력은
   `answer_requirements`와 현재 충족되지 않은 `evidence requirements`다. 목적별 블록명,
   슬롯 후보 순위나 SWOT/KPI 같은 화면 모양을 검색 요구사항으로 사용하지 않는다.
@@ -97,7 +124,7 @@
   읽히게 한다. 목적별 narrative는 reader flow이지 수집 명세가 아니다.
 
 `block_priority_planner`와 `target_block_shapes`는 현재 파이프라인에 남아 있는 호환·진단
-정보다. 새 Source Router에 연결할 때 이를 검색어 생성, 문서 가중치, analyzer 필수 추출
+정보다. Source Router는 이를 검색어 생성, 문서 가중치, analyzer 필수 추출
 목표로 승격하지 않는다. 목적표를 맞추려고 evidence requirement를 새로 만들거나
 불필요한 자료를 수집해서는 안 된다. `resolve_slots()`가 이 계획을 읽지 않는 원칙도
 유지한다.
