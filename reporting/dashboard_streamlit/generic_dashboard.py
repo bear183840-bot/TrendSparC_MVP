@@ -22,11 +22,12 @@ from common.block_shapes import (
     executive_summary_comparison,
     executive_summary_supporting_kpis,
     headline_kpi,
+    landscape_parts,
 )
-from common.block_titles import slot_title
+from common.block_titles import block_title, slot_title
 from common.content_quality_validator import select_chartable_series
 from common.content_quality_validator import dedupe_across_blocks
-from common.content_quality_validator import exclude_market_category_entities
+from common.content_quality_validator import exclude_non_competitor_comparisons
 # Importing the package is what registers every block, including the live
 # ones - the registry is only "the one table" if nothing can reach the
 # dashboard without it being populated.
@@ -219,8 +220,14 @@ _BLOCK_UNITS = {
     "question_comparison": 2,
     "composition_breakdown": 2, "share_split": 2,
     # Flows keep the full landscape width.
-    "landscape": 4, "timeline": 4, "cause_map": 4,
-    "cause_tree": 4, "competitor_panels": 4, "matrix": 4,
+    "cause_map": 4, "cause_tree": 4, "competitor_panels": 4, "matrix": 4,
+    # `landscape` (trend + composition, already one card) and `timeline` pack
+    # into one row together (3 + 1 = `_GRID_UNITS`) instead of each claiming
+    # its own full-width row - live-verified 2026-08-11: on a wide screen a
+    # standalone trend chart and a standalone 5-step timeline each left most
+    # of their row empty. General to any purpose where both slots resolve
+    # next to each other, not specific to any one sector's data.
+    "landscape": 3, "timeline": 1,
 }
 _GRID_UNITS = 4
 
@@ -401,24 +408,29 @@ def _render_slot(
         slot.block_types if complete or not compact or full_width
         else slot.block_types[:1]
     )
-    draws = [
-        draw for draw in (
-            _body_renderer(
-                block_type, result, synthesis, risks, opportunities,
-                strengths, weaknesses, items,
-                presentation,
-                compact,
-                question,
-                slot.drawn_before,
-            )
-            for block_type in block_types
-        ) if draw is not None
-    ]
-    if not draws:
-        return
-    with st.container(border=True):
-        st.markdown(f'<div class="ts-card-inner"><h3>{escape(title)}</h3></div>', unsafe_allow_html=True)
-        for draw in draws:
+    # Each block gets its own card. A slot's lead and companion answer the
+    # same question but are not one visualization - the lead's block
+    # (`landscape`) already draws its own internal composite (chart+donut)
+    # as a single block_type entry, so splitting by block_type here still
+    # keeps that pair on one card; only genuinely separate block TYPES
+    # (e.g. a `timeline` companion beside `landscape`) get pulled apart.
+    # Live-verified 2026-08-11: 요청 - "타임라인은 다른 블록으로 분리" - a
+    # timeline sharing landscape's own bordered container read as one card
+    # that just kept growing, not two related-but-distinct answers.
+    for index, block_type in enumerate(block_types):
+        draw = _body_renderer(
+            block_type, result, synthesis, risks, opportunities,
+            strengths, weaknesses, items,
+            presentation,
+            compact,
+            question,
+            slot.drawn_before,
+        )
+        if draw is None:
+            continue
+        card_title = title if index == 0 else block_title(block_type, title)
+        with st.container(border=True):
+            st.markdown(f'<div class="ts-card-inner"><h3>{escape(card_title)}</h3></div>', unsafe_allow_html=True)
             draw()
 
 
@@ -651,7 +663,7 @@ def render_generic_dashboard(
         # real competitors ("KT"/"SKB"/"LGU+") reads as a competitor to every
         # block downstream - filtered once here, against the sector's own
         # registered market_keywords, so no renderer has to remember to do it.
-        "comparison_points": exclude_market_category_entities(
+        "comparison_points": exclude_non_competitor_comparisons(
             result.synthesis.comparison_points, market_keywords,
         ),
     })
@@ -682,9 +694,25 @@ def render_generic_dashboard(
         synthesis.metric_series, question, headline_point,
     )
     comparison = executive_summary_comparison(synthesis.metric_series)
+    # If Landscape will pair this same composition with its trend chart
+    # below, Executive Summary skips drawing it a second time as its own
+    # donut - see `render_executive_summary`'s docstring. Checked by subject
+    # (the "whole" being split), not just kind=="share", so a question with
+    # a *different* composition than the one Landscape claims still gets its
+    # Executive Summary visualization as before.
+    landscape_parts_here = landscape_parts(synthesis.metric_series)
+    landscape_owns_this_share = (
+        comparison is not None
+        and comparison[0] == "share"
+        and landscape_parts_here is not None
+        and landscape_parts_here[2] == "share"
+        and landscape_parts_here[0] == "trend"
+        and comparison[1] == landscape_parts_here[3][0].share_of
+    )
     render_executive_summary(
         summary, heading=presentation.summary_label, headline_point=headline_point,
-        supporting_points=supporting_points, comparison=comparison,
+        supporting_points=supporting_points,
+        comparison=None if landscape_owns_this_share else comparison,
     )
     # The purpose's slot skeleton drives the page: fixed order, but each slot
     # takes the first block type its data can honestly support. See
@@ -693,10 +721,19 @@ def render_generic_dashboard(
     #
     # `initial_drawn` seeds the dedup state with every fact the Executive
     # Summary just rendered above (headline figure, supporting KPIs, its own
-    # comparison/composition visualization): without it, Key Metrics' own
-    # ranking would pick the same top metrics all over again, since
-    # headline_kpi/executive_summary_supporting_kpis and rank_kpi_candidates
-    # share one ranking and neither knew about the other's pick.
+    # bar-shaped comparison): without it, Key Metrics' own ranking would pick
+    # the same top metrics all over again, since headline_kpi/
+    # executive_summary_supporting_kpis and rank_kpi_candidates share one
+    # ranking and neither knew about the other's pick.
+    #
+    # A "share" composition is seeded here only when Executive Summary
+    # actually drew it (i.e. Landscape does not own it - see above). When
+    # Landscape owns it, Executive Summary skipped rendering it, so nothing
+    # is drawn to seed and Landscape must still see it as available.
+    # Live-verified 2026-08-11: seeding it unconditionally used to make
+    # Landscape lose its own donut whenever Executive Summary claimed the
+    # same composition first, splitting the trend chart and its composition
+    # into two separate cards instead of the one paired card they belong in.
     exec_summary_drawn: set[str] = set()
     if headline_point is not None:
         exec_summary_drawn.add(kpi_evidence_key(headline_point))
@@ -704,7 +741,8 @@ def render_generic_dashboard(
     if comparison is not None:
         kind, subject, points = comparison
         if kind == "share":
-            exec_summary_drawn.add(share_evidence_key(subject))
+            if not landscape_owns_this_share:
+                exec_summary_drawn.add(share_evidence_key(subject))
         else:
             exec_summary_drawn.update(bars_evidence_key(point) for point in points)
     resolved = order_slots_for_audience(
@@ -767,10 +805,20 @@ def render_generic_dashboard(
             ratios = [*widths[:-1], remainder, widths[-1]]
             all_columns = st.columns(ratios, gap="small")
             columns = [*all_columns[:len(widths) - 1], all_columns[-1]]
+        elif remainder:
+            # No blank trailing column here: `_grid_rows` already packed
+            # every slot that fits into this row (greedy, order-preserving -
+            # a slot too wide for `remainder` genuinely cannot join without
+            # reordering), so a leftover unit that stays unfilled is just
+            # dead space at the row's right edge. Live-verified 2026-08-11.
+            # Stretching the row's own cards over the full row instead of
+            # reserving that space for nothing keeps the same *relative*
+            # proportions between cards in this row, at the cost of their
+            # absolute width no longer matching same-width cards in another
+            # row - a smaller inconsistency than a visible empty gap.
+            columns = st.columns(widths, gap="small")
         else:
-            ratios = [*widths, remainder] if remainder else widths
-            all_columns = st.columns(ratios, gap="small")
-            columns = all_columns[:len(row)]
+            columns = st.columns(widths, gap="small")
         for slot, column in zip(row, columns):
             with column:
                 _render_slot(

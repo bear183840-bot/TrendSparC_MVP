@@ -327,6 +327,12 @@ def render_executive_summary(
     )
     if supporting_points:
         render_kpi_row(supporting_points, limit=len(supporting_points))
+    # `comparison` is already None here when the Landscape card below will
+    # pair this same composition with its trend chart - the caller
+    # (`generic_dashboard.py`) checks that before calling in, so the
+    # identical donut does not appear once here and once beside its trend.
+    # When Landscape has no chartable trend to pair it with, the composition
+    # still gets its Executive Summary visualization here as before.
     if comparison is not None:
         kind, subject, points = comparison
         if kind == "share":
@@ -1112,9 +1118,18 @@ def render_action_list(
             f'<span class="action">{escape(title)}{badge}</span>'
             f"{impact_cell}{link}</div>"
         )
-    heading = f"{owner} 실행 제안" if owner else "실행 제안"
+    # A small subtitle, not a big <h3>, repeating "실행 제안" - the card's own
+    # header (e.g. "Recommended Actions", set by the slot renderer one level
+    # up) already says that at full size; live-verified 2026-08-11, a second
+    # big title reading "SK브로드밴드 실행 제안" right under it read as the
+    # same claim twice. The words stay (a reader still sees what this list
+    # is), just no longer competing with the card header for size/attention.
+    owner_note = (
+        f'<span class="ts-actions-owner">실행 제안 ({escape(owner)})</span>'
+        if owner else '<span class="ts-actions-owner">실행 제안</span>'
+    )
     st.markdown(
-        f'<section class="ts-actions"><h3>{escape(heading)}</h3>'
+        f'<section class="ts-actions">{owner_note}'
         '<div class="ts-actions-head"><span></span><span></span><span>기대 효과</span><span>근거</span></div>'
         + "".join(body_parts)
         + "</section>",
@@ -1610,11 +1625,29 @@ def render_landscape(
         f'<b>{escape(title or block_title("landscape"))}</b></div>',
         unsafe_allow_html=True,
     )
+    if complement_kind == "kpi":
+        # A bare KPI reading is not a composition of the trend beside it -
+        # live-verified 2026-08-11: `landscape_parts` falls back to this when
+        # no real share/comparison data qualifies, and squeezing 3 KPI cards
+        # into the composite's companion column read as "KPI cards trapped
+        # inside the trend chart's card" rather than the trend+composition
+        # pairing this block exists for. Those same points are still in
+        # `synthesis.metric_series` and undrawn, so the Key Metrics slot
+        # picks them up on its own - this just stops double-homing them here.
+        if core_kind == "trend":
+            render_metric_chart(core_points, title=block_title("chart"), grounded_claims=grounded_claims)
+        else:
+            render_kpi_row(core_points, limit=4)
+        return
     # One card, so one gap. The default column gap put a full gutter between
     # the trend and the composition of that same trend, and the two halves
     # read as two cards that happened to be adjacent - which is the opposite
     # of why they were put together.
-    trend, split = st.columns([1.35, 1], gap="small")
+    # 2:1 rather than the earlier 1.35:1 - live-verified 2026-08-11, the
+    # donut+legend column was reading wider than the ring/labels inside it
+    # actually needed once the card itself narrowed (see `_BLOCK_UNITS`),
+    # leaving the trend chart cramped for no reason.
+    trend, split = st.columns([2, 1], gap="small")
     with trend:
         if core_kind == "trend":
             render_metric_chart(core_points, title=block_title("chart"), grounded_claims=grounded_claims)
@@ -1623,10 +1656,8 @@ def render_landscape(
     with split:
         if complement_kind == "share":
             render_share_split(complement_points)
-        elif complement_kind == "comparison":
-            render_metric_bar(complement_points, grounded_claims, show_insight=False)
         else:
-            render_kpi_row(complement_points, limit=3)
+            render_metric_bar(complement_points, grounded_claims, show_insight=False)
 
 
 def render_decision_matrix(comparison_points: list[Any]) -> None:

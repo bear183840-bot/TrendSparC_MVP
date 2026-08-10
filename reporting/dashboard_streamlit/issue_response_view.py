@@ -9,7 +9,7 @@ import streamlit as st
 from audience.presentation import load_audience_presentation
 from common.action_quality import actions_for_owner, routed_action_owner
 from common.block_shapes import headline_kpi
-from common.content_quality_validator import exclude_market_category_entities
+from common.content_quality_validator import exclude_non_competitor_comparisons
 from common.purpose_slots import kpi_evidence_key
 from reporting.dashboard_streamlit.components import (
     action_impact_lookup,
@@ -76,7 +76,7 @@ def render_issue_response_dashboard(result: Any, question: str, sector: str, aud
     # comparison table below - filtered once here against the sector's own
     # registered market_keywords, same fix as generic_dashboard.py's.
     synthesis = result.synthesis.model_copy(update={
-        "comparison_points": exclude_market_category_entities(
+        "comparison_points": exclude_non_competitor_comparisons(
             result.synthesis.comparison_points, market_keywords,
         ),
     })

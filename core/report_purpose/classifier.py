@@ -191,8 +191,18 @@ def classify_report_purpose(
                 matched_signals[purpose_id].append(signal)
     # An explicit response or causal request is more decisive than a broad AI
     # label. This is generic across sectors and question subjects.
+    #
+    # Weighted to outscore primary_intent's +4 anchor plus one generic
+    # PRESCRIPTIVE_INTENT_SIGNALS hit on future_business (+2): "방안"/"전략"/
+    # "어떻게" are broad prescriptive-phrasing words that say nothing about
+    # *future business* specifically, so they should not let a wrong
+    # primary_intent beat an explicit, purpose-specific word like "대응"/
+    # "이슈"/"리스크". Live-verified: "중앙그룹 회생 사태에 따른 IPTV사의
+    # 대응 방안" scored future_business=6 (4 anchor + 2 for "방안") vs
+    # issue_response=5 (2 for "대응" + old +3 here), tipping a textbook
+    # issue_response question to the wrong purpose by one point.
     if any(signal.lower() in terms for signal in _EXPLICIT_ISSUE_RESPONSE_SIGNALS):
-        scores["issue_response"] += 3
+        scores["issue_response"] += 5
     if any(signal.lower() in terms for signal in ("원인", "왜", "이유", "근본", "root cause", "why")):
         scores["root_cause"] += 3
 

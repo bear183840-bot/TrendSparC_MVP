@@ -162,6 +162,100 @@ def exclude_market_category_entities(
     ]
 
 
+# A closed, deterministic set of Korean rollup words. A table's own
+# subtotal/total row ("IPTV 총계", "SO 소계", "전체 합계") is not a peer of
+# the rows it sums, in any sector - it is that group's own aggregate,
+# mixed in as if it were one more comparable entity. Matched anywhere in the
+# entity string (not just a suffix), since the qualifier can lead or follow
+# the category name depending on how the source table phrased its row.
+_TOTAL_ROW_ENTITY_RE = re.compile(r"(총계|소계|합계|전체\s*합계)")
+
+_COMPARISON_VALUE_RE = re.compile(r"-?\d+(?:\.\d+)?")
+
+
+def is_total_row_entity(entity: str | None) -> bool:
+    """Whether this entity is a table's own subtotal/total row rather than
+    one of the things being compared."""
+    return bool(entity and _TOTAL_ROW_ENTITY_RE.search(entity))
+
+
+def _comparison_numeric_value(value: str | None) -> float | None:
+    match = _COMPARISON_VALUE_RE.search(value or "")
+    return float(match.group()) if match else None
+
+
+# Mirrors block_shapes.SHARE_MIN_SLICES / SHARE_SUM_TOLERANCE - not imported
+# from there because block_shapes imports this module, and importing back
+# would be circular. Kept in sync by the shared "a composition sums to ~100%"
+# definition both modules document, not by a runtime reference.
+_COMPOSITION_MIN_SLICES = 2
+_COMPOSITION_SUM_TOLERANCE = 2.0
+
+
+def is_composition_group(points: list[Any]) -> bool:
+    """Whether one criterion's comparison rows are a composition (parts of
+    one whole) rather than a set of peers being compared to each other.
+
+    Structural, not vocabulary-based: `IPTV 59.57% / SO 33.01% / 위성 7.41%`
+    sums to ~100% under one criterion - that is what a composition *is*,
+    the same test `share_groups()` already applies to MetricPoint's
+    `share_of` groups, run here on ComparisonPoint (which carries no
+    `share_of` field to key off directly). `KT 25.24% / SKB 18.51% / LGU+
+    15.82%` also sums under 100 but is genuinely a competitor comparison -
+    the distinguishing fact both use is the same: percentages that
+    partition a whole vs. percentages that do not, and only the former
+    reads as one.
+    """
+    if len(points) < _COMPOSITION_MIN_SLICES:
+        return False
+    values = [_comparison_numeric_value(getattr(point, "value", None)) for point in points]
+    if any(value is None for value in values):
+        return False
+    total = sum(values)
+    return 100 - 15 <= total <= 100 + _COMPOSITION_SUM_TOLERANCE
+
+
+def exclude_non_competitor_comparisons(
+    comparison_points: list[Any], market_keywords: list[str] | None,
+) -> list[Any]:
+    """`comparison_points` narrowed to rows that are actually comparable
+    peers of the same entity type - the shape a Competitive Landscape
+    block needs.
+
+    Three deterministic passes, all reusing data already on the contract,
+    no new classifier and no per-company name list:
+    1. `exclude_market_category_entities` - the sector's own registered
+       market/category vocabulary.
+    2. total/subtotal rows (`is_total_row_entity`) - a table's own rollup
+       is never a peer of what it rolls up.
+    3. whole criterion groups that are compositions (`is_composition_group`)
+       - "what this whole is made of" is a different block purpose from
+       "how do these peers compare" even when both arrive as percentages.
+    """
+    filtered = exclude_market_category_entities(comparison_points, market_keywords)
+    filtered = [point for point in filtered if not is_total_row_entity(getattr(point, "entity", None))]
+    by_criterion: dict[str, list[Any]] = {}
+    for point in filtered:
+        by_criterion.setdefault(getattr(point, "criterion", None), []).append(point)
+    # One table commonly states the same composition twice - a percentage
+    # column and its raw-count column - as two different criteria. The
+    # percentage version sums to ~100% and is caught directly; the count
+    # version (e.g. 21,414,521 / 12,091,056 / 2,720,523) will not sum near
+    # 100 by coincidence, so it needs the entity set it shares with an
+    # already-identified composition, not its own numbers, to be recognised.
+    composition_entity_sets = [
+        frozenset(getattr(point, "entity", None) for point in points)
+        for points in by_criterion.values()
+        if is_composition_group(points)
+    ]
+    composition_criteria = set()
+    for criterion, points in by_criterion.items():
+        entities = frozenset(getattr(point, "entity", None) for point in points)
+        if is_composition_group(points) or entities in composition_entity_sets:
+            composition_criteria.add(criterion)
+    return [point for point in filtered if getattr(point, "criterion", None) not in composition_criteria]
+
+
 def _age_sort_key(entity: str) -> tuple:
     """Age brackets in their natural order, not in evidence order.
 

@@ -30,6 +30,7 @@ from reporting/.
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from typing import Any, Callable
 
@@ -753,6 +754,33 @@ def _metric_label_keys(groups: list[list[Any]]) -> set[str]:
     }
 
 
+def _timeline_keys(synthesis: Any) -> set[str]:
+    """A timeline's identity is the metric it plots, not the word "timeline".
+
+    A constant key made a timeline invisible to every other shape's dedup -
+    live-verified 2026-08-11: a `bar` and a `timeline` slot each independently
+    picked the identical "숏폼 콘텐츠 시청 비중" series (`time_bar_groups` and
+    `timeline_entries` both prefer the same repeated-period metric,
+    `block_shapes._timeline_metric_series`), so the same two numbers rendered
+    twice under different shapes. Keying on `metric:{semantic_metric_key}`
+    matches the scheme `bar`/`chart`/`metric_comparison` already use, so the
+    two-pass claim in `resolve_slots()` recognizes the overlap regardless of
+    which shape drew it first - general to any metric, not "숏폼" specific.
+    When the timeline instead falls back to dated prose (no repeated metric
+    exists), key on the drawn sentences themselves so two different prose
+    timelines don't collide but an identical repeat still does.
+    """
+    label = block_shapes.timeline_evidence_label(synthesis.metric_series)
+    if label:
+        return {f"metric:{semantic_metric_key(label)}"}
+    entries = block_shapes.timeline_entries(
+        synthesis.evidence, synthesis.metric_series, _reference_year(synthesis)
+    )
+    if not entries:
+        return {"timeline"}
+    return {f"timeline:{period}:{text}" for period, text in entries}
+
+
 def _comparison_keys(points: list[Any]) -> set[str]:
     return {
         f"cmp:{semantic_entity_key(point.entity)}:{semantic_metric_key(point.criterion)}"
@@ -784,6 +812,15 @@ _SHAPE_FAMILIES: dict[str, str] = {
     "ranking_list": "bars",
     "grouped_bar": "bars",
     "metric_comparison": "bars",
+    # A timeline built from a repeated metric (see `_timeline_keys`) draws
+    # the exact figures a bar/item_bar/metric_comparison would for that same
+    # metric, just as dots-on-a-line instead of columns - live-verified
+    # 2026-08-11: "숏폼 콘텐츠 시청 비중" rendered once as a horizontal bar and
+    # once as a timeline, in two different cards. A timeline built from dated
+    # prose instead (no repeated metric) keys on the sentences themselves
+    # (`timeline:{period}:{text}`), which never collides with a `bars`-family
+    # metric key, so this mapping only ever suppresses the genuine duplicate.
+    "timeline": "bars",
     "table": "comparison_grid",
     "segment_table": "comparison_grid",
     "benchmark_table": "comparison_grid",
@@ -868,6 +905,51 @@ def bars_evidence_key(point: Any) -> str:
     return qualified_key("bars", f"metric:{semantic_metric_key(point.label)}")
 
 
+# A closed set of Korean rollup/total words a table's own row label may
+# carry ("IPTV 총계 가입자수") beside a plain sentence restatement of the
+# identical reading ("IPTV 가입자 수"). Dedup-key-only normalization - never
+# touches what is displayed, and deliberately narrow (matches the same
+# vocabulary the analyzer's own total-row detection uses) rather than a
+# general fuzzy rewrite.
+_TOTAL_QUALIFIER_RE = re.compile(r"(총계|소계|합계)")
+
+
+def _canonical_metric_key(point: Any) -> str:
+    """The same identity `semantic_metric_key(label)` already gives every
+    other consumer of a metric label - kept label-based, and deliberately
+    period-agnostic, matching `rank_kpi_candidates`'s own behavior of
+    folding every period of one label into a single latest-plus-delta card
+    (see test_the_same_label_at_a_different_period_is_still_one_kpi_identity).
+
+    On top of that shared identity, two dedup-key-only fixes for one
+    label naming the same reading two ways:
+    - a table's own total-row wording ("IPTV 총계 가입자수") vs. a sentence
+      restating it ("IPTV 가입자 수") - the qualifier is dropped before
+      keying;
+    - "가입자 수" vs "가입자수" - Korean noun-noun compounds are written
+      with and without a space inconsistently by extraction, and
+      `semantic_metric_key` collapses whitespace *runs* but does not merge
+      a written-together compound with a written-apart one. Internal
+      whitespace is removed here, for this key only - this changes what
+      counts as *the same label*, not what any other caller of
+      `semantic_metric_key` sees.
+    Live-verified 2026-08-11: the Executive Summary headline ("IPTV 가입자
+    수", 21,535,256) and the first Key Metrics card ("IPTV 총계 가입자수",
+    the identical 21,535,256) survived the label-only dedup as two different
+    identities until both of these were applied.
+    """
+    # Cleaned before semantic_metric_key, not after: its own alias table
+    # matches specific substrings ("가입자 수" with the space -> "subscribers"),
+    # so a label already carrying the qualifier or the no-space spelling
+    # missed that alias and fell through as raw Korean while the plain
+    # spelling hit it - two different output strings for what should be one
+    # key. Stripping first means both spellings reach semantic_metric_key
+    # identically and either both hit the alias or neither does.
+    cleaned = _TOTAL_QUALIFIER_RE.sub("", point.label or "")
+    cleaned = re.sub(r"\s+", "", cleaned)
+    return semantic_metric_key(cleaned)
+
+
 def kpi_evidence_key(point: Any) -> str:
     """The consumption key for one KPI-shaped metric point.
 
@@ -881,7 +963,7 @@ def kpi_evidence_key(point: Any) -> str:
     top-ranked metric shows up twice: once as the summary's headline number,
     once again as the first Key Metrics card.
     """
-    return qualified_key("kpi", f"metric:{semantic_metric_key(point.label)}")
+    return qualified_key("kpi", f"metric:{_canonical_metric_key(point)}")
 
 
 def _kpi_keys(synthesis: Any, question: str | None) -> set[str]:
@@ -895,7 +977,7 @@ def _kpi_keys(synthesis: Any, question: str | None) -> set[str]:
     asking it is asking the block itself.
     """
     return {
-        f"metric:{semantic_metric_key(point.label)}"
+        f"metric:{_canonical_metric_key(point)}"
         for point in block_shapes.rank_kpi_candidates(
             synthesis.metric_series, (question or "").split(),
         )
@@ -957,7 +1039,7 @@ def _consumption(question: str | None = None) -> dict[str, Callable[[Any, list[s
         },
         "kpi_grid": lambda s, i: _kpi_keys(s, question),
         "kpi_single": lambda s, i: _kpi_keys(s, question),
-        "timeline": lambda s, i: {"timeline"},
+        "timeline": lambda s, i: _timeline_keys(s),
         "table": lambda s, i: _comparison_keys(
             block_shapes.comparison_points_of_kind(s.comparison_points, False)
         ),

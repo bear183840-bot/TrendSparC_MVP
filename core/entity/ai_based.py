@@ -107,13 +107,22 @@ market_landscape only when the user explicitly asks about a market, industry, se
 market size/share, or competitive landscape. Generic status, trend, performance, \
 revenue, investment, subscriber, utilization, sales, and development words do not by \
 themselves make a question market-level.
-4. If no alias matches, infer from the business topic. Use general only when neither \
-an alias nor a business topic clearly supports a registered sector.
+4. If no alias matches, infer from the business topic: compare the question's own \
+subject matter against each sector's supplied business_topics list, not just its name. \
+If a sector's business_topics contains two or more terms that clearly overlap with what \
+the question is actually about (exact words, obvious synonyms, or the same named \
+technology/format/service), select that sector even though no company name or alias was \
+mentioned - this is a real match, not forcing an unrelated question. Use general only \
+when no sector's business_topics meaningfully overlaps with the question's subject.
 
 Examples:
 - "오케캐시백 시럽 요새 반응 어떰" -> infer OK캐쉬백/Syrup and select the matching sector.
 - "요즘 회사에서 자꾸 AI 데이터센터 얘기 나오는데 SKT가 하는거 잘되고있나요 \
 갑자기 궁금해서요" -> ignore filler and select the SKT/telecom sector.
+- A question about a media/content-consumption topic with no company named, where one \
+sector's business_topics list literally includes matching terms (e.g. streaming, OTT, \
+content consumption, viewing data) -> select that sector via business-topic overlap, \
+not general.
 - "오늘 점심 뭐먹지" -> sector_id="general"; invent no business connection.
 - When the user says "우리", "우리 회사", or "우리 쪽" without a company name, use \
 the business topic plus the registered sector choices to resolve the intended SK \
@@ -244,8 +253,11 @@ Routing:
 1. Choose sector_id only from REGISTERED SECTOR CHOICES. Match routing_aliases despite
 normal Korean particles, spacing, capitalization, and obvious phonetic spelling.
 2. A clear alias wins; add its canonical company/business name to organizations.
-3. Without an alias, use business_topics. Use sector_id="general" when neither clearly
-matches; never force an unrelated question into a business.
+3. Without an alias, compare the question's subject against each sector's business_topics.
+Two or more clearly overlapping terms (exact words, obvious synonyms, or the same named
+technology/format/service) is a real match - select that sector even with no company
+name mentioned. Use sector_id="general" only when no sector's business_topics
+meaningfully overlaps; never force an unrelated question into a business.
 4. "우리", "우리 회사", "우리 쪽", or "저희" may resolve through a clearly matching
 business topic or an explicitly selected UI sector, but never by guessing.
 routing_confidence is low, medium, or high.

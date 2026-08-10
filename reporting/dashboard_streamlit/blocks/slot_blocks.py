@@ -130,9 +130,19 @@ def _competitor_panels(context: SlotContext):
 
 def _landscape(context: SlotContext):
     synthesis = context.synthesis
-    if not has_landscape(synthesis.metric_series):
+    # The composition half must not repeat a donut the Executive Summary
+    # already drew - live-verified 2026-08-11: `executive_summary_comparison`
+    # picks `share_groups(metric_points)[0]` and this block picked the same
+    # group independently, so the identical '25년 하반기 IPTV/SO/위성 donut
+    # appeared twice on one page. `_undrawn_share_points` already does this
+    # subtraction for `_share_split`/`_composition_breakdown`; landscape's
+    # trend half is unaffected (it is never seeded as drawn), and
+    # `landscape_parts` itself falls back to a different complement (or none)
+    # once the composition's own slices are gone from the input.
+    points = _undrawn_share_points(context)
+    if not has_landscape(points):
         return None
-    return lambda: render_landscape(synthesis.metric_series, synthesis.grounded_claims)
+    return lambda: render_landscape(points, synthesis.grounded_claims)
 
 
 def _grouped_bars(context: SlotContext):

@@ -1028,6 +1028,36 @@ def _timeline_period(sentence: str, reference_year: int | None = None) -> str | 
     return None
 
 
+def _timeline_metric_series(metric_points: list[Any]) -> list[Any] | None:
+    """The single repeated-period metric `timeline_entries` would plot, if any.
+
+    Split out of `timeline_entries` so a caller that only needs to know
+    *which* metric a timeline would draw (not render its rows) - the
+    dedup-identity path in `purpose_slots._consumption` - can ask without
+    duplicating the selection rule.
+    """
+    points_by_label = {
+        label: [point for point in points if is_time_period(point.period)]
+        for label, points in group_metric_points_by_label(metric_points).items()
+    }
+    return max(
+        (
+            points for points in points_by_label.values()
+            if len({point.period for point in points}) >= 2
+        ),
+        key=lambda points: len({point.period for point in points}),
+        default=None,
+    )
+
+
+def timeline_evidence_label(metric_points: list[Any]) -> str | None:
+    """The label of the metric a timeline would plot, or None if it would
+    fall back to dated prose instead. Used only to key cross-block dedup -
+    see `purpose_slots._consumption`'s "timeline" entry."""
+    series = _timeline_metric_series(metric_points)
+    return series[0].label if series else None
+
+
 def timeline_entries(
     evidence: list[str],
     metric_points: list[Any],
@@ -1038,18 +1068,7 @@ def timeline_entries(
     Undated prose is left out - a numbered list of undated statements is not
     a timeline, which is all the old registry block produced."""
     entries: list[tuple[str, str]] = []
-    points_by_label = {
-        label: [point for point in points if is_time_period(point.period)]
-        for label, points in group_metric_points_by_label(metric_points).items()
-    }
-    series = max(
-        (
-            points for points in points_by_label.values()
-            if len({point.period for point in points}) >= 2
-        ),
-        key=lambda points: len({point.period for point in points}),
-        default=None,
-    )
+    series = _timeline_metric_series(metric_points)
     # One timeline, one measurement definition. If no repeated metric exists,
     # fall back to dated events only; never insert unrelated one-off KPIs
     # between those events merely because they have dates.

@@ -72,7 +72,7 @@ def test_reporting_survives_having_no_question():
 @pytest.mark.parametrize("block_types,family", [
     (("share_split", "composition_breakdown"), "composition"),
     (("kpi_grid", "kpi_single"), "kpi"),
-    (("bar", "item_bar", "ranking_list", "grouped_bar", "metric_comparison"), "bars"),
+    (("bar", "item_bar", "ranking_list", "grouped_bar", "metric_comparison", "timeline"), "bars"),
     (("table", "segment_table", "benchmark_table", "level_matrix"), "comparison_grid"),
 ])
 def test_blocks_that_draw_the_same_picture_share_a_family(block_types, family):
@@ -86,8 +86,15 @@ def test_a_trend_and_a_bar_of_one_label_are_not_the_same_key():
 
 
 def test_an_undeclared_block_type_dedupes_only_against_itself():
-    """Its family is its own id, which is the old claimed-once rule."""
-    assert "timeline" not in _SHAPE_FAMILIES
+    """Its family is its own id, which is the old claimed-once rule.
+
+    `timeline` no longer qualifies as an example - live-verified 2026-08-11,
+    a bar and a timeline built from the same repeated metric drew the
+    identical figures in two cards, so it now shares the `bars` family (see
+    `_SHAPE_FAMILIES`); `cause_tree` has no declared family and stands in
+    for the still-undeclared case instead.
+    """
+    assert "cause_tree" not in _SHAPE_FAMILIES
 
 
 def test_a_key_that_already_names_its_family_is_left_alone():

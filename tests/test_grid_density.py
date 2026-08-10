@@ -75,10 +75,14 @@ def test_a_short_timeline_does_not_claim_the_full_landscape_width():
 
 
 def test_a_long_timeline_keeps_its_declared_full_width():
+    """`timeline`'s declared width is 1 (it now shares a row with
+    `landscape` - see `_BLOCK_UNITS`), so "full width" for a long timeline
+    means holding that 1-unit ceiling rather than shrinking further, not
+    reclaiming the whole 4-unit row."""
     slot = _slot("timeline", "timeline")
     long = _synthesis(evidence=[f"근거 {i}" for i in range(12)])
 
-    assert _slot_width(slot, synthesis=long) == 4
+    assert _slot_width(slot, synthesis=long) == 1
 
 
 def test_a_short_prose_card_shrinks():
@@ -103,7 +107,10 @@ def test_width_never_grows_past_what_the_block_type_declared():
 
 
 def test_an_unmeasured_block_type_keeps_its_declared_width():
-    assert _slot_width(_slot("market", "landscape"), synthesis=_synthesis()) == 4
+    """`landscape` has no `_CONTENT_VOLUME` entry, so it always keeps its
+    declared width (3 - it shares a row with `timeline`, see
+    `_BLOCK_UNITS`) rather than being shrunk on a guess."""
+    assert _slot_width(_slot("market", "landscape"), synthesis=_synthesis()) == 3
 
 
 def test_without_a_synthesis_nothing_shrinks():

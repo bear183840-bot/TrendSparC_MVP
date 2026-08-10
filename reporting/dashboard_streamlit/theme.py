@@ -202,7 +202,17 @@ def dashboard_css(dark: bool, accent_theme: str = "orange") -> str:
     div[data-testid="stFormSubmitButton"] button p {{ font-size:1.45rem!important; font-weight:900!important; }}
     div[data-testid="stFormSubmitButton"] button:hover {{ background:color-mix(in srgb,var(--ts-accent) 85%,black); color:#fff;
       box-shadow:0 12px 26px color-mix(in srgb,var(--ts-accent) 55%,transparent); }}
-    div[data-testid="stVerticalBlockBorderWrapper"] {{ border-color:var(--ts-line)!important;
+    /* The installed Streamlit no longer emits `stVerticalBlockBorderWrapper`
+       for `st.container(border=True)` - live-DOM-verified 2026-08-11 by
+       walking the actual ancestor chain in a running instance: the bordered
+       card is `div[data-testid="stVerticalBlock"]` carrying
+       `data-test-scroll-behavior`, one of several `stVerticalBlock`s at
+       different nesting depths (most unbordered). Every rule in this file
+       scoped to the old testid was matching nothing, silently, in the
+       running app - not caught by any Python-level test since this is a
+       pure runtime DOM/CSS mismatch. `:is(...)` keeps the old testid too,
+       so this still works if a different Streamlit version restores it. */
+    :is(div[data-testid="stVerticalBlockBorderWrapper"],div[data-testid="stVerticalBlock"][data-test-scroll-behavior]) {{ border-color:var(--ts-line)!important;
       background:var(--ts-panel); border-radius:24px; box-shadow:none; }}
     /* One wordmark, one knob. The mark used to be sized in pixels while the
        text was sized in rem, so the two only lined up at the size they were
@@ -520,12 +530,20 @@ def dashboard_css(dark: bool, accent_theme: str = "orange") -> str:
     .ts-swot.duo > .ts-swot-cell {{ border-bottom:0; }}
     .ts-actions {{ margin-top:.65rem; padding:.65rem 1rem; border:1.5px solid var(--ts-line); border-radius:20px;
       background:var(--ts-panel); }}
-    .ts-actions h3 {{ margin:0 0 .45rem; color:var(--ts-ink); }}
-    .ts-actions-head {{ display:grid; grid-template-columns:42px minmax(250px,1.5fr) minmax(160px,1fr) 44px;
+    .ts-actions-owner {{ display:block; margin:0 0 .45rem; font-size:.72rem; font-weight:600;
+      color:var(--ts-muted); }}
+    /* `minmax(250px,…)`/`minmax(160px,…)` used to force these two columns
+       wider than the card actually had once `action_list` shares a row with
+       another block (see generic_dashboard.py's grid packing) - the grid
+       track could not shrink below its floor, so the row overflowed its
+       card and the header's columns stopped lining up with the body's.
+       `minmax(0,…)` keeps the same *relative* proportions but lets both
+       shrink (and wrap/truncate) to whatever width the card actually has. */
+    .ts-actions-head {{ display:grid; grid-template-columns:42px minmax(0,1.5fr) minmax(0,1fr) 44px;
       gap:.75rem; padding:0 .3rem .3rem; color:var(--ts-muted); font-size:.66rem; font-weight:700;
       text-transform:uppercase; letter-spacing:.04em; }}
     .ts-actions-head span:last-child, .ts-actions-head span:nth-child(3) {{ text-align:right; }}
-    .ts-action-row {{ display:grid; grid-template-columns:42px minmax(250px,1.5fr) minmax(160px,1fr) 44px;
+    .ts-action-row {{ display:grid; grid-template-columns:42px minmax(0,1.5fr) minmax(0,1fr) 44px;
       gap:.75rem; align-items:center; padding:.5rem .3rem; border-bottom:1px solid var(--ts-line); font-size:.88rem; }}
     .ts-action-row:last-child {{ border-bottom:0; }} .ts-action-row .num {{ font-size:1.1rem; color:var(--ts-muted); }}
     .ts-action-row .action {{ font-weight:800; }}
@@ -698,29 +716,43 @@ def dashboard_css(dark: bool, accent_theme: str = "orange") -> str:
     .ts-gbar.single .ts-gbar-stack i {{ position:relative; background:var(--ts-accent);
       width:16px; max-width:40%; }}
     /* Horizontal timeline: nodes on one rail with the stage under each, the
-       artwork's wide variant. Wraps to a column below 520px rather than
-       compressing five labels into unreadable slivers. */
-    .ts-htimeline {{ display:flex; align-items:flex-start; gap:.25rem; margin:.9rem 0 .3rem; }}
-    .ts-htimeline-step {{ position:relative; flex:1 1 0; min-width:0; padding-top:1.35rem;
+       artwork's wide variant. Wraps to a column below its OWN 360px, not the
+       browser viewport's - live-verified 2026-08-11: `landscape`/`timeline`
+       now share one grid row (see `_BLOCK_UNITS` in generic_dashboard.py),
+       so the timeline's card can be narrow on an otherwise wide screen and
+       a viewport-only `@media` breakpoint would never fire. Every Streamlit
+       column gets `container-type:inline-size` so `@container` below can
+       react to that column's actual width instead. */
+    div[data-testid="stColumn"] {{ container-type:inline-size; }}
+    .ts-htimeline {{ display:flex; align-items:flex-start; gap:.2rem; margin:.7rem 0 .2rem; }}
+    .ts-htimeline-step {{ position:relative; flex:1 1 0; min-width:0; padding-top:1.1rem;
       text-align:center; }}
     .ts-htimeline-step:not(:last-child):after {{ content:""; position:absolute; left:50%; right:-50%;
-      top:.42rem; border-top:2px solid var(--ts-navy); }}
+      top:.34rem; border-top:2px solid var(--ts-navy); }}
     .ts-htimeline-step.active:not(:last-child):after {{ border-top-style:dashed;
       border-top-color:var(--ts-accent); }}
     .ts-htimeline-step.todo:not(:last-child):after {{ border-top-style:dashed;
       border-top-color:var(--ts-muted); }}
-    .ts-htimeline-node {{ position:absolute; left:50%; top:0; width:.78rem; height:.78rem;
-      margin-left:-.39rem; border:2px solid var(--ts-navy); border-radius:50%;
+    .ts-htimeline-node {{ position:absolute; left:50%; top:0; width:.62rem; height:.62rem;
+      margin-left:-.31rem; border:2px solid var(--ts-navy); border-radius:50%;
       background:var(--ts-navy); box-sizing:border-box; z-index:1; }}
     .ts-htimeline-step.active .ts-htimeline-node {{ background:var(--ts-panel); border-color:var(--ts-accent); }}
     .ts-htimeline-step.todo .ts-htimeline-node {{ background:var(--ts-panel); border-color:var(--ts-muted); }}
-    .ts-htimeline-step b {{ display:block; font-size:.82rem; font-weight:700; word-break:keep-all; }}
-    .ts-htimeline-state {{ display:block; margin-top:.15rem; font-size:.74rem; font-weight:700;
+    .ts-htimeline-step b {{ display:block; font-size:.7rem; font-weight:700; word-break:keep-all; }}
+    .ts-htimeline-state {{ display:block; margin-top:.1rem; font-size:.62rem; font-weight:700;
       color:var(--ts-muted); }}
     .ts-htimeline-step.done .ts-htimeline-state {{ color:var(--ts-navy); }}
     .ts-htimeline-step.active .ts-htimeline-state {{ color:var(--ts-accent); }}
-    .ts-htimeline-text {{ display:block; margin-top:.3rem; font-size:.74rem; color:var(--ts-muted);
-      line-height:1.4; word-break:keep-all; }}
+    .ts-htimeline-text {{ display:block; margin-top:.2rem; font-size:.62rem; color:var(--ts-muted);
+      line-height:1.3; word-break:keep-all; }}
+    @container (max-width:360px) {{
+      .ts-htimeline {{ flex-direction:column; gap:.5rem; }}
+      .ts-htimeline-step {{ text-align:left; padding-left:1.1rem; padding-top:0; }}
+      .ts-htimeline-node {{ left:0; top:.15rem; margin-left:0; }}
+      .ts-htimeline-step:not(:last-child):after {{ display:none; }}
+    }}
+    /* Viewport-narrow fallback for browsers/pages where the container query
+       above cannot resolve (e.g. printed/exported snapshots). */
     @media (max-width:520px) {{
       .ts-htimeline {{ flex-direction:column; }}
       .ts-htimeline-step:not(:last-child):after {{ display:none; }}
@@ -740,32 +772,77 @@ def dashboard_css(dark: bool, accent_theme: str = "orange") -> str:
     .ts-panel-figure small, .ts-panel-share small {{ font-size:.76rem; color:var(--ts-muted); }}
     .ts-panel-figure b, .ts-panel-share b {{ font-size:.95rem; font-weight:800; color:var(--ts-ink); }}
     .ts-panel-share b {{ color:var(--ts-accent); }}
-    /* AI Insight: the artwork's outlined control. Streamlit draws the
-       expander itself, so only its chrome is restyled. */
-    [data-testid="stExpander"] details {{ border:1px solid var(--ts-accent); border-radius:12px;
-      background:var(--ts-panel); }}
-    [data-testid="stExpander"] summary {{ color:var(--ts-accent); font-weight:700; }}
+    /* AI Insight: the artwork's outlined control - a small supporting
+       annotation next to a chart, not a section of its own. Streamlit's
+       default expander padding treats it as major page furniture (full
+       card width, generous summary row height), which is why it read as
+       almost as heavy as the chart it was annotating and pushed the
+       chart+donut pair apart under it. Streamlit draws the expander
+       itself, so only its chrome is restyled; content stays full - this
+       is density, not truncation. */
+    [data-testid="stExpander"] details {{ border:1px solid var(--ts-accent); border-radius:8px;
+      background:var(--ts-panel); margin:.3rem 0 0; }}
+    [data-testid="stExpander"] summary {{ color:var(--ts-accent); font-weight:700;
+      font-size:.76rem; padding:.25rem .55rem; min-height:0; }}
+    [data-testid="stExpander"] summary svg {{ width:14px; height:14px; }}
+    [data-testid="stExpander"] [data-testid="stExpanderDetails"] {{ padding:.1rem .55rem .5rem; }}
     .ts-landscape-head {{ margin:.2rem 0 .1rem; font-size:.9rem; font-weight:700;
       color:var(--ts-ink); }}
     /* The trend and the composition of that trend are one card, so they get
        the guide's *within-card* spacing, not its between-card gutter - the
        reference Landscape card sets its two visualizations side by side with
-       a hairline between and no more air than that. Streamlit's column gutter
-       (and its own per-column padding, which survives `gap="small"`) was
-       reading as a gap between two cards. */
-    .ts-landscape + div[data-testid="stHorizontalBlock"] {{ gap:0; }}
-    .ts-landscape + div[data-testid="stHorizontalBlock"]
-      > div[data-testid="stColumn"] {{ padding:0; }}
-    .ts-landscape + div[data-testid="stHorizontalBlock"]
-      > div[data-testid="stColumn"] + div[data-testid="stColumn"] {{
+       a hairline between and no more air than that.
+       Scoped with :has() to the bordered card wrapper rather than an
+       adjacent-sibling selector on `.ts-landscape` itself - live-verified
+       2026-08-11: the trend chart and donut still rendered a full column
+       gutter apart, because `.ts-landscape`'s own element is nested inside
+       Streamlit's per-markdown wrapper div, not a direct sibling of the
+       `stHorizontalBlock` that follows it, so `.ts-landscape + div[...]`
+       never matched anything. `:has()` finds the ancestor card by content
+       instead of assuming a specific nesting depth. */
+    :is(div[data-testid="stVerticalBlockBorderWrapper"],div[data-testid="stVerticalBlock"][data-test-scroll-behavior]):has(.ts-landscape)
+      div[data-testid="stHorizontalBlock"] {{ gap:0; }}
+    :is(div[data-testid="stVerticalBlockBorderWrapper"],div[data-testid="stVerticalBlock"][data-test-scroll-behavior]):has(.ts-landscape)
+      div[data-testid="stColumn"] {{ padding:0; }}
+    /* The companion column (donut, or its fallback - a small KPI stack or a
+       comparison bar) must not flex-grow to fill a `1fr` share of the whole
+       card's width. On a wide layout that share is far more than a donut or
+       three KPI numbers need, so the *column* filled the space while its
+       *content* stayed small - a wide dead gap, not a joined block.
+       Live-verified 2026-08-11. `flex:0 0 auto` makes the column shrink-wrap
+       its content instead of stretching to its nominal fraction; the chart
+       column takes whatever is left. */
+    :is(div[data-testid="stVerticalBlockBorderWrapper"],div[data-testid="stVerticalBlock"][data-test-scroll-behavior]):has(.ts-landscape)
+      div[data-testid="stHorizontalBlock"] > div[data-testid="stColumn"]:first-child {{
+      flex:1 1 auto !important; min-width:0; }}
+    :is(div[data-testid="stVerticalBlockBorderWrapper"],div[data-testid="stVerticalBlock"][data-test-scroll-behavior]):has(.ts-landscape)
+      div[data-testid="stHorizontalBlock"] > div[data-testid="stColumn"]:last-child {{
+      /* `width:auto` alone collapsed this column to ~10px in the running
+         app - live-DOM-verified 2026-08-11: with `flex-basis:auto`, this
+         version's browser/Streamlit combination resolved the flex item's
+         content-based size using the *replaced* `.ts-donut` svg's box
+         before its own 118px CSS width was applied (the svg's rendered
+         width came out ~16px, height correctly 118px), so the column had
+         nothing to shrink-wrap to. An explicit `min-width` floor sidesteps
+         that auto-sizing ambiguity by giving the column real space to work
+         with regardless of how the browser resolves the content pass. */
+      flex:0 0 auto !important; width:auto !important; min-width:180px !important; max-width:240px;
       border-left:1px solid var(--ts-line); padding-left:.6rem; margin-left:.6rem; }}
-    /* Inside the card the plot fills its column - the standalone cap exists to
-       stop a lone chart spanning a 1500px card, which is not this case. */
-    .ts-landscape + div[data-testid="stHorizontalBlock"] .ts-chart-svg {{
-      max-width:none; }}
-    .ts-landscape + div[data-testid="stHorizontalBlock"] .ts-donut-card {{
+    /* The chart keeps its usual cap (defined once, next to `_CHART_W`) even
+       here - letting it grow unbounded was what pulled the whole row wide
+       enough to strand the companion column's content on the far right. */
+    :is(div[data-testid="stVerticalBlockBorderWrapper"],div[data-testid="stVerticalBlock"][data-test-scroll-behavior]):has(.ts-landscape) .ts-donut-card {{
       margin-top:0; }}
-    .ts-landscape + div[data-testid="stHorizontalBlock"] .ts-chart {{ gap:.2rem; }}
+    :is(div[data-testid="stVerticalBlockBorderWrapper"],div[data-testid="stVerticalBlock"][data-test-scroll-behavior]):has(.ts-landscape) .ts-chart {{
+      gap:.2rem; max-width:540px; }}
+    /* `.ts-chart-head`'s title+unit row uses `justify-content:space-between`,
+       which is fine when the row's own width matches the chart below it -
+       but the first column here is `flex:1 1 auto` (fills whatever the
+       companion doesn't use), so on a wide screen the row was far wider
+       than the 540px-capped `.ts-chart-svg` beneath it and the unit caption
+       landed well past the chart's right edge instead of sitting just above
+       it. Capping `.ts-chart` itself keeps title/unit/legend/svg all the
+       same width, so "단위: ..." stays directly over the chart it labels. */
     /* Below this, two Streamlit columns side by side leave neither the trend
        line nor the donut+legend enough width to read - "Donut | Line" must
        stack as "Donut" over "Line" instead of both being squeezed. Streamlit
@@ -776,11 +853,12 @@ def dashboard_css(dark: bool, accent_theme: str = "orange") -> str:
        second-column divider becomes a top border once there is no second
        column beside it to divide from. */
     @media (max-width:700px) {{
-      .ts-landscape + div[data-testid="stHorizontalBlock"] {{ flex-direction:column; }}
-      .ts-landscape + div[data-testid="stHorizontalBlock"]
-        > div[data-testid="stColumn"] {{ width:100% !important; flex:1 1 100% !important; }}
-      .ts-landscape + div[data-testid="stHorizontalBlock"]
-        > div[data-testid="stColumn"] + div[data-testid="stColumn"] {{
+      :is(div[data-testid="stVerticalBlockBorderWrapper"],div[data-testid="stVerticalBlock"][data-test-scroll-behavior]):has(.ts-landscape)
+        div[data-testid="stHorizontalBlock"] {{ flex-direction:column; }}
+      :is(div[data-testid="stVerticalBlockBorderWrapper"],div[data-testid="stVerticalBlock"][data-test-scroll-behavior]):has(.ts-landscape)
+        div[data-testid="stColumn"] {{ width:100% !important; flex:1 1 100% !important; }}
+      :is(div[data-testid="stVerticalBlockBorderWrapper"],div[data-testid="stVerticalBlock"][data-test-scroll-behavior]):has(.ts-landscape)
+        div[data-testid="stColumn"] + div[data-testid="stColumn"] {{
         border-left:none; padding-left:0; margin-left:0;
         border-top:1px solid var(--ts-line); padding-top:.6rem; margin-top:.6rem; }}
     }}
