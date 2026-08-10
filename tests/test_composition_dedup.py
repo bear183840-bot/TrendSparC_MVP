@@ -132,6 +132,9 @@ def test_landscape_reports_the_donut_it_actually_draws():
 
     keys = _landscape_keys(synthesis)
 
-    assert any(key.startswith("share:") for key in keys)
+    assert any("share:" in key for key in keys)
+    # Its two halves are two shapes, so they carry two families - a single
+    # family for the card would be a lie in one direction or the other.
+    assert {key.split("|")[0] for key in keys} == {"trend", "composition"}
     # Not every label in the synthesis - only the two halves of this card.
     assert len(keys) < len({f"metric:{point.label}" for point in synthesis.metric_series})

@@ -16,6 +16,7 @@ from __future__ import annotations
 import re
 from typing import Any
 
+from common.number_format import format_number
 from common.content_quality_validator import (
     _RELATIVE_YEAR_OFFSETS,
     classify_metric_shape,
@@ -59,11 +60,10 @@ def clean_citation(value: str | None) -> str:
     return _DOC_ID_RE.sub("", value or "").strip()
 
 
-def _format_number(value: float) -> str:
-    """Trailing-zero-free rendering of a metric value."""
-    if value == int(value):
-        return f"{int(value):,}"
-    return f"{value:,.1f}"
+# Digit grouping now lives in `common/number_format.py` alongside the scaling
+# rule, so the two cannot drift; re-exported here because every existing
+# caller imports it from this module.
+_format_number = format_number
 
 
 def has_timeseries(metric_points: list[Any]) -> bool:
@@ -1400,3 +1400,36 @@ def rank_kpi_candidates(
     if terms:
         candidates.sort(key=_score, reverse=True)
     return candidates[:limit]
+
+
+def headline_kpi(metric_points: list[Any], question: str | None) -> Any | None:
+    """The one figure that answers the question, or None if there isn't one.
+
+    Deliberately not a new notion of importance. It is the top of
+    `rank_kpi_candidates` - the same relevance-over-recency ranking the KPI
+    grid already uses - narrowed by the two conditions that make a figure
+    quotable on its own:
+
+    * it is grounded, meaning it carries the claim id of a quote verified
+      against the source text (`evidence_claim_id`), and a document to go
+      back to;
+    * it actually answers *this* question, meaning its label matches at
+      least one term of it.
+
+    The second condition is what leaves the slot empty rather than filling
+    it. A question that no single number answers - "왜 가입자가 줄었나" - has
+    no headline KPI, and putting the largest figure lying around there would
+    assert a relevance nothing established.
+    """
+    terms = [term.casefold() for term in (question or "").split() if len(term) >= 2]
+    if not terms:
+        return None
+    for point in rank_kpi_candidates(metric_points, (question or "").split()):
+        if not getattr(point, "evidence_claim_id", None):
+            continue
+        if not (getattr(point, "doc_id", None) or getattr(point, "source_url", None)):
+            continue
+        label = f"{getattr(point, 'label', '') or ''} {getattr(point, 'subject', '') or ''}".casefold()
+        if any(term in label for term in terms):
+            return point
+    return None

@@ -38,6 +38,10 @@ from typing import Any, Callable
 # or on anything that imports it.
 from common import block_shapes
 from common.content_quality_validator import (
+    plotted_chart_series,
+    select_chartable_series,
+)
+from common.content_quality_validator import (
     leading_subject_kind,
     semantic_entity_key,
     semantic_metric_key,
@@ -756,6 +760,49 @@ def _comparison_keys(points: list[Any]) -> set[str]:
     }
 
 
+# What a block *does* with the facts it draws, as opposed to which facts.
+#
+# Dedup on the facts alone is wrong, and the revenue_trend fixture is the
+# proof: a 매출액 trend line, a 매출액 KPI card and a 매출액 bar are the same
+# three numbers, and a 현황파악 report has separate 시장상황 / 지표 / 순위
+# slots precisely because "how did it move", "what is it now" and "how does
+# it rank" are three questions. Keying on the facts alone let whichever slot
+# ran first answer all three and leave the other two empty.
+#
+# Two blocks of the *same* family drawing the same facts genuinely are one
+# card shown twice - the composition donut that appeared under both 시장 변화
+# and 주요 비교. A block type absent from this table gets its own family, so
+# it dedupes only against itself, which is the old claimed-once behaviour.
+_SHAPE_FAMILIES: dict[str, str] = {
+    "share_split": "composition",
+    "composition_breakdown": "composition",
+    "chart": "trend",
+    "kpi_grid": "kpi",
+    "kpi_single": "kpi",
+    "bar": "bars",
+    "item_bar": "bars",
+    "ranking_list": "bars",
+    "grouped_bar": "bars",
+    "metric_comparison": "bars",
+    "table": "comparison_grid",
+    "segment_table": "comparison_grid",
+    "benchmark_table": "comparison_grid",
+    "level_matrix": "comparison_grid",
+    "competitor_panels": "comparison_grid",
+    "radar": "comparison_grid",
+}
+
+# Keys minted already carrying their family, because the block that draws
+# them draws more than one shape - `landscape` is a trend and a composition
+# in one card, so a single family for it would be a lie in one direction or
+# the other.
+_QUALIFIED = "|"
+
+
+def qualified_key(family: str, key: str) -> str:
+    return key if _QUALIFIED in key else f"{family}{_QUALIFIED}{key}"
+
+
 def share_evidence_key(whole: object) -> str:
     """The consumption key for one composed whole.
 
@@ -763,7 +810,7 @@ def share_evidence_key(whole: object) -> str:
     to compute the same key the resolver did; two spellings of this rule
     would silently stop matching the first time either changed.
     """
-    return f"share:{semantic_metric_key(str(whole or ''))}"
+    return f"composition{_QUALIFIED}share:{semantic_metric_key(str(whole or ''))}"
 
 
 def _share_keys(groups: list[tuple[str, list[Any]]]) -> set[str]:
@@ -790,16 +837,52 @@ def _landscape_keys(synthesis: Any) -> set[str]:
     if parts is None:
         return set()
     core_kind, core_points, complement_kind, complement_points = parts
-    keys = {f"metric:{semantic_metric_key(point.label)}" for point in core_points}
+    core_family = "trend" if core_kind == "trend" else "kpi"
+    keys = {
+        qualified_key(core_family, f"metric:{semantic_metric_key(point.label)}")
+        for point in core_points
+    }
     if complement_kind == "share":
         whole = (getattr(complement_points[0], "share_of", "") or "") if complement_points else ""
         keys |= {share_evidence_key(whole)} if whole else set()
     else:
-        keys |= {f"metric:{semantic_metric_key(point.label)}" for point in complement_points}
+        complement_family = "bars" if complement_kind == "comparison" else "kpi"
+        keys |= {
+            qualified_key(complement_family, f"metric:{semantic_metric_key(point.label)}")
+            for point in complement_points
+        }
     return keys
 
 
-def _consumption() -> dict[str, Callable[[Any, list[str]], set[str]]]:
+def _kpi_keys(synthesis: Any, question: str | None) -> set[str]:
+    """The metrics a KPI grid puts on cards - not every metric it could.
+
+    This used to report one key per point in `metric_series`: 77 keys for a
+    grid that draws six. Under a report-wide dedup rule that is not a
+    conservative over-report, it is a claim on the whole page - every other
+    metric block looked already-drawn and disappeared behind whichever ran
+    first. `rank_kpi_candidates` is the same selection `_kpi` renders, so
+    asking it is asking the block itself.
+    """
+    return {
+        f"metric:{semantic_metric_key(point.label)}"
+        for point in block_shapes.rank_kpi_candidates(
+            synthesis.metric_series, (question or "").split(),
+        )
+    }
+
+
+def _chart_keys(synthesis: Any) -> set[str]:
+    """The series a trend chart draws, after unit/period and series caps."""
+    return {
+        f"metric:{semantic_metric_key(point.label)}"
+        for point in plotted_chart_series(
+            select_chartable_series(synthesis.metric_series)
+        )
+    }
+
+
+def _consumption(question: str | None = None) -> dict[str, Callable[[Any, list[str]], set[str]]]:
     """block_type -> the identity of the data it would put on screen.
 
     This is what makes composition safe. Two blocks in one slot are worth
@@ -816,11 +899,7 @@ def _consumption() -> dict[str, Callable[[Any, list[str]], set[str]]]:
     by_label = block_shapes.group_metric_points_by_label
     return {
         "landscape": lambda s, i: _landscape_keys(s),
-        "chart": lambda s, i: {
-            f"metric:{semantic_metric_key(label)}"
-            for label, points in by_label(s.metric_series).items()
-            if block_shapes.classify_metric_shape(points) == "line"
-        },
+        "chart": lambda s, i: _chart_keys(s),
         "bar": lambda s, i: _metric_label_keys(block_shapes.time_bar_groups(s.metric_series)),
         "item_bar": lambda s, i: _metric_label_keys(block_shapes.item_bar_groups(s.metric_series)),
         "ranking_list": lambda s, i: _metric_label_keys(
@@ -846,12 +925,8 @@ def _consumption() -> dict[str, Callable[[Any, list[str]], set[str]]]:
             )
             for point in points
         },
-        "kpi_grid": lambda s, i: {
-            f"metric:{semantic_metric_key(point.label)}" for point in s.metric_series
-        },
-        "kpi_single": lambda s, i: {
-            f"metric:{semantic_metric_key(point.label)}" for point in s.metric_series
-        },
+        "kpi_grid": lambda s, i: _kpi_keys(s, question),
+        "kpi_single": lambda s, i: _kpi_keys(s, question),
         "timeline": lambda s, i: {"timeline"},
         "table": lambda s, i: _comparison_keys(
             block_shapes.comparison_points_of_kind(s.comparison_points, False)
@@ -971,11 +1046,17 @@ def resolve_slots(
     synthesis: Any,
     report: Any,
     question_answer_type: str | None = None,
+    question: str | None = None,
 ) -> list[ResolvedSlot]:
-    """Fill each of the purpose's slots with the best block its data supports."""
+    """Fill each of the purpose's slots with the best block its data supports.
+
+    `question` is optional and affects only *which* metrics a KPI grid would
+    put on cards, which is what it reports having drawn. Without it the grid
+    still reports a bounded set, just ranked by the evidence alone.
+    """
     slots = slots_for(purpose_id, question_answer_type)
     availability = _availability()
-    consumption = _consumption()
+    consumption = _consumption(question)
     claimed: set[str] = set()
     resolved: list[ResolvedSlot] = []
     # Every evidence identity anything on the page has drawn so far. Claiming
@@ -994,13 +1075,29 @@ def resolve_slots(
     drawn: set[str] = set()
 
     def keys_for(candidate: str, synthesis: Any, items: list[str]) -> set[str]:
-        return consumption.get(candidate, _coarse_key(candidate))(synthesis, items)
+        # Same facts + same shape is a repeat; same facts in another shape is
+        # another question answered. A block with no declared family is its
+        # own, so it still dedupes against itself and nothing else.
+        family = _SHAPE_FAMILIES.get(candidate, candidate)
+        raw = consumption.get(candidate, _coarse_key(candidate))(synthesis, items)
+        return {qualified_key(family, key) for key in raw}
 
     def drawable(candidate: str, synthesis: Any, items: list[str]) -> bool:
         if candidate in claimed and candidate not in _REUSABLE_BLOCKS:
             return False
         predicate = availability.get(candidate)
-        return predicate is not None and predicate(synthesis, items)
+        if predicate is None or not predicate(synthesis, items):
+            return False
+        # A block with nothing left to add is not a block, wherever the
+        # facts were drawn. This is only safe because every entry in
+        # `_consumption()` reports what its block *draws*: the first attempt
+        # at this rule was reverted because `kpi_grid` claimed all 77 metrics
+        # for the six it shows, so it swallowed the trend chart, and `chart`
+        # claimed nine series for the three it plots. Blocks whose data
+        # cannot be identified keep their coarse key, so for them this stays
+        # the old claimed-once rule.
+        keys = keys_for(candidate, synthesis, items)
+        return not (keys and keys <= drawn)
 
     # Pass 1: every slot gets its lead block first. Composition must never
     # cost a later slot the block that answers it best - 원인 taking the

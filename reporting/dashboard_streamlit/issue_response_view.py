@@ -8,6 +8,7 @@ import streamlit as st
 
 from audience.presentation import load_audience_presentation
 from common.action_quality import actions_for_owner, routed_action_owner
+from common.block_shapes import headline_kpi
 from reporting.dashboard_streamlit.components import (
     action_impact_lookup,
     headline_stats,
@@ -101,8 +102,8 @@ def render_issue_response_dashboard(result: Any, question: str, sector: str, aud
     render_page_header(question, sector, audience, purpose)
     # This view only ever renders issue_response reports.
     render_executive_summary(
-        summary, headline_stats(synthesis, "issue_response"),
-        heading=presentation.summary_label,
+        summary, heading=presentation.summary_label,
+        headline_point=headline_kpi(synthesis.metric_series, question),
     )
     render_kpi_row(
         synthesis.metric_series, limit=presentation.kpi_limit,

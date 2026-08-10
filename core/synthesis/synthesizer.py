@@ -8,12 +8,18 @@ and recommended actions.
 
 from __future__ import annotations
 
+from typing import Any
+
 from common.content_quality_validator import (
     dedupe_structured_across_sections,
     extract_metric_points_from_evidence,
 )
-from common.metric_identity import normalize_metric_points
+from common.metric_identity import (
+    normalize_comparison_points,
+    normalize_metric_points,
+)
 from common.contracts import (
+    ComparisonPoint,
     DocumentAnalysis,
     SynthesisClaim,
     SynthesisConclusion,
@@ -49,6 +55,68 @@ def _grounded_values(analysis: DocumentAnalysis, claim_type: str) -> list[str]:
 def _grounded_joined(analysis: DocumentAnalysis, claim_type: str) -> str | None:
     values = _grounded_values(analysis, claim_type)
     return "; ".join(values) if values else None
+
+
+def grounded_comparison_points(analysis: DocumentAnalysis) -> list[ComparisonPoint]:
+    """This document's comparisons that point at a claim it verified.
+
+    Grounding, not labelling. The gate used to require the referenced claim
+    be *typed* `comparison`, which a comparison read off a table row never
+    is - it is grounded in the row, a `metric` claim. The metric path has
+    always used exactly this rule.
+    """
+    verified_ids = {claim.claim_id for claim in analysis.grounded_claims}
+    return [
+        point for point in analysis.comparison_points
+        if point.evidence_claim_id in verified_ids
+    ]
+
+
+def repair_dropped_comparison_points(result: Any) -> Any:
+    """Recover comparisons an older run's synthesis threw away.
+
+    A saved `PipelineResult` is replayed, never re-synthesised - the
+    dashboard validates the JSON and renders whatever synthesis is in it. So
+    a run archived while the claim-type gate was in place still arrives with
+    `comparison_points: []`, and every comparison-shaped block in it falls
+    back to prose, even though the run's own `document_analyses` still carry
+    the points and the source documents behind them.
+
+    This re-applies today's grounding rule to data the pipeline already
+    verified and stored. It is not a re-analysis: nothing new is derived,
+    nothing is re-requested, and it only ever runs when the synthesis has
+    none and the analyses have some - a synthesis that legitimately found no
+    comparisons is left exactly as it is.
+    """
+    synthesis = getattr(result, "synthesis", None)
+    analyses = getattr(result, "document_analyses", None) or []
+    if synthesis is None or synthesis.comparison_points or not analyses:
+        return result
+
+    recovered: list[ComparisonPoint] = []
+    source_ids = {
+        analysis.doc_id: analysis.source_id for analysis in analyses
+    }
+    for analysis in analyses:
+        for index, point in enumerate(grounded_comparison_points(analysis), 1):
+            recovered.append(point.model_copy(update={
+                "comparison_id": point.comparison_id
+                or f"{analysis.doc_id}:comparison:{index}",
+                "evidence_synthesis_claim_id": (
+                    f"{analysis.doc_id}:{point.evidence_claim_id}"
+                    if point.evidence_claim_id else None
+                ),
+                "doc_id": analysis.doc_id,
+                "source_id": source_ids.get(analysis.doc_id),
+                "source_url": analysis.source_url,
+            }))
+    if not recovered:
+        return result
+    return result.model_copy(update={
+        "synthesis": synthesis.model_copy(update={
+            "comparison_points": normalize_comparison_points(recovered),
+        })
+    })
 
 
 def synthesize(
@@ -157,16 +225,17 @@ def synthesize(
                 for claim in analysis.grounded_claims
                 if claim.claim_type == "metric"
             }
-            comparison_claim_ids = {
-                claim.claim_id
-                for claim in analysis.grounded_claims
-                if claim.claim_type == "comparison"
-            }
-            analysis_comparisons = [
-                point
-                for point in analysis.comparison_points
-                if point.evidence_claim_id in comparison_claim_ids
-            ]
+            # A comparison has to be grounded in a claim this document
+            # actually verified. It does not have to be grounded in a claim
+            # the model *labelled* a comparison, which is what this used to
+            # require - and a comparison recovered from a table row is
+            # grounded in the row itself, a `metric` claim. Live-verified
+            # 2026-08-10: a 보도자료 whose tables compare IPTV/SO/위성 and
+            # KT/SKB/LGU+ arrived here with 52 comparison points and zero
+            # claims typed `comparison`, so every one of them was dropped and
+            # 경쟁구도 fell back to prose. The metric path immediately below
+            # has always used exactly this rule.
+            analysis_comparisons = grounded_comparison_points(analysis)
         else:
             # Backward-compatible path for sector analyzers that have not yet
             # adopted grounded claims.

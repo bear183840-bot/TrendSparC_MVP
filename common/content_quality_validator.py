@@ -997,6 +997,39 @@ def select_chartable_series(metric_points: list[Any]) -> list[Any]:
     return chartable
 
 
+# Four lines across two axes is not a trend anyone reads; it is a legend with
+# a picture attached. The live 유료방송 card plotted IPTV / SO / 위성방송 /
+# 증감폭 - three levels and a change between them - and the change, two orders
+# of magnitude smaller, dragged a second axis onto the card that the reader
+# had to match line-by-line before the chart said anything.
+CHART_MAX_SERIES = 3
+
+
+def plotted_chart_series(chartable_points: list[Any]) -> list[Any]:
+    """The series one chart actually draws, out of those it *could*.
+
+    Magnitude decides which survive, because nothing in the evidence says
+    which series is "the main one" and the biggest is what sets the axis the
+    others are read against. Dropped labels are not lost - as
+    `select_chartable_series` already documents, they still reach the reader
+    as KPI cards or bars.
+
+    Separate from the renderer so slot resolution can ask what the chart will
+    put on screen without importing Streamlit. That question is not
+    cosmetic: a block that reports data it will not draw makes every later
+    block look redundant.
+    """
+    by_label = group_metric_points_by_series(chartable_points)
+    if len(by_label) <= CHART_MAX_SERIES:
+        return chartable_points
+    kept = set(sorted(
+        by_label,
+        key=lambda label: max(abs(point.value) for point in by_label[label]),
+        reverse=True,
+    )[:CHART_MAX_SERIES])
+    return [point for label in kept for point in by_label[label]]
+
+
 def filter_shared_comparison_axis(comparison_points: list[Any]) -> list[Any]:
     """Keep only the criteria that at least 2 distinct entities actually
     have a value for (a real shared axis), dropping criteria only one

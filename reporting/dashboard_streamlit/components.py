@@ -28,12 +28,21 @@ from common.content_quality_validator import (
     period_sort_key,
     rank_by_relevance,
     select_chartable_series,
+    plotted_chart_series,
 )
 # Data-shape predicates live in common/block_shapes.py (no Streamlit
 # dependency) and are re-exported here so the renderers that use them, and
 # every existing caller, keep importing from one place.
 from common.metric_identity import metric_identity
+from common.number_format import (
+    display_value,
+    scaled_number,
+    joined_value,
+    scale_for,
+    unit_needs_space,
+)
 from common.section_titles import section_title
+from common.block_titles import block_title
 from common.block_shapes import (  # noqa: F401
     LEVEL_RADIUS_FRACTION as _LEVEL_RADIUS_FRACTION,
     RADAR_MAX_ENTITIES as _RADAR_MAX_ENTITIES,
@@ -252,19 +261,53 @@ def headline_stats(synthesis: Any, purpose_id: str | None) -> list[tuple[str, in
     ]
 
 
-def render_executive_summary(
-    summary: str, stats: list[tuple[str, int, str]], heading: str = "Executive Summary"
-) -> None:
-    """Executive Summary card with a purpose-appropriate stat column."""
-    cells = "".join(
-        f'<div class="ts-stat {accent}"><small>{escape(label)}</small><b>{count}건</b></div>'
-        for label, count, accent in stats
+def render_headline_kpi(point: Any) -> str:
+    """The one figure the summary is about, as the corner card's markup."""
+    number, unit = display_value(point.value, point.unit)
+    period = getattr(point, "period", None) or ""
+    return (
+        '<div class="ts-headline-kpi">'
+        f'<small>{escape(clean_citation(point.label))}</small>'
+        f'<b>{escape(number)}</b>'
+        + (f'<span class="ts-headline-unit">{escape(unit)}</span>' if unit else "")
+        + (f'<em>{escape(period)}</em>' if period else "")
+        + "</div>"
     )
+
+
+def render_executive_summary(
+    summary: str,
+    stats: list[tuple[str, int, str]] | None = None,
+    heading: str = "Executive Summary",
+    headline_point: Any | None = None,
+) -> None:
+    """Executive Summary card, with the question's own figure beside it.
+
+    The corner used to hold counters - "확인된 지표 155건 / 주의 신호 3건".
+    A count of an internal list is not something a reader can act on, and it
+    sat in the most prominent position on the page. What belongs there is the
+    number the summary is about, chosen by `headline_kpi` using the ranking
+    the KPI grid already uses; when no single figure answers the question the
+    corner is simply empty, on the same rule as every other block here.
+
+    `stats` is still accepted so existing callers keep working, and is used
+    only when there is no headline figure to show instead.
+    """
+    if headline_point is not None:
+        aside = render_headline_kpi(headline_point)
+    elif stats:
+        aside = "".join(
+            f'<div class="ts-stat {accent}"><small>{escape(label)}</small><b>{count}건</b></div>'
+            for label, count, accent in stats
+        )
+    else:
+        aside = ""
     st.markdown(
-        '<div class="ts-summary-grid">'
+        f'<div class="ts-summary-grid{"" if aside else " ts-summary-solo"}">'
         f'<section class="ts-summary"><h2>{escape(heading)}</h2>'
         f'<p>{escape(summary or "분석 가능한 근거가 부족합니다.")}</p></section>'
-        f'<aside class="ts-stat-col">{cells}</aside></div>',
+        + (f'<aside class="ts-stat-col">{aside}</aside>' if aside else "")
+        + "</div>",
         unsafe_allow_html=True,
     )
 
@@ -509,11 +552,16 @@ def render_metric_chart(
     evidence-stated `period` text as-is (no invented dates). Height is
     capped so one chart can't push the rest of the dashboard off-screen.
     """
-    chartable_points = select_chartable_series(metric_points)
+    chartable_points = _plottable_series(select_chartable_series(metric_points))
     if not chartable_points:
         return
     st.markdown(_metric_chart_svg(chartable_points, title), unsafe_allow_html=True)
     render_metric_insight(chartable_points, grounded_claims)
+
+
+# Moved to common/block_shapes.py so slot resolution, which must not import
+# Streamlit, can ask the same question this renderer answers.
+_plottable_series = plotted_chart_series
 
 
 # Chart geometry, in the SVG's own viewBox units (it scales to the container).
@@ -534,6 +582,41 @@ _CHART_GRID_LINES = 4
 # 영업이익 (900~3,700억원) drawn against 매출액 (44,000~46,900억원) rendered as
 # a straight rule along the bottom of the plot.
 _DUAL_AXIS_RATIO = 4.0
+
+# One colour per series, not per axis. Colouring by axis meant two series
+# sharing the left axis were drawn identically - IPTV and SO were the same
+# orange line, and the legend could not tell the reader which was which.
+#
+# The ramp is the design guide's own two colours plus the midpoint between
+# them, so three series separate cleanly without introducing a hue the brand
+# does not use. `color-mix` computes the middle rather than hard-coding a
+# third hex, which keeps it correct if either end is retuned.
+SERIES_PALETTE = (
+    "var(--ts-accent)",
+    "var(--ts-navy)",
+    "color-mix(in srgb,var(--ts-accent) 50%,var(--ts-navy))",
+    "color-mix(in srgb,var(--ts-accent) 75%,var(--ts-navy))",
+    "color-mix(in srgb,var(--ts-accent) 25%,var(--ts-navy))",
+    "color-mix(in srgb,var(--ts-accent) 62%,var(--ts-panel))",
+)
+
+# Below three items a single accent reads as "these are all the same kind of
+# thing", which is true and calmer. At three and above the reader is being
+# asked to tell items apart, and one colour makes them do it by position
+# alone.
+SERIES_PALETTE_MIN_ITEMS = 3
+
+
+def series_color(index: int, count: int = SERIES_PALETTE_MIN_ITEMS) -> str:
+    """The colour for one item of `count`, from the shared ramp."""
+    if count < SERIES_PALETTE_MIN_ITEMS:
+        return SERIES_PALETTE[0]
+    return SERIES_PALETTE[index % len(SERIES_PALETTE)]
+
+
+# The line chart's own alias, kept because it colours by series unconditionally
+# - a chart never plots fewer than two lines' worth of meaning per line.
+_LINE_SERIES_COLORS = SERIES_PALETTE
 
 _NICE_STEPS = (1.0, 2.0, 2.5, 5.0, 10.0)
 
@@ -578,37 +661,14 @@ def _chart_y_ticks(low: float, high: float) -> list[float]:
     return [top - step * index for index in range(_CHART_GRID_LINES)]
 
 
-# Korean magnitude words, largest first. Only exact powers of ten that have a
-# word of their own: there is no unit for 10^6, so 25,000,000 is 2,500만, not
-# "25M".
-_AXIS_SCALES: tuple[tuple[float, str], ...] = ((1e12, "조"), (1e8, "억"), (1e4, "만"))
-
-# Below this a scaled axis reads worse than the raw one: 0.25억 is harder than
-# 25,000,000 is long. Ten keeps at least two significant digits on the axis.
-_AXIS_SCALE_MIN = 10.0
-
-# Shares, rates and indices are already small numbers whose unit *is* the
-# scale. "2.5만%" is not a thing.
-_UNSCALED_UNITS = frozenset({"%", "%p", "％", "배", "점", "위", "건", ""})
-
-
 def axis_scale(values: list[float], unit: str | None) -> tuple[float, str]:
-    """`(divisor, prefix)` for displaying an axis - never for storing a value.
+    """The chart axis's share of one project-wide rule.
 
-    A subscriber axis was reading 25,000,000 at every gridline, which is
-    accurate and unusable; the reader has to count digits to tell one tick
-    from the next. Only the *label* is divided, and the magnitude word moves
-    into the unit note so the axis still says what it is measuring. The
-    stored `MetricPoint.value` is untouched, so nothing downstream - a KPI
-    card, a table, the evidence trail - sees a rounded number.
+    Kept as a name because the axis is where scaling first appeared, but the
+    rule itself lives in `common/number_format.py` so a KPI card, a bar
+    label and this axis all write the same figure the same way.
     """
-    if (unit or "").strip() in _UNSCALED_UNITS:
-        return 1.0, ""
-    peak = max((abs(value) for value in values), default=0.0)
-    for divisor, prefix in _AXIS_SCALES:
-        if peak / divisor >= _AXIS_SCALE_MIN:
-            return divisor, prefix
-    return 1.0, ""
+    return scale_for(values, unit)
 
 
 def _axis_groups(by_label: dict) -> list[list[str]]:
@@ -716,8 +776,17 @@ def _metric_chart_svg(points: list[Any], title: str) -> str:
     # has to answer before anything else.
     right_labels = ""
     if len(groups) > 1:
+        # Tinted with its series' colour only when it carries exactly one -
+        # "which line does this number belong to" is the first question a
+        # dual axis raises, and with two lines on it any single tint would
+        # answer it wrongly. Then the legend's 좌축/우축 labels are the cue.
+        right_series = [label for label in by_label if axis_of_label[label] == 1]
+        axis_tint = (
+            _LINE_SERIES_COLORS[list(by_label).index(right_series[0]) % len(_LINE_SERIES_COLORS)]
+            if len(right_series) == 1 else "var(--ts-muted)"
+        )
         right_labels = (
-            f'<g class="ts-chart-axis" text-anchor="end" fill="var(--ts-teal)">'
+            f'<g class="ts-chart-axis" text-anchor="end" fill="{axis_tint}">'
             + "".join(
                 f'<text x="{_CHART_W - 2}" y="{y_on(1, tick) + 3:.1f}">'
                 f'{escape(tick_label(1, tick))}</text>'
@@ -764,7 +833,7 @@ def _metric_chart_svg(points: list[Any], title: str) -> str:
                 + f'L{solid_coords[-1][0]:.1f} {_CHART_BOTTOM}L{solid_coords[0][0]:.1f} {_CHART_BOTTOM}Z'
             )
             area = f'<path d="{area_path}" fill="url(#tsChartFill)"></path>'
-        stroke = "var(--ts-teal)" if axis else "var(--ts-accent)"
+        stroke = _LINE_SERIES_COLORS[index % len(_LINE_SERIES_COLORS)]
         forecast_markup = (
             f'<polyline points="{forecast_line}" fill="none" stroke="{stroke}" stroke-width="2.2" '
             f'stroke-dasharray="5 4" stroke-linejoin="round" stroke-linecap="round" '
@@ -781,11 +850,11 @@ def _metric_chart_svg(points: list[Any], title: str) -> str:
     # chart silently invites the reader to compare two different scales.
     legend = "".join(
         f'<span class="ts-chart-key">'
-        f'<i style="background:{"var(--ts-teal)" if axis_of_label[label] else "var(--ts-accent)"}"></i>'
+        f'<i style="background:{_LINE_SERIES_COLORS[index % len(_LINE_SERIES_COLORS)]}"></i>'
         f'{escape(label)}'
         + (f'<small>{"우축" if axis_of_label[label] else "좌축"}</small>' if len(groups) > 1 else "")
         + "</span>"
-        for label in by_label
+        for index, label in enumerate(by_label)
     )
     # The axis divides its labels, so the note is where the reader is told by
     # how much. Without it the chart would understate every figure by four
@@ -868,12 +937,17 @@ def render_metric_bar(
     label = ordered[0].label
     unit = ordered[0].unit or ""
     max_value = max(abs(p.value) for p in ordered) or 1
+    # One scale across the group: bars are read as lengths against each
+    # other, so writing one row in 만 and another raw breaks the comparison
+    # the block exists to make.
+    bar_scale = scale_for([p.value for p in ordered], unit)
     rows = "".join(
         f'<div class="ts-bar-compare-row"><span class="period">{escape(axis_label)}</span>'
         f'<div class="ts-bar-compare-track"><div class="ts-bar-compare-fill" '
-        f'style="--pct:{abs(p.value) / max_value * 100:.1f}%"></div></div>'
-        f'<span class="value">{escape(_format_number(p.value))}{escape(unit)}</span></div>'
-        for p, axis_label in zip(ordered, metric_axis_labels(ordered))
+        f'style="--pct:{abs(p.value) / max_value * 100:.1f}%;'
+        f'background:{series_color(position, len(ordered))}"></div></div>'
+        f'<span class="value">{escape(joined_value(p.value, unit, bar_scale))}</span></div>'
+        for position, (p, axis_label) in enumerate(zip(ordered, metric_axis_labels(ordered)))
     )
     st.markdown(
         f'<div class="ts-bar-compare"><b>{escape(label)}</b>{rows}</div>',
@@ -1029,13 +1103,10 @@ def render_action_list(
 # One hue stepped down in strength, as the artwork does it: a share of a whole
 # is still the same quantity, so five unrelated colours would read as five
 # unrelated things. Slices arrive largest-first, so strength tracks size.
-_DONUT_COLORS = (
-    "var(--ts-accent)",
-    "color-mix(in srgb,var(--ts-accent) 78%,var(--ts-panel))",
-    "color-mix(in srgb,var(--ts-accent) 56%,var(--ts-panel))",
-    "color-mix(in srgb,var(--ts-accent) 36%,var(--ts-panel))",
-    "color-mix(in srgb,var(--ts-accent) 20%,var(--ts-panel))",
-)
+# Slices of one whole are items to tell apart, same as lines on a chart, so
+# they use the shared ramp rather than five tints of one hue - at 7.5% a
+# 20%-opacity orange wedge was barely distinguishable from the empty track.
+_DONUT_COLORS = SERIES_PALETTE
 
 
 def render_share_split(metric_points: list[Any]) -> None:
@@ -1177,15 +1248,22 @@ def render_ranking_list(
             continue
         peak = max(abs(point.value) for point in ordered) or 1
         unit = ordered[0].unit or ""
+        # The total is written at the ranking's own scale so "전체" and the
+        # rows it totals are the same kind of number.
+        rank_scale = scale_for(
+            [point.value for point in ordered] + ([total.value] if total else []), unit,
+        )
         rows = "".join(
             f'<div class="ts-ranking-row"><span class="rank">{index:02d}</span>'
             f'<span class="label">{escape(point.subject or point.period)}</span>'
-            f'<span class="track"><i style="width:{abs(point.value) / peak * 100:.1f}%"></i></span>'
-            f'<b>{escape(_format_number(point.value))}{escape(unit)}</b></div>'
+            f'<span class="track"><i style="width:{abs(point.value) / peak * 100:.1f}%;'
+            f'background:{series_color(index - 1, len(ordered))}"></i></span>'
+            f'<b>{escape(joined_value(point.value, unit, rank_scale))}</b></div>'
             for index, point in enumerate(ordered, 1)
         )
         total_note = (
-            f'<span class="ts-chart-unit">전체 {_format_number(total.value)}{escape(total.unit or unit)}</span>'
+            '<span class="ts-chart-unit">전체 '
+            f'{escape(joined_value(total.value, total.unit or unit, rank_scale))}</span>'
             if total else ""
         )
         st.markdown(
@@ -1217,7 +1295,8 @@ def render_ranking_list(
         rows = "".join(
             f'<div class="ts-ranking-row"><span class="rank">{index:02d}</span>'
             f'<span class="label">{escape(point.entity)}</span>'
-            f'<span class="track"><i style="width:{abs(value) / peak * 100:.1f}%"></i></span>'
+            f'<span class="track"><i style="width:{abs(value) / peak * 100:.1f}%;'
+            f'background:{series_color(index - 1, len(ordered))}"></i></span>'
             f'<b>{escape(point.value)}</b></div>'
             if value is not None else
             f'<div class="ts-ranking-row"><span class="rank">{index:02d}</span>'
@@ -1251,7 +1330,7 @@ def render_benchmark_table(comparison_points: list[Any], metric_points: list[Any
     )
 
 
-_SERIES_COLORS = ("var(--ts-accent)", "var(--ts-navy)", "var(--ts-orange)")
+_SERIES_COLORS = SERIES_PALETTE
 _GROUPED_BAR_HEIGHT = 132
 
 
@@ -1281,18 +1360,23 @@ def render_metric_columns(points_for_one_label: list[Any]) -> None:
     # Bars, the stated whole, and the gridlines all read against one scale.
     axis_top, ticks = _bar_axis(peak)
     labels = metric_axis_labels(ordered)
+    # Bars, the stated whole and the axis ticks share one scale, so the unit
+    # is stated once in the caption and the bar labels carry only the number
+    # plus its magnitude word.
+    column_scale = scale_for([*(point.value for point in ordered), axis_top], unit)
     columns = "".join(
         f'<div class="ts-gbar-col"><div class="ts-gbar-stack">'
-        f'<i style="height:{abs(point.value) / axis_top * 100:.1f}%" '
-        f'title="{escape(_format_number(point.value))}{escape(unit)}"></i>'
-        f'<b class="ts-gbar-value">{escape(_format_number(point.value))}{escape(unit)}</b></div>'
+        f'<i style="height:{abs(point.value) / axis_top * 100:.1f}%;'
+        f'background:{series_color(position, len(ordered))}" '
+        f'title="{escape(joined_value(point.value, unit, column_scale))}"></i>'
+        f'<b class="ts-gbar-value">{escape(scaled_number(point.value, column_scale))}</b></div>'
         f'<span>{escape(label)}</span></div>'
-        for point, label in zip(ordered, labels)
+        for position, (point, label) in enumerate(zip(ordered, labels))
     )
     ceiling_markup = (
         f'<div class="ts-gbar-ceiling" style="bottom:{ceiling / axis_top * 100:.1f}%">'
-        f'<span>전체 {escape(_format_number(total.value))}'
-        f'{escape(total.unit or unit)}</span></div>' if ceiling else ""
+        f'<span>전체 {escape(joined_value(total.value, total.unit or unit, column_scale))}'
+        '</span></div>' if ceiling else ""
     )
     # The artwork's bars stand on a dashed grid with a labelled axis, which is
     # what lets a reader read a bar's value off the chart instead of only
@@ -1300,7 +1384,7 @@ def render_metric_columns(points_for_one_label: list[Any]) -> None:
     # line chart uses, so the two blocks agree on what a scale looks like.
     axis = "".join(
         f'<span style="bottom:{tick / axis_top * 100:.1f}%">'
-        f'{escape(_format_number(tick))}</span>'
+        f'{escape(scaled_number(tick, column_scale))}</span>'
         for tick in ticks
     )
     grid = f'<div class="ts-gbar-axis">{axis}</div>' if axis else ""
@@ -1309,10 +1393,10 @@ def render_metric_columns(points_for_one_label: list[Any]) -> None:
     # while competing with the labels that do.
     notes = " · ".join(
         part for part in (
-            f"단위: {escape(unit)}" if unit else "",
+            f"단위: {escape(column_scale[1])}{escape(unit)}" if unit else "",
             f"{escape(ordered[0].period)} 기준" if ordered[0].period else "",
             # Drawn as a ceiling instead when the bars are scaled to it.
-            f"전체 {escape(_format_number(total.value))}{escape(total.unit or '')}"
+            f"전체 {escape(joined_value(total.value, total.unit or '', column_scale))}"
             if total and not ceiling else "",
         ) if part
     )
@@ -1471,7 +1555,7 @@ def render_competitor_panels(
 def render_landscape(
     metric_points: list[Any],
     grounded_claims: list[Any] | None = None,
-    title: str = "시장 추세 · 구성",
+    title: str | None = None,
 ) -> None:
     """The artwork's Landscape: the trend on the left, what the total is made
     of on the right.
@@ -1486,12 +1570,19 @@ def render_landscape(
     if parts is None:
         return
     core_kind, core_points, complement_kind, complement_points = parts
-    st.markdown(f'<div class="ts-landscape-head"><b>{escape(title)}</b></div>',
-                unsafe_allow_html=True)
-    trend, split = st.columns([1.35, 1])
+    st.markdown(
+        '<div class="ts-landscape-head ts-landscape">'
+        f'<b>{escape(title or block_title("landscape"))}</b></div>',
+        unsafe_allow_html=True,
+    )
+    # One card, so one gap. The default column gap put a full gutter between
+    # the trend and the composition of that same trend, and the two halves
+    # read as two cards that happened to be adjacent - which is the opposite
+    # of why they were put together.
+    trend, split = st.columns([1.35, 1], gap="small")
     with trend:
         if core_kind == "trend":
-            render_metric_chart(core_points, title="추세", grounded_claims=grounded_claims)
+            render_metric_chart(core_points, title=block_title("chart"), grounded_claims=grounded_claims)
         else:
             render_kpi_row(core_points, limit=4)
     with split:
@@ -1639,7 +1730,7 @@ def render_cause_tree(grounded_claims: list[Any]) -> None:
             f'<div class="ts-cause-branches">{branches}</div></div>'
         )
     st.markdown(
-        f'<section class="ts-cause-tree"><div class="ts-block-title">원인 구조</div>'
+        f'<section class="ts-cause-tree"><div class="ts-block-title">{escape(block_title("cause_tree"))}</div>'
         f'{trees}</section>',
         unsafe_allow_html=True,
     )
@@ -1695,7 +1786,7 @@ def render_importance_bars(
         # "질문 결론 영향도" named a quantity nobody could point at. What the
         # bars actually order is which findings the model thought mattered
         # most for this question, so the heading says that.
-        '<section class="ts-drivers"><div class="ts-block-title">질문에 더 중요한 근거 순 '
+        '<section class="ts-drivers"><div class="ts-block-title">' + escape(block_title("driver_bars")) + ' '
         '<span class="ts-ai-badge">AI 판단</span></div>' + target +
         note + rows + "</section>",
         unsafe_allow_html=True,
@@ -1808,11 +1899,31 @@ def render_kpi_row(
         forecast_tag = (
             f'<span class="ts-kpi-forecast">{escape(type_label)}</span>' if type_label else ""
         )
-        value_text = f"{_format_number(latest.value)}{latest.unit}"
+        # One scale for the headline and its delta, or a card would say
+        # 2,154만 above +12만 above -  two magnitudes of the same series.
+        # The unit becomes its own element: `21,535,256단말장치・단자` ran the
+        # digits straight into a word, and gluing 만 onto it would have made
+        # that worse ("2,154만단말장치・단자" reads as a unit named 만단말장치).
+        card_scale = scale_for(
+            [point.value for point in points], latest.unit,
+        )
+        value_number, value_unit = display_value(latest.value, latest.unit, card_scale)
+        value_text = (
+            f'{escape(value_number)}'
+            + (
+                f'<span class="ts-kpi-unit">{escape(value_unit)}</span>'
+                if unit_needs_space(value_unit)
+                else escape(value_unit)
+            )
+        )
         if is_chronological and len(observed) >= 2:
             delta = latest.value - observed[0].value
             sign = "+" if delta >= 0 else ""
-            caption_text = f"{sign}{_format_number(delta)}{latest.unit} ({escape(observed[0].period)}→{escape(latest.period)})"
+            delta_text = joined_value(delta, latest.unit, card_scale)
+            caption_text = (
+                f"{sign}{escape(delta_text)} "
+                f"({escape(observed[0].period)}→{escape(latest.period)})"
+            )
         elif len(points) >= 2:
             caption_text = f"{escape(latest.period)} 기준 · {len(points)}개 대상 비교"
         elif latest.subject:
@@ -1828,7 +1939,7 @@ def render_kpi_row(
         # be asserting a judgement the data doesn't support.
         cards.append(
             f'<div class="ts-kpi-card"><small>{escape(label)}</small>'
-            f'<div class="ts-kpi-figure"><b>{escape(value_text)}{forecast_tag}</b>'
+            f'<div class="ts-kpi-figure"><b>{value_text}{forecast_tag}</b>'
             f'<small class="ts-kpi-delta">{caption_text}</small></div>{spark}</div>'
         )
     # The artwork ships the KPI block in several densities, and which one fits

@@ -27,6 +27,7 @@ from typing import Any
 import streamlit as st
 from pydantic import BaseModel
 
+from common.block_titles import block_title
 from reporting.dashboard_streamlit.blocks.base import BlockDefinition, SlotContext
 from reporting.dashboard_streamlit.blocks.registry import register
 from common.block_shapes import (
@@ -93,7 +94,7 @@ class _SynthesisContent(BaseModel):
 def _chart(context: SlotContext):
     synthesis = context.synthesis
     return lambda: render_metric_chart(
-        synthesis.metric_series, title="확인된 수치 추이",
+        synthesis.metric_series, title=block_title("chart"),
         grounded_claims=synthesis.grounded_claims,
     )
 

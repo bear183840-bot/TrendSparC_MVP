@@ -32,6 +32,7 @@ from audience.contracts import list_audience_ids
 from common.contracts import Attachment, UserRequest
 from common.errors import StageStatus
 from core.request_pipeline.pipeline import PipelineResult, run_pipeline
+from core.synthesis.synthesizer import repair_dropped_comparison_points
 from core.run_archive import load_result
 from core.sector_router.router import scan_sectors
 from reporting.dashboard_streamlit.collection_progress_view import _STATUS_LABELS, render_execution_record
@@ -395,7 +396,13 @@ if result is None:
         )
         if uploaded_result is not None:
             try:
-                loaded = PipelineResult.model_validate_json(uploaded_result.getvalue())
+                # A saved result is replayed, not re-synthesised, so a run
+                # archived under an older rule keeps that rule's losses. This
+                # re-applies today's grounding rule to points the run already
+                # verified and stored; it derives nothing new.
+                loaded = repair_dropped_comparison_points(
+                    PipelineResult.model_validate_json(uploaded_result.getvalue())
+                )
             except Exception as exc:  # noqa: BLE001
                 st.error(f"이 파일은 실행 결과로 읽히지 않습니다: {exc}")
             else:

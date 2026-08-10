@@ -280,6 +280,20 @@ def dashboard_css(dark: bool, accent_theme: str = "orange") -> str:
     .ts-stat small {{ color:var(--ts-muted); font-size:.68rem; font-weight:700; text-transform:uppercase;
       letter-spacing:.05em; }}
     .ts-stat b {{ font-size:1.5rem; font-weight:850; letter-spacing:-.02em; }}
+    /* The figure the summary is about, in the page's most prominent corner -
+       where a count of an internal list used to sit. Empty when no single
+       number answers the question, and then `.ts-summary-solo` gives the
+       summary the whole width instead of leaving a hole. */
+    .ts-headline-kpi {{ display:flex; flex-direction:column; justify-content:center;
+      gap:.12rem; height:100%; padding:0 .35rem; }}
+    .ts-headline-kpi small {{ color:var(--ts-muted); font-size:.68rem; font-weight:700;
+      text-transform:uppercase; letter-spacing:.05em; }}
+    .ts-headline-kpi b {{ font-size:1.9rem; font-weight:850; letter-spacing:-.03em;
+      color:var(--ts-ink); line-height:1.05; }}
+    .ts-headline-unit {{ font-size:.72rem; font-weight:600; color:var(--ts-muted); }}
+    .ts-headline-kpi em {{ font-style:normal; font-size:.68rem; color:var(--ts-muted);
+      margin-top:.12rem; }}
+    .ts-summary-solo {{ grid-template-columns:minmax(0,1fr); }}
     .ts-stat.risk b {{ color:var(--ts-accent); }} .ts-stat.opportunity b {{ color:var(--ts-teal); }}
     /* Key KPI - reference design 1a: label on the left, figure and its YoY
        delta right-aligned on the same row, in a light 2-up card grid. */
@@ -318,6 +332,13 @@ def dashboard_css(dark: bool, accent_theme: str = "orange") -> str:
     .ts-kpi-figure {{ flex:none; }}
     .ts-kpi-card b {{ display:block; font-size:1.32rem; font-weight:800;
       color:var(--ts-ink); letter-spacing:-.02em; white-space:nowrap; }}
+    /* A word-shaped unit is not part of the figure. `21,535,256단말장치・단자`
+       ran eleven digits straight into a four-syllable word at 1.32rem/800,
+       so the number could not be read at a glance and the unit could not be
+       read at all. Same size relationship as the axis unit note. */
+    .ts-kpi-unit {{ display:block; margin-top:.05rem; font-size:.68rem; font-weight:600;
+      letter-spacing:0; color:var(--ts-muted); white-space:normal; }}
+    .ts-kpi-row.rows .ts-kpi-unit {{ display:inline; margin:0 0 0 .3rem; }}
     .ts-kpi-delta {{ display:block; margin-top:.15rem; font-size:.72rem; font-weight:650;
       color:var(--ts-muted); white-space:normal; }}
     /* Shape only - the figure and its delta carry the numbers. Deliberately
@@ -720,6 +741,25 @@ def dashboard_css(dark: bool, accent_theme: str = "orange") -> str:
     [data-testid="stExpander"] summary {{ color:var(--ts-accent); font-weight:700; }}
     .ts-landscape-head {{ margin:.2rem 0 .1rem; font-size:.9rem; font-weight:700;
       color:var(--ts-ink); }}
+    /* The trend and the composition of that trend are one card, so they get
+       the guide's *within-card* spacing, not its between-card gutter - the
+       reference Landscape card sets its two visualizations side by side with
+       a hairline between and no more air than that. Streamlit's column gutter
+       (and its own per-column padding, which survives `gap="small"`) was
+       reading as a gap between two cards. */
+    .ts-landscape + div[data-testid="stHorizontalBlock"] {{ gap:0; }}
+    .ts-landscape + div[data-testid="stHorizontalBlock"]
+      > div[data-testid="stColumn"] {{ padding:0; }}
+    .ts-landscape + div[data-testid="stHorizontalBlock"]
+      > div[data-testid="stColumn"] + div[data-testid="stColumn"] {{
+      border-left:1px solid var(--ts-line); padding-left:.6rem; margin-left:.6rem; }}
+    /* Inside the card the plot fills its column - the standalone cap exists to
+       stop a lone chart spanning a 1500px card, which is not this case. */
+    .ts-landscape + div[data-testid="stHorizontalBlock"] .ts-chart-svg {{
+      max-width:none; }}
+    .ts-landscape + div[data-testid="stHorizontalBlock"] .ts-donut-card {{
+      margin-top:0; }}
+    .ts-landscape + div[data-testid="stHorizontalBlock"] .ts-chart {{ gap:.2rem; }}
     .ts-metric-snapshot {{ display:grid; gap:.35rem; }}
     .ts-metric-snapshot > b {{ font-size:.76rem; color:var(--ts-muted); }}
     .ts-metric-snapshot-row {{ display:flex; align-items:baseline; justify-content:space-between;

@@ -17,7 +17,8 @@ from core.question_coverage import (
     derive_question_coverage,
     minimum_drawable_periods,
 )
-from common.block_shapes import comparison_points_of_kind
+from common.block_shapes import comparison_points_of_kind, headline_kpi
+from common.block_titles import slot_title
 from common.content_quality_validator import select_chartable_series
 from common.content_quality_validator import dedupe_across_blocks
 # Importing the package is what registers every block, including the live
@@ -159,7 +160,7 @@ def _render_under_evidenced_notice(resolved: list[ResolvedSlot]) -> None:
     layout picked badly - and that is a different message from any single
     empty card.
     """
-    empty = [slot.slot.title for slot in resolved if slot.is_last_resort]
+    empty = [slot_title(slot.slot.slot_id, slot.slot.title) for slot in resolved if slot.is_last_resort]
     st.markdown(
         '<div class="ts-card ts-under-evidenced"><h3>이 질문에 필요한 정보가 '
         "충분히 수집되지 않았습니다</h3>"
@@ -335,7 +336,10 @@ def _render_slot(
     complete: bool = False,
 ) -> None:
     """Draw whichever block the slot resolved to, under the slot's own title."""
-    title = slot.slot.title
+    # One table decides every heading - see common/block_titles.py. The
+    # slot's own `title` stays as the fallback so a slot added without a
+    # registered heading renders under its working name instead of raising.
+    title = slot_title(slot.slot.slot_id, slot.slot.title)
     if slot.is_last_resort:
         # Nothing for this slot survived any candidate. Silent: the
         # under-evidenced notice above and the omitted-sections list below
@@ -377,7 +381,17 @@ def _render_slot(
     # composition the same rule applies per block: a companion that would
     # draw nothing is simply not drawn, and if none of them draw, the card
     # never opens.
-    block_types = slot.block_types if complete or not compact else slot.block_types[:1]
+    # Compact mode shows one block per card, because a card sharing a row
+    # with three others has room for one. A card that already owns the whole
+    # row is the exception: its companion has real space to go into rather
+    # than space taken from a neighbour, so dropping it there only leaves the
+    # row half empty. This is why `resolve_slots` bothered to pick a second
+    # block that draws facts the lead does not.
+    full_width = _slot_width(slot, compact=True, synthesis=synthesis) >= _GRID_UNITS
+    block_types = (
+        slot.block_types if complete or not compact or full_width
+        else slot.block_types[:1]
+    )
     draws = [
         draw for draw in (
             _body_renderer(
@@ -644,7 +658,8 @@ def render_generic_dashboard(
 
     render_page_header(question, sector, audience, purpose)
     render_executive_summary(
-        summary, headline_stats(synthesis, purpose_id), heading=presentation.summary_label,
+        summary, heading=presentation.summary_label,
+        headline_point=headline_kpi(synthesis.metric_series, question),
     )
     # The purpose's slot skeleton drives the page: fixed order, but each slot
     # takes the first block type its data can honestly support. See
@@ -654,6 +669,7 @@ def render_generic_dashboard(
         resolve_slots(
             purpose_id, synthesis, report,
             getattr(getattr(result, "report_purpose", None), "question_answer_type", None),
+            question,
         ), presentation,
     )
     if under_evidenced(resolved):

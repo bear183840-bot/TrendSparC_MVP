@@ -201,10 +201,13 @@ def test_two_series_of_different_magnitude_get_their_own_axes(monkeypatch):
 
     assert "좌축" in output and "우축" in output
     # The smaller series is drawn against its own scale, so its points spread
-    # across the plot instead of collapsing onto the bottom edge.
-    teal_lines = re.findall(r'points="([^"]+)" fill="none" stroke="var\(--ts-teal\)"', output)
-    assert teal_lines, output
-    ys = [float(pair.split(",")[1]) for pair in teal_lines[0].split()]
+    # across the plot instead of collapsing onto the bottom edge. Colour is
+    # per series now, not per axis - the second line is the second colour of
+    # the ramp - so this looks for the second polyline, which is what the
+    # assertion was always actually about.
+    lines = re.findall(r'points="([^"]+)" fill="none" stroke="var\(--ts-[a-z]+\)"', output)
+    assert len(lines) >= 2, output
+    ys = [float(pair.split(",")[1]) for pair in lines[1].split()]
     assert max(ys) - min(ys) > 20, ys
 
 

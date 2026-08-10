@@ -378,8 +378,11 @@ def test_kpi_uses_the_latest_period_not_the_last_one_emitted(monkeypatch):
     ])
     body = "".join(captured)
 
-    assert "300억원" in body
-    assert "+200억원 (2024년→2026년)" in body
+    # The unit is its own element and the delta is spaced off its digits -
+    # see common/number_format.py. What this test is about is which figure
+    # and which two periods, not how they are punctuated.
+    assert "300" in body and "억원" in body
+    assert "+200 억원 (2024년→2026년)" in body
 
 
 def test_a_non_time_axis_gets_no_delta(monkeypatch):
@@ -569,9 +572,9 @@ def test_a_kpi_headline_is_the_latest_observed_figure_not_the_projection(monkeyp
     ])
     body = "".join(captured)
 
-    assert "120억원" in body
+    assert "120" in body and "억원" in body
     assert "200억원" not in body
-    assert "+20억원 (2024년→2025년)" in body
+    assert "+20 억원 (2024년→2025년)" in body
 
 
 def test_the_forecast_leg_of_a_chart_is_drawn_dashed():
