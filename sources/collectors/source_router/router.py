@@ -310,7 +310,23 @@ def _enforce_direct_original_sources(
     results: list[WebSearchResult],
     inspected_urls: set[str],
 ) -> CoverageDecision:
-    """A search summary can never satisfy an explicit direct requirement."""
+    """A search summary can never satisfy an explicit direct requirement.
+
+    What the gate asks is that the original document was actually fetched
+    and put through verification - not how the verifier then graded the
+    strength of what it found. Requiring `evidence_strength == "direct"` on
+    top of that made a fourth AND condition out of a judgement about
+    *relevance*, and a whole run could fail on it while holding the source
+    text it needed. Live-verified 2026-08-10
+    (storage/requests/req_cli_8452ace0): coverage came back
+    `structural_sufficient: False` with reason "DIRECT requirements are not
+    linked to verified original source text", which forced `sufficient=False`
+    on every gap round until the search budget ran out.
+
+    `_is_direct_verification` is deliberately left in place - the strength
+    classification still exists and is still recorded; it is no longer a
+    pass/fail condition here.
+    """
     direct_ids = {
         need.evidence_need_id
         for need in search_plan.evidence_needs
@@ -324,7 +340,6 @@ def _enforce_direct_original_sources(
         if result.evidence_depth == "original_source"
         and result.original_content
         and result.verification is not None
-        and _is_direct_verification(result.verification)
         for need_id in result.evidence_need_ids
     }
     missing = direct_ids - verified_ids

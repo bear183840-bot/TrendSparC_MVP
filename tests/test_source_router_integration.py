@@ -342,8 +342,19 @@ def test_original_text_without_verification_does_not_satisfy_a_direct_need():
     assert any("direct-1" in item for item in decision.missing)
 
 
-def test_contextual_only_verification_does_not_satisfy_a_direct_need():
-    """A page that merely discusses the topic is not the figure being asked for."""
+def test_a_verified_original_source_satisfies_a_direct_need_at_any_strength():
+    """The gate asks whether the original document was fetched and verified,
+    not how the verifier graded what it found.
+
+    This used to require `evidence_strength == "direct"` as a fourth AND
+    condition, which made a judgement about relevance into a pass/fail on
+    collection: a run could hold the source text it needed and still fail.
+    Live-verified 2026-08-10 (storage/requests/req_cli_8452ace0) - coverage
+    returned "DIRECT requirements are not linked to verified original source
+    text" and forced `sufficient=False` on every gap round until the search
+    budget ran out. The strength classification is still produced and still
+    recorded; it is just no longer a gate.
+    """
     decision = router_module._enforce_direct_original_sources(
         CoverageDecision(sufficient=True, reason="looked fine"),
         _direct_plan(),
@@ -359,7 +370,7 @@ def test_contextual_only_verification_does_not_satisfy_a_direct_need():
         set(),
     )
 
-    assert decision.sufficient is False
+    assert decision.sufficient is True
 
 
 def test_direct_confirmed_fact_leaves_the_coverage_decision_untouched():

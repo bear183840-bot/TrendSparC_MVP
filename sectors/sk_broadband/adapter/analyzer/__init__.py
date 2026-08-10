@@ -84,16 +84,21 @@ _ANALYSIS_SCHEMA = {
     "type": "object",
     "properties": {
         "summary": {"type": "string", "maxLength": 500, "description": "질문 관련 핵심 사실. 한국어 1~3문장."},
-        "sentiment": {"type": "string", "enum": ["positive", "neutral", "negative", "mixed"]},
+        # `sentiment` and `relevance_reason` used to be asked for here. Every
+        # consumer of both was this analyzer's own chunk merge - traced across
+        # the whole repository, nothing downstream of it ever read either one
+        # (see the removal note above `_merge_chunk_analyses`). Asking the
+        # model for a field no reader has costs an output field on every call
+        # and a schema branch on every validation.
+        #
+        # `relevance_level` stays: `_merge_chunk_analyses` uses it to drop a
+        # chunk the model itself judged irrelevant, and `relevant_to_question`
+        # - which decides whether the whole document survives - is derived
+        # from it.
         "relevance_level": {
             "type": "string",
             "enum": ["direct", "partial", "background", "irrelevant"],
             "description": "direct=질문에 직접 답함, partial=일부 필요 증거를 제공, background=맥락만 제공, irrelevant=무관.",
-        },
-        "relevance_reason": {
-            "type": "string",
-            "maxLength": 300,
-            "description": "관련성 등급을 선택한 구체적인 이유. 문서에 없는 내용을 만들지 말 것.",
         },
         "grounded_claims": {
             "type": "array",
@@ -122,7 +127,13 @@ _ANALYSIS_SCHEMA = {
                     "evidence_quote": {"type": "string", "maxLength": 500, "description": "원문에서 그대로 복사한 최소 충분 구절."},
                     "evidence_location": {"type": ["string", "null"], "maxLength": 180, "description": "확인 가능한 문단·절·표 위치, 아니면 null."},
                     "as_of_date": {"type": ["string", "null"], "maxLength": 80, "description": "명시된 기준 시점 원문, 아니면 null."},
-                    "confidence": {"type": "string", "enum": ["low", "medium", "high"]},
+                    # Per-claim `confidence` is no longer asked for. It reached
+                    # `SynthesisClaim.confidence` and `SynthesisConclusion.
+                    # confidence` (core/synthesis/synthesizer.py:187,362) and
+                    # stopped there - no block, eligibility rule or renderer
+                    # reads either. `_normalize_analysis_payload` still supplies
+                    # the contract's required value, so the field is asked of
+                    # the model once per claim less on every call.
                     "parent_claim_id": {
                         "type": ["string", "null"],
                         "description": (
@@ -144,7 +155,7 @@ _ANALYSIS_SCHEMA = {
                         "description": "그 중요도로 본 이유. importance를 채웠으면 필수.",
                     },
                 },
-                "required": ["claim_id", "claim_type", "claim", "evidence_passage_id", "evidence_quote", "evidence_location", "as_of_date", "confidence", "parent_claim_id", "importance", "importance_basis"],
+                "required": ["claim_id", "claim_type", "claim", "evidence_passage_id", "evidence_quote", "evidence_location", "as_of_date", "parent_claim_id", "importance", "importance_basis"],
                 "additionalProperties": False,
             },
         },
@@ -237,18 +248,18 @@ _ANALYSIS_SCHEMA = {
                 "additionalProperties": False,
             },
         },
-        "action_level": {
-            "type": "string",
-            "enum": ["Monitor", "Review", "Prepare", "Act", "insufficient_data"],
-            "description": "대응 수준. 근거가 부족하면 insufficient_data.",
-        },
+        # `action_level` removed for the same reason as `sentiment`: its only
+        # reader was this analyzer's own merge. It was also inert in practice
+        # - all three documents of the archived 유료방송 run came back
+        # "insufficient_data", because `:2278` already forced that whenever
+        # the document stated no action claim.
         "analysis_confidence": {
             "type": "string",
             "enum": ["low", "medium", "high"],
             "description": "문서 근거만 기준으로 한 분석 확신도.",
         },
     },
-    "required": ["summary", "sentiment", "relevance_level", "relevance_reason", "grounded_claims", "covered_information_needs", "metric_points", "comparison_points", "action_level", "analysis_confidence"],
+    "required": ["summary", "relevance_level", "grounded_claims", "covered_information_needs", "metric_points", "comparison_points", "analysis_confidence"],
     "additionalProperties": False,
 }
 
@@ -879,6 +890,14 @@ def _recover_missing_metric_claims(
                 "evidence_quote": quote,
                 "evidence_location": passage.get("passage_id"),
                 "as_of_date": None,
+                # TODO(confidence-inversion): "high" here means only "this
+                # quote was copied verbatim from the source", not that the
+                # claim matters more than a model-written one - yet every
+                # model claim now normalises to "low" (see the matching note
+                # in `_normalize_analysis_payload`), so the two read as an
+                # ordering that says the opposite of what is true. Harmless
+                # while nothing reads `GroundedClaim.confidence`; fix both
+                # sides before anything does.
                 "confidence": "high",
                 "parent_claim_id": None,
                 "importance": None,
@@ -1960,6 +1979,16 @@ def _normalize_analysis_payload(data: dict) -> dict:
         claim.setdefault("evidence_passage_id", None)
         claim.setdefault("evidence_location", None)
         claim.setdefault("as_of_date", None)
+        # TODO(confidence-inversion): since `confidence` was dropped from the
+        # model's claim schema, nothing ever supplies it here, so every
+        # model-produced claim lands on "low" - while a claim minted by
+        # `_recover_missing_metric_claims` is hard-coded "high" (see the
+        # matching note there). That ordering is backwards and means nothing.
+        # It is inert today: `GroundedClaim.confidence` reaches
+        # `SynthesisClaim`/`SynthesisConclusion` (core/synthesis/
+        # synthesizer.py:187,362) and no block, eligibility rule or renderer
+        # reads either. Anything that starts reading it has to fix this first
+        # - the value is bookkeeping, not a judgement about the claim.
         if claim.get("confidence") not in {"low", "medium", "high"}:
             claim["confidence"] = "low"
         claim.setdefault("parent_claim_id", None)
@@ -2006,20 +2035,12 @@ def _normalize_analysis_payload(data: dict) -> dict:
     relevance = data.get("relevance_level")
     if relevance not in {"direct", "partial", "background", "irrelevant"}:
         relevance = "partial" if claims else "background"
-    sentiment = data.get("sentiment")
-    if sentiment not in {"positive", "neutral", "negative", "mixed"}:
-        sentiment = "neutral"
-    action_level = data.get("action_level")
-    if action_level not in {"Monitor", "Review", "Prepare", "Act", "insufficient_data"}:
-        action_level = "insufficient_data"
     confidence = data.get("analysis_confidence")
     if confidence not in {"low", "medium", "high"}:
         confidence = "low"
     return {
         "summary": str(data.get("summary") or "")[:500],
-        "sentiment": sentiment,
         "relevance_level": relevance,
-        "relevance_reason": str(data.get("relevance_reason") or "")[:300],
         "grounded_claims": claims,
         "covered_information_needs": [
             value for value in (data.get("covered_information_needs") or [])
@@ -2027,7 +2048,6 @@ def _normalize_analysis_payload(data: dict) -> dict:
         ],
         "metric_points": metrics,
         "comparison_points": comparisons,
-        "action_level": action_level,
         "analysis_confidence": confidence,
     }
 
@@ -2189,7 +2209,6 @@ def _analyze_document(
             )
         relevance_level = data["relevance_level"]
         relevant_to_question = relevance_level != "irrelevant"
-        relevance_reason = data["relevance_reason"]
         raw_claim_count = len(data.get("grounded_claims", []))
         if not relevant_to_question:
             validation_status = "not_applicable"
@@ -2254,10 +2273,8 @@ def _analyze_document(
         return DocumentAnalysis(
             doc_id=document.doc_id,
             summary=data["summary"],
-            sentiment=data["sentiment"],
             relevant_to_question=relevant_to_question,
             relevance_level=relevance_level,
-            relevance_reason=relevance_reason,
             grounded_claims=grounded_claims,
             covered_information_needs=covered_information_needs,
             missing_information_needs=missing_information_needs,
@@ -2275,7 +2292,6 @@ def _analyze_document(
             recommended_actions=action_claims,
             monitoring_indicators=_claim_texts(grounded_claims, "monitoring"),
             evidence=[claim["evidence_quote"] for claim in grounded_claims],
-            action_level=data.get("action_level", "insufficient_data") if action_claims else "insufficient_data",
             analysis_confidence=data.get("analysis_confidence", "low"),
         )
     except (TypeError, json.JSONDecodeError, KeyError, ValueError) as exc:
@@ -2400,8 +2416,6 @@ def _merge_chunk_analyses(
     relevant_analyses = [
         analysis for analysis in analyses if analysis.relevance_level != "irrelevant"
     ]
-    sentiments = _unique_text([analysis.sentiment for analysis in relevant_analyses])
-    sentiment = sentiments[0] if len(sentiments) == 1 else ("mixed" if sentiments else "neutral")
     covered_set = {
         need
         for analysis in analyses
@@ -2428,17 +2442,6 @@ def _merge_chunk_analyses(
     else:
         validation_status = "verified"
 
-    action_level_rank = {
-        "insufficient_data": 0,
-        "Monitor": 1,
-        "Review": 2,
-        "Prepare": 3,
-        "Act": 4,
-    }
-    action_level = max(
-        (analysis.action_level or "insufficient_data" for analysis in analyses),
-        key=lambda value: action_level_rank[value],
-    )
     confidence_rank = {"low": 0, "medium": 1, "high": 2}
     grounded_confidences = [
         analysis.analysis_confidence
@@ -2450,14 +2453,11 @@ def _merge_chunk_analyses(
         if grounded_confidences
         else "low"
     )
-    relevance_reasons = _unique_text(
-        [analysis.relevance_reason for analysis in analyses]
-    )
-    if incomplete:
-        relevance_reasons.append(
-            "문서가 설정된 최대 청크 수를 초과했거나 일부 청크 분석이 실패해 분석된 청크만 병합했습니다."
-        )
-
+    # `incomplete` used to be reported by appending a sentence to
+    # `relevance_reason`, which nothing downstream read. It still reaches
+    # every consumer that acts on it: it forces `validation_status` to
+    # "partial_grounding" above, which is what the pipeline and the
+    # dashboard's diagnostics actually branch on.
     return DocumentAnalysis(
         doc_id=document.doc_id,
         source_id=document.source_id,
@@ -2465,10 +2465,8 @@ def _merge_chunk_analyses(
         source_url=document.url,
         reliability_tier=document.reliability_tier,
         summary=" ".join(_unique_text([analysis.summary for analysis in relevant_analyses])),
-        sentiment=sentiment,
         relevant_to_question=relevant_to_question,
         relevance_level=relevance_level,
-        relevance_reason=" ".join(relevance_reasons),
         grounded_claims=merged_claims,
         covered_information_needs=covered_information_needs,
         missing_information_needs=missing_information_needs,
@@ -2486,7 +2484,6 @@ def _merge_chunk_analyses(
         recommended_actions=_claim_texts(claim_dicts, "action"),
         monitoring_indicators=_claim_texts(claim_dicts, "monitoring"),
         evidence=[claim.evidence_quote for claim in merged_claims],
-        action_level=action_level if _claim_texts(claim_dicts, "action") else "insufficient_data",
         analysis_confidence=analysis_confidence,
     )
 

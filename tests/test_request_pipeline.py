@@ -621,14 +621,22 @@ def test_pipeline_halts_when_analyzer_still_has_fewer_than_minimum_after_recolle
     assert "insufficient usable analyses" in result.trace[-1].reason
 
 
-def test_source_router_collection_does_not_start_a_second_search_loop(monkeypatch):
-    """The router already ran its own bounded gap loop before returning.
+def test_source_router_collection_still_gets_its_profile_recollection_attempt(monkeypatch):
+    """A router run that came up short is retried like any other.
 
-    Same shape as the recollection test above - one usable analysis against a
-    profile minimum that would normally trigger a retry - except the
-    collection announces itself as source_router. The pipeline must accept
-    the thin result instead of re-entering search, or every run pays for two
-    stacked follow-up loops.
+    This used to assert the opposite: `collection_mode == "source_router"`
+    forced `max_recollections = 0`, on the assumption that the router's own
+    gap loop had already collected everything it would. That assumption only
+    holds when the router stopped *because* it was satisfied.
+
+    Live-verified 2026-08-10 (storage/requests/req_cli_8452ace0): the router
+    stopped on `search_call_budget_exhausted` with three of its nine planned
+    queries never run, handed over 2 documents, and the analyzer reported
+    "insufficient usable analyses after bounded recollection (2 < 3)" - where
+    that bounded recollection had run zero times and the profile's own
+    allowance of 1 was unreachable. The retry is mode-agnostic: same
+    collector, same `search_context` widened by `excluded_urls`, gaps folded
+    into `evidence_requirements`.
     """
     collector_calls = []
 
@@ -668,7 +676,10 @@ def test_source_router_collection_does_not_start_a_second_search_loop(monkeypatc
         dry_run=False,
     )
 
-    assert len(collector_calls) == 1
-    assert not any(
+    # One initial collection plus the profile's single allowed retry.
+    assert len(collector_calls) == 2
+    assert any(
         trace.stage.endswith("recollection") for trace in result.trace
     ), [trace.stage for trace in result.trace]
+    # The retry has to be gap-specific, not a rerun of the same search.
+    assert collector_calls[1].search_context.excluded_urls

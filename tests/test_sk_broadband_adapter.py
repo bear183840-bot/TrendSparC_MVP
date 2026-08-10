@@ -1306,7 +1306,12 @@ def test_broadband_analyzer_uses_structured_schema(monkeypatch):
     assert result[0].summary == "요약"
     assert result[0].relevant_to_question is True
     assert result[0].relevance_level == "direct"
-    assert result[0].relevance_reason
+    # `relevance_reason` is no longer requested from the model: its only
+    # reader was this analyzer's own chunk merge, and nothing downstream of
+    # that ever read it. `relevance_level` above is the part that decides
+    # anything - it gates chunk contribution and derives
+    # `relevant_to_question`.
+    assert result[0].relevance_reason is None
     assert result[0].grounded_claims[0].source_url == "https://example.com/a"
     assert result[0].covered_information_needs == ["OTT와 IPTV 경쟁 변화"]
     assert result[0].missing_information_needs == ["경쟁사별 가입자 수치"]

@@ -1846,7 +1846,13 @@ def test_research_reassesses_coverage_after_last_round_inspects_sources(monkeypa
 
     assert result.stop_reason == "gap_loop_iterations_exhausted"
     assert result.final_coverage.reason != "pre-inspection"
-    assert "verified original source" in result.final_coverage.reason
+    # The re-assessment's own verdict is what reaches the caller. This used
+    # to read "verified original source" instead, but only incidentally: the
+    # inspected source carried an empty `EvidenceVerification()`, so the old
+    # fourth AND condition in `_enforce_direct_original_sources` rejected it
+    # and overwrote the reason. Now a fetched-and-verified source clears that
+    # gate, so the fresh decision survives - which is what this test is about.
+    assert result.final_coverage.reason == "post-inspection, still not enough"
     assert result.rounds_completed == 2  # 1 allotted iteration + 1 free re-assessment
     inspected = next(r for r in result.results if r.url == "https://a.example.com")
     assert inspected.evidence_depth == "original_source"

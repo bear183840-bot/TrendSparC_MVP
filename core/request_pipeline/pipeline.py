@@ -548,12 +548,25 @@ def _run_pipeline_stages(
                 profile = result.sector_route.matched_profile
                 minimum = profile.min_analyzed_documents
                 target = max(minimum, profile.target_analyzed_documents)
-                max_recollections = (
-                    0
-                    if result.source_collection
-                    and result.source_collection.collection_mode == "source_router"
-                    else profile.max_analysis_recollection_attempts
-                )
+                # The collection mode used to decide this: a `source_router`
+                # run got 0 attempts, on the assumption that the router's own
+                # gap loop had already collected everything it was going to.
+                # That assumption fails exactly when the router stops for a
+                # reason unrelated to coverage. Live-verified 2026-08-10
+                # (storage/requests/req_cli_8452ace0): the router halted on
+                # `search_call_budget_exhausted` with three of its nine
+                # planned queries never run, delivered 2 documents, and the
+                # analyzer then reported "insufficient usable analyses after
+                # bounded recollection (2 < 3)" - where the bounded
+                # recollection had run zero times and the profile's own
+                # allowance of 1 was unreachable.
+                #
+                # The retry path is mode-agnostic: it re-invokes whichever
+                # collector the sector registered, with the same
+                # `search_context` widened by `excluded_urls` and the gaps
+                # folded into `evidence_requirements`, and source_router
+                # honours both (integration.py:34 -> router.py:414,422,504).
+                max_recollections = profile.max_analysis_recollection_attempts
                 recollection_attempt = 0
                 structural_gaps = assess_question_coverage(
                     usable, result.question_coverage or QuestionCoverageRequirement()
