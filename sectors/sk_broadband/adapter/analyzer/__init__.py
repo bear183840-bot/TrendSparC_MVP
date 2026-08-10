@@ -1402,20 +1402,51 @@ def _column_headers(headers: list[list[str]], columns: int) -> tuple[list[str], 
     return periods, criteria
 
 
-def _table_row_label(cells: list[str]) -> tuple[str, int, bool] | None:
-    """The row's own name, its column, and whether the row states a delta."""
+def _table_row_label(
+    cells: list[str], criteria: list[str] | None = None
+) -> tuple[str, int, bool] | None:
+    """The row's own name, its column, and whether the row states a delta.
+
+    A table may lead with more than one label column, and taking the first
+    one names the wrong thing. 유료방송 사업자별 rows read
+    `| IPTV (3개) | KT | 9,123,463 | 25.24% |`: the first column groups the
+    operators by delivery type and the second is the operator. Reading the
+    first made every one of KT, SK브로드밴드 and LG유플러스 come back as
+    `subject="IPTV"`, so five distinct operators collapsed into one entity -
+    which is why the live 경쟁구도 card had a sentence where a ranking should
+    have been, with no comparison points behind it at all.
+
+    Which column is the row's identity is settled by the table's own header,
+    not by position: `구 분` is filler that names no column, `유료방송 사업자`
+    names one. So among the leading label columns, the last one carrying a
+    header of its own wins, and a table that gives none keeps the first
+    column exactly as before.
+    """
+    candidates: list[tuple[str, int, bool]] = []
     for column, cell in enumerate(cells):
-        stripped = cell.strip()
+        # A merged cell that wrapped in the source carries a line break as
+        # markup. Left in, `-0.10%p<br>-` no longer reads as a run of digits
+        # and was accepted as an entity name.
+        stripped = re.sub(r"<\s*br\s*/?\s*>", " ", cell).strip()
         if stripped in _TABLE_FILLER_CELLS or not stripped:
             continue
+        # The leading run of label columns ends at the first cell holding a
+        # figure; a later text cell is a value, not the row's name.
         if re.fullmatch(r"[\d,.\s%p()-]+", stripped):
-            continue
+            break
         has_delta = "증감" in stripped
         label = re.sub(r"[(（][^)）]*[)）]", "", stripped).strip()
         if not label or re.fullmatch(r"[\d,.\s]+", label):
-            return None
-        return label, column, has_delta
-    return None
+            return None if not candidates else candidates[-1]
+        candidates.append((label, column, has_delta))
+    if not candidates:
+        return None
+    named = [
+        candidate for candidate in candidates
+        if criteria and candidate[1] < len(criteria)
+        and criteria[candidate[1]].strip() not in _TABLE_FILLER_CELLS
+    ]
+    return named[-1] if named else candidates[0]
 
 
 def _promotable_table_metric(label: str, subject: str | None) -> bool:
@@ -1484,11 +1515,13 @@ def _table_row_points(
             context if context is not None else ([], None, None)
         )
         cells = _split_table_cells(quote)
-    named = _table_row_label(cells)
+    # Headers first: which of the leading columns is the row's identity is a
+    # question only the header row can answer.
+    periods, criteria = _column_headers(headers, len(cells))
+    named = _table_row_label(cells, criteria)
     if named is None:
         return None
     entity, label_column, row_states_delta = named
-    periods, criteria = _column_headers(headers, len(cells))
     metrics: list[dict] = []
     comparisons: list[dict] = []
     for column, cell in enumerate(cells):
@@ -1545,7 +1578,13 @@ def _table_row_points(
                 ),
                 "evidence_claim_id": claim.get("claim_id"),
             })
-            if criterion and period and not is_delta:
+            # Same name test the metric path applies. A comparison row is
+            # read by a human as "this entity, this figure", so an entity
+            # that is really a stray delta cell has to be refused here too.
+            if (
+                criterion and period and not is_delta
+                and _semantically_complete_label(entity, context="table")
+            ):
                 comparisons.append({
                     "entity": entity,
                     "criterion": f"{criterion} {period}".strip(),
