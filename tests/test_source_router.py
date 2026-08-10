@@ -15,6 +15,8 @@ from sources.collectors.source_router import _solar as solar_module
 from sources.collectors.source_router import coverage as coverage_module
 from sources.collectors.source_router import pdf_parser
 from sources.collectors.source_router import planner as planner_module
+from sources.collectors.source_router import question_type_ai_based
+from sources.collectors.source_router import question_type_classifier
 from sources.collectors.source_router import router as router_module
 from sources.collectors.source_router import web_search as web_search_module
 from sources.collectors.source_router.config import SourceRouterConfig
@@ -117,7 +119,16 @@ def _patch_web_search(monkeypatch, responses, api_key="search-test-key"):
 
 def test_prompts_load_returns_non_empty_text_for_every_stage():
     for name in [
-        "planner",
+        "planner_common_head",
+        "planner_common_tail",
+        "planner_purposes/current_status",
+        "planner_purposes/issue_response",
+        "planner_purposes/future_business",
+        "planner_purposes/root_cause",
+        "planner_audiences/practitioner",
+        "planner_audiences/executive",
+        "planner_audiences/management",
+        "planner_audiences/external",
         "coverage",
         "evidence_extraction",
         "section_selection",
@@ -127,24 +138,35 @@ def test_prompts_load_returns_non_empty_text_for_every_stage():
 
 
 # ---------------------------------------------------------------------------
-# prompts/planner.md content invariants — regression guard for the
-# audience/purpose_id STEP 2.5/2.6/2.7 refactor (this file's first prompt-
-# text invariant test, same spirit as tests/test_prompt_invariants.py for
-# the main pipeline's prompts).
+# planner.md content invariants — regression guard for the audience/
+# purpose_id STEP 2.5/2.6/2.7 refactor (this file's first prompt-text
+# invariant test, same spirit as tests/test_prompt_invariants.py for the
+# main pipeline's prompts). planner.md itself no longer exists — it was
+# split into prompts/planner_common_head.md, prompts/planner_purposes/*.md,
+# prompts/planner_audiences/*.md and prompts/planner_common_tail.md (see
+# planner_module._assemble_system_prompt). Calling
+# `_assemble_system_prompt(purpose_id=None, purpose_confidence=None,
+# audience=None)` reproduces the old "send everything" behavior these tests
+# were written against, so they migrate with no behavioral change.
 # ---------------------------------------------------------------------------
+
+
+def _full_planner_prompt() -> str:
+    return planner_module._assemble_system_prompt(None, None, None)
 
 
 def test_planner_prompt_preserves_step2_candidate_dimensions():
     """STEP 2's general candidate-angle list must survive the STEP 2.5/2.6/
     2.7 insertion untouched - this feature adds axes, it must not narrow
-    the ones already there."""
-    text = prompts_module.load("planner")
+    the ones already there. (2026-08-10: planner_common_head.md replaced
+    with a Korean translation - dimensions checked in Korean now.)"""
+    text = _full_planner_prompt()
     for dimension in [
-        "official / primary sources",
-        "direct comparison",
-        "quantitative data",
-        "independent evaluation",
-        "criticism / counterevidence",
+        "공식 / 1차 자료",
+        "직접 비교",
+        "정량 데이터",
+        "독립 평가",
+        "비판 / 반대 근거",
     ]:
         assert dimension in text
 
@@ -153,7 +175,7 @@ def test_planner_prompt_preserves_strategy_response_subitems_after_move_into_ste
     """The former standalone "Strategy / Response / Recommendation
     Questions" section's 6 sub-items were moved into STEP 2.5's
     issue_response branch, not deleted."""
-    text = prompts_module.load("planner")
+    text = _full_planner_prompt()
     for heading in [
         "Current factual state",
         "Affected relationships and dependencies",
@@ -166,12 +188,130 @@ def test_planner_prompt_preserves_strategy_response_subitems_after_move_into_ste
 
 
 def test_planner_prompt_documents_audience_and_purpose_id_inputs():
-    text = prompts_module.load("planner")
+    text = _full_planner_prompt()
     assert "audience" in text
     assert "purpose_id" in text
     assert "STEP 2.5" in text
     assert "STEP 2.6" in text
     assert "STEP 2.7" in text
+
+
+# ---------------------------------------------------------------------------
+# planner.py — _assemble_system_prompt / _pick_branch_ids / _pick_audience_ids
+# cut-and-assemble behavior (the actual cutting, not just "is this text
+# present somewhere" as the migrated invariants above check).
+# ---------------------------------------------------------------------------
+
+
+def test_assemble_system_prompt_sends_only_the_confident_purpose_branch():
+    text = planner_module._assemble_system_prompt("current_status", "high", None)
+
+    assert "current_status" in text
+    assert "Snapshot → Trend → Comparison" in text  # current_status's own narrative arc
+    for other_marker in [
+        "Applicable regulatory, legal, contractual, or policy framework",  # issue_response
+        "Current Position → Future Change",  # future_business
+        "Problem Evidence → Cause Structure",  # root_cause
+    ]:
+        assert other_marker not in text
+
+
+def test_assemble_system_prompt_falls_back_to_all_purposes_when_confidence_low():
+    text = planner_module._assemble_system_prompt("current_status", "low", None)
+
+    for marker in [
+        "Snapshot → Trend → Comparison",
+        "Applicable regulatory, legal, contractual, or policy framework",
+        "Current Position → Future Change",
+        "Problem Evidence → Cause Structure",
+    ]:
+        assert marker in text
+
+
+def test_assemble_system_prompt_falls_back_to_all_purposes_when_unclassified():
+    text = planner_module._assemble_system_prompt(None, None, None)
+
+    for marker in [
+        "Snapshot → Trend → Comparison",
+        "Applicable regulatory, legal, contractual, or policy framework",
+        "Current Position → Future Change",
+        "Problem Evidence → Cause Structure",
+    ]:
+        assert marker in text
+
+
+def test_assemble_system_prompt_sends_only_the_selected_audience_branch():
+    text = planner_module._assemble_system_prompt(None, None, "practitioner")
+
+    assert "practitioner — focus: HOW" in text
+    for other_marker in [
+        "executive — focus: IMPACT & PRIORITY",
+        "management — focus: DECISION & STRATEGY",
+        "external — focus: WHAT & WHY",
+    ]:
+        assert other_marker not in text
+
+
+def test_assemble_system_prompt_omits_audience_section_entirely_when_unset():
+    text = planner_module._assemble_system_prompt(None, None, None)
+
+    for marker in [
+        "practitioner — focus: HOW",
+        "executive — focus: IMPACT & PRIORITY",
+        "management — focus: DECISION & STRATEGY",
+        "external — focus: WHAT & WHY",
+    ]:
+        assert marker not in text
+
+
+# question_type (Troubleshooting/Navigating/Investigating/Sensing) cutting -
+# same _pick_branch_ids-driven behavior as purpose_id above, one marker
+# string per prompts/planner_question_types/*.md file.
+_QUESTION_TYPE_MARKERS = {
+    "troubleshooting": "문제의 실체 → 영향 범위 → 대응 가능한 수단 → 실제 대응 사례 → 중장기 대응 방향",
+    "navigating": "평가기준 정의 → 후보 탐색 → 후보별 정량/정성 근거 → 성공 사례 → 비교 → 추천 근거 확보",
+    "investigating": "현상 확인 → 가능한 원인/요인 탐색 → 정량 근거 → 대상 집단별 차이 → 관계/효과 검증 → 설명 가능한 결론",
+    "sensing": "현재 상태 → 과거 대비 변화 → 규모/이용률 → 세그먼트별 차이 → 주요 트렌드 → 최근 변화",
+}
+
+
+def test_assemble_system_prompt_sends_only_the_confident_question_type_branch():
+    text = planner_module._assemble_system_prompt(None, None, None, "troubleshooting", "high")
+
+    assert _QUESTION_TYPE_MARKERS["troubleshooting"] in text
+    for type_id in ("navigating", "investigating", "sensing"):
+        assert _QUESTION_TYPE_MARKERS[type_id] not in text
+
+
+def test_assemble_system_prompt_falls_back_to_all_question_types_when_confidence_low():
+    text = planner_module._assemble_system_prompt(None, None, None, "troubleshooting", "low")
+
+    for marker in _QUESTION_TYPE_MARKERS.values():
+        assert marker in text
+
+
+def test_assemble_system_prompt_falls_back_to_all_question_types_when_unclassified():
+    text = planner_module._assemble_system_prompt(None, None, None, None, None)
+
+    for marker in _QUESTION_TYPE_MARKERS.values():
+        assert marker in text
+
+
+def test_assemble_system_prompt_places_question_type_branch_before_purpose_and_audience():
+    """question_type was designed as a co-equal 1st-pass generator alongside
+    STEP 2 (in planner_common_head.md), not a 2nd-pass refinement like
+    purpose_id/audience - so its text must sit between head and the
+    purpose/audience branches, not after them."""
+    text = planner_module._assemble_system_prompt(
+        "current_status", "high", "practitioner", "troubleshooting", "high"
+    )
+
+    head_pos = text.index("STEP 2 — candidate search angle 생성")
+    question_type_pos = text.index(_QUESTION_TYPE_MARKERS["troubleshooting"])
+    purpose_pos = text.index("Snapshot → Trend → Comparison")
+    audience_pos = text.index("practitioner — focus: HOW")
+
+    assert head_pos < question_type_pos < purpose_pos < audience_pos
 
 
 # ---------------------------------------------------------------------------
@@ -347,6 +487,67 @@ def test_plan_searches_forwards_given_audience_and_purpose_id_in_payload(monkeyp
     assert captured["purpose_id"] == "issue_response"
 
 
+def test_plan_searches_confident_purpose_sends_only_that_branch_to_solar(monkeypatch):
+    captured = {}
+
+    def _fake_call_json(system_prompt, payload, *, caller, model_override=None, timeout_seconds=30):
+        captured["system_prompt"] = system_prompt
+        return None
+
+    monkeypatch.setattr(solar_module, "call_json", _fake_call_json)
+
+    planner_module.plan_searches("질문", purpose_id="current_status", purpose_confidence="high")
+
+    assert "Snapshot → Trend → Comparison" in captured["system_prompt"]
+    assert "Applicable regulatory, legal, contractual, or policy framework" not in captured["system_prompt"]
+
+
+def test_plan_searches_low_confidence_sends_all_purpose_branches_to_solar(monkeypatch):
+    captured = {}
+
+    def _fake_call_json(system_prompt, payload, *, caller, model_override=None, timeout_seconds=30):
+        captured["system_prompt"] = system_prompt
+        return None
+
+    monkeypatch.setattr(solar_module, "call_json", _fake_call_json)
+
+    planner_module.plan_searches("질문", purpose_id="current_status", purpose_confidence="low")
+
+    assert "Applicable regulatory, legal, contractual, or policy framework" in captured["system_prompt"]
+
+
+def test_plan_searches_classifies_question_type_and_cuts_branch_to_solar(monkeypatch):
+    """Wiring regression: plan_searches() must actually call
+    classify_question_type -> refine_question_type_ai (question_type is
+    computed locally, never passed in by a caller - see plan_searches'
+    docstring) and feed the result into _assemble_system_prompt so only the
+    matching question_type branch reaches the model."""
+    captured = {}
+
+    def _fake_classify(question):
+        captured["classify_input"] = question
+        return (None, "low")
+
+    def _fake_refine(rule_based_result, question, *, model_override=None, timeout_seconds=30):
+        captured["refine_input"] = (rule_based_result, question)
+        return ("sensing", "high")
+
+    def _fake_call_json(system_prompt, payload, *, caller, model_override=None, timeout_seconds=30):
+        captured["system_prompt"] = system_prompt
+        return None
+
+    monkeypatch.setattr(planner_module, "classify_question_type", _fake_classify)
+    monkeypatch.setattr(planner_module, "refine_question_type_ai", _fake_refine)
+    monkeypatch.setattr(solar_module, "call_json", _fake_call_json)
+
+    planner_module.plan_searches("질문")
+
+    assert captured["classify_input"] == "질문"
+    assert captured["refine_input"] == ((None, "low"), "질문")
+    assert _QUESTION_TYPE_MARKERS["sensing"] in captured["system_prompt"]
+    assert _QUESTION_TYPE_MARKERS["troubleshooting"] not in captured["system_prompt"]
+
+
 def _plan_response(**overrides):
     base = {
         "intent": "질문",
@@ -461,9 +662,9 @@ def test_plan_searches_keeps_key_terms_at_or_below_cap_unaffected(monkeypatch):
 
 
 def test_planner_prompt_documents_key_terms_cap_and_segment_splitting():
-    text = prompts_module.load("planner")
-    assert "at most 2" in text
-    assert "one query per segment" in text
+    text = prompts_module.load("planner_common_tail")
+    assert "최대 2개" in text
+    assert "segment별로 query를 생성" in text
 
 
 def test_planner_prompt_documents_quantitative_benchmark_institution_queries():
@@ -472,12 +673,19 @@ def test_planner_prompt_documents_quantitative_benchmark_institution_queries():
     the human anchored on named benchmark providers (reach %, reputation
     index, rate cards) instead of generic phrasing; this section teaches the
     same named-provider + precise-metric pattern already proven by the
-    Regulatory / institutional terminology queries section above it."""
-    text = prompts_module.load("planner")
+    Regulatory / institutional terminology queries section above it.
+
+    2026-08-10: tail replaced with a Korean-translated, generalized version
+    - the concrete real institution names (KISDI, 코바코, 닐슨미디어코리아,
+    etc.) were themselves only ever relevant to one of this shared engine's
+    five sectors (broadcast/media), so generalizing them to placeholder
+    names loses nothing sector-agnostic; this test now checks the pattern
+    itself survived rather than any one sector's specific institution
+    names."""
+    text = prompts_module.load("planner_common_tail")
     assert "Quantitative benchmark" in text
-    for institution in ["KISDI", "코바코", "닐슨미디어", "메조미디어", "한국기업평판연구소", "FUNdex"]:
-        assert institution in text
-    assert "never invent a plausible-sounding index or institution name" in text
+    assert "리서치기관" in text and "규제기관" in text
+    assert "그럴듯해 보이는 index나 institution name을 만들어내지 마십시오" in text
 
 
 def test_coverage_prompt_documents_entity_anchored_followup():
@@ -1193,6 +1401,172 @@ def test_select_chunks_parses_object_shaped_selection(monkeypatch):
 
 
 # ---------------------------------------------------------------------------
+# question_type_classifier.py — rule-based 1st pass over planner.py's 3rd
+# axis (now wired into _assemble_system_prompt/plan_searches - see the
+# "question_type cutting" tests above and prompts/planner_question_types/
+# *.md). This section only tests the classifier in isolation. Example
+# questions below are the user-supplied representative examples from the
+# source material, not invented.
+# ---------------------------------------------------------------------------
+
+
+def test_classify_question_type_returns_none_for_empty_question():
+    assert question_type_classifier.classify_question_type("") == (None, "low")
+    assert question_type_classifier.classify_question_type(None) == (None, "low")
+
+
+def test_classify_question_type_returns_none_when_no_signal_matches():
+    assert question_type_classifier.classify_question_type("안녕하세요") == (None, "low")
+
+
+def test_classify_question_type_detects_troubleshooting_with_high_confidence():
+    result = question_type_classifier.classify_question_type(
+        "중앙그룹 회생 사태에 따른 IPTV사의 대응 방안"
+    )
+    assert result == ("troubleshooting", "high")
+
+
+def test_classify_question_type_detects_navigating_with_high_confidence():
+    result = question_type_classifier.classify_question_type(
+        "SK브로드밴드 브랜드 이미지 개선에 맞는 연령층별 광고 매체 및 모델 추천"
+    )
+    assert result == ("navigating", "high")
+
+
+def test_classify_question_type_detects_investigating_with_high_confidence():
+    result = question_type_classifier.classify_question_type(
+        "2030 1인 가구의 유선 인터넷 가입 고려 요인 및 페인 포인트"
+    )
+    assert result == ("investigating", "high")
+
+
+def test_classify_question_type_detects_sensing_with_high_confidence():
+    result = question_type_classifier.classify_question_type(
+        "지난 5년간 OTT 생태계의 변화 추이 (국내 vs 글로벌 비교)"
+    )
+    assert result == ("sensing", "high")
+
+
+def test_classify_question_type_returns_low_confidence_when_top_two_scores_are_close():
+    """This is the source material's own worked example for why the gap
+    between the top two scores matters more than the absolute top score -
+    the question genuinely mixes an investigating angle ("미치는 영향")
+    with a troubleshooting one ("대응 전략")."""
+    question_type, confidence = question_type_classifier.classify_question_type(
+        "칩플레이션(반도체 가격 상승)이 셋톱박스 업계에 미치는 영향과 IPTV사의 중장기 대응 전략"
+    )
+    assert confidence == "low"
+    assert question_type in question_type_classifier.QUESTION_TYPE_IDS
+
+
+def test_classify_question_type_does_not_guess_from_a_word_no_list_actually_contains():
+    """The source material's own caution: "전략" alone is ambiguous across
+    types ("대응 전략" -> troubleshooting, "성장 전략" -> navigating), so
+    it deliberately does NOT appear as a bare general-signal word in any
+    list - only inside specific multi-word strong phrases. A question that
+    only contains the bare word should score 0 everywhere and return no
+    guess at all, rather than default to any one type."""
+    assert question_type_classifier.classify_question_type("경쟁사 전략 분석") == (None, "low")
+
+
+# ---------------------------------------------------------------------------
+# question_type_ai_based.py — optional 2nd-pass AI refinement over
+# question_type_classifier.py's rule-based 1st pass. `refine_question_type_ai`
+# is now called by planner.py's plan_searches() (see the
+# test_plan_searches_classifies_question_type_and_cuts_branch_to_solar wiring
+# test above) - these tests exercise the module in isolation, same as the
+# rule-based classifier tests above.
+# ---------------------------------------------------------------------------
+
+
+def test_classify_question_type_ai_returns_none_without_api_key(monkeypatch):
+    monkeypatch.delenv(solar_module.API_KEY_ENV_VAR, raising=False)
+
+    assert question_type_ai_based.classify_question_type_ai("질문") is None
+
+
+def test_classify_question_type_ai_parses_valid_response(monkeypatch):
+    _patch_solar(
+        monkeypatch,
+        [{"type": "Troubleshooting", "confidence": 0.92, "reason": "대응책을 찾는 질문"}],
+    )
+
+    result = question_type_ai_based.classify_question_type_ai("반도체 가격 상승에 어떻게 대응해야 하는가")
+
+    assert result == ("troubleshooting", "high")
+
+
+def test_classify_question_type_ai_maps_confidence_tiers(monkeypatch):
+    _patch_solar(monkeypatch, [{"type": "Sensing", "confidence": 0.5, "reason": "r"}])
+    assert question_type_ai_based.classify_question_type_ai("질문") == ("sensing", "medium")
+
+    _patch_solar(monkeypatch, [{"type": "Sensing", "confidence": 0.1, "reason": "r"}])
+    assert question_type_ai_based.classify_question_type_ai("질문") == ("sensing", "low")
+
+
+def test_classify_question_type_ai_returns_none_for_unrecognized_type(monkeypatch):
+    _patch_solar(monkeypatch, [{"type": "NotARealType", "confidence": 0.9, "reason": "r"}])
+
+    assert question_type_ai_based.classify_question_type_ai("질문") is None
+
+
+def test_classify_question_type_ai_returns_none_on_call_failure(monkeypatch):
+    monkeypatch.setenv(solar_module.API_KEY_ENV_VAR, "key")
+    monkeypatch.setattr(
+        solar_module, "OpenAI", lambda **_: (_ for _ in ()).throw(RuntimeError("boom"))
+    )
+
+    assert question_type_ai_based.classify_question_type_ai("질문") is None
+
+
+# --- refine_question_type_ai: the 1st->2nd pass orchestration itself -------
+
+
+def test_refine_question_type_ai_skips_ai_call_when_rule_based_is_high(monkeypatch):
+    """A "high" rule-based confidence is trusted as-is - no API call spent
+    confirming it. Asserting on solar_module.call_json's call log (rather
+    than just the returned value) proves the AI pass was never invoked, not
+    merely that its result happened to match."""
+    calls = []
+    monkeypatch.setattr(
+        solar_module, "call_json", lambda *a, **k: calls.append(1) or {"type": "Sensing", "confidence": 0.9}
+    )
+
+    result = question_type_ai_based.refine_question_type_ai(("troubleshooting", "high"), "질문")
+
+    assert result == ("troubleshooting", "high")
+    assert calls == []
+
+
+def test_refine_question_type_ai_calls_ai_when_rule_based_is_low(monkeypatch):
+    _patch_solar(monkeypatch, [{"type": "Navigating", "confidence": 0.8, "reason": "r"}])
+
+    result = question_type_ai_based.refine_question_type_ai((None, "low"), "질문")
+
+    assert result == ("navigating", "high")
+
+
+def test_refine_question_type_ai_calls_ai_when_rule_based_is_medium(monkeypatch):
+    """The rule-based classifier itself never emits "medium" today, but the
+    orchestration threshold is written generically against this codebase's
+    full low/medium/high scale - not hardcoded to only "low" - so this must
+    keep working if that ever changes."""
+    _patch_solar(monkeypatch, [{"type": "Sensing", "confidence": 0.8, "reason": "r"}])
+
+    result = question_type_ai_based.refine_question_type_ai(("troubleshooting", "medium"), "질문")
+
+    assert result == ("sensing", "high")
+
+
+def test_refine_question_type_ai_falls_back_to_rule_based_when_ai_unavailable(monkeypatch):
+    monkeypatch.delenv(solar_module.API_KEY_ENV_VAR, raising=False)
+
+    result = question_type_ai_based.refine_question_type_ai(("investigating", "low"), "질문")
+
+    assert result == ("investigating", "low")
+
+
+# ---------------------------------------------------------------------------
 # router.py — orchestration, monkeypatching this package's own module
 # functions directly (simpler and just as faithful as mocking three layers
 # of OpenAI clients for pure control-flow assertions).
@@ -1229,6 +1603,33 @@ def test_research_forwards_audience_and_purpose_id_to_plan_searches(monkeypatch)
 
     assert captured["audience"] == "executive"
     assert captured["purpose_id"] == "issue_response"
+
+
+def test_research_forwards_purpose_confidence_to_plan_searches(monkeypatch):
+    """Same wiring pattern as audience/purpose_id above, for the new
+    purpose_confidence kwarg that gates the cut-and-assemble prompt's
+    confidence fallback (see planner_module._pick_branch_ids)."""
+    captured = {}
+
+    def _fake_plan_searches(question, **kwargs):
+        captured.update(kwargs)
+        return _plan(("q1", 1))
+
+    monkeypatch.setattr(planner_module, "plan_searches", _fake_plan_searches)
+    monkeypatch.setattr(web_search_module, "execute_web_search", lambda query, **_: [])
+    monkeypatch.setattr(
+        coverage_module, "check_coverage", lambda *a, **k: CoverageDecision(sufficient=True, reason="enough")
+    )
+
+    router_module.research(
+        "질문",
+        SourceRouterConfig(),
+        purpose_id="issue_response",
+        purpose_confidence="low",
+        audience="executive",
+    )
+
+    assert captured["purpose_confidence"] == "low"
 
 
 def test_research_stops_when_sufficient_after_priority1(monkeypatch):
@@ -1782,14 +2183,14 @@ def test_result_carries_the_budget_it_actually_had(monkeypatch):
 
 # --- planner prompt: institution anchors must not replace DIRECT ------------
 def test_planner_prompt_blocks_anchoring_a_plain_status_question():
-    prompt = prompts_module.load("planner")
+    prompt = prompts_module.load("planner_common_tail")
 
-    assert "단순 현재 상태" in prompt or "plain current-state" in prompt
-    assert "IPTV 가입자 수 현황은?" in prompt
+    assert "단순 current-state" in prompt
+    assert "서비스 A 이용자 수 현황은?" in prompt
 
 
 def test_planner_prompt_requires_one_unanchored_question_first_query():
-    prompt = prompts_module.load("planner")
+    prompt = prompts_module.load("planner_common_tail")
 
     assert "Keep one unanchored question-first query" in prompt
     assert "priority: 1" in prompt
@@ -1797,9 +2198,11 @@ def test_planner_prompt_requires_one_unanchored_question_first_query():
 
 def test_planner_prompt_still_teaches_the_benchmark_pattern():
     """The anchor guidance is narrowed, never removed - a multi-candidate
-    recommendation question still needs it."""
-    prompt = prompts_module.load("planner")
+    recommendation question still needs it. (2026-08-10: no longer checks
+    specific real institution names - see
+    test_planner_prompt_documents_quantitative_benchmark_institution_queries's
+    docstring for why those were generalized away.)"""
+    prompt = prompts_module.load("planner_common_tail")
 
-    for provider in ("KISDI", "코바코", "닐슨미디어코리아", "한국기업평판연구소"):
-        assert provider in prompt
     assert "Quantitative benchmark / ranking-index queries" in prompt
+    assert "리서치기관" in prompt

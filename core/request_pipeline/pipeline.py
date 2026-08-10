@@ -383,6 +383,7 @@ def _run_pipeline_stages(
                     request.question, result.entities.perspective
                 ),
                 report_purpose_id=result.report_purpose.purpose_id,
+                purpose_confidence=result.report_purpose.confidence,
                 audience=audience_id,
                 information_needs=result.entities.information_needs,
                 answer_requirements=result.entities.answer_requirements,

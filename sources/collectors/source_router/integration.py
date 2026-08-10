@@ -29,6 +29,7 @@ def collect(source_plan: SourcePlan) -> SourceCollectionResult:
             answer_requirements=list(source_plan.answer_requirements),
             evidence_requirements=list(source_plan.evidence_requirements),
             purpose_id=context.report_purpose_id,
+            purpose_confidence=context.purpose_confidence,
             audience=context.audience,
             excluded_urls=list(context.excluded_urls),
             excluded_domains=list(context.excluded_domains),
