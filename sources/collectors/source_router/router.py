@@ -365,6 +365,7 @@ def research(
     answer_requirements: list[str] | None = None,
     evidence_requirements: list[str] | None = None,
     purpose_id: str | None = None,
+    purpose_confidence: str | None = None,
     audience: str | None = None,
     excluded_urls: list[str] | None = None,
     excluded_domains: list[str] | None = None,
@@ -386,6 +387,7 @@ def research(
         question,
         audience=audience,
         purpose_id=purpose_id,
+        purpose_confidence=purpose_confidence,
         model_override=config.planner_model,
         timeout_seconds=config.call_timeout_seconds,
     )

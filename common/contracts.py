@@ -297,6 +297,13 @@ class WebSearchContext(BaseModel):
     # company's own coverage and the underlying research is never found.
     needs_generic_topic_round: bool = False
     report_purpose_id: Optional[str] = None
+    # ReportPurposeClassification.confidence, echoed through unchanged - lets
+    # the search planner (source_router/planner.py's `_assemble_system_prompt`)
+    # decide whether to trust report_purpose_id enough to send only that one
+    # purpose's query-generation instructions, or fall back to sending all
+    # four when confidence is "low" (or this is None, e.g. standalone/test
+    # use of source_router outside the full pipeline).
+    purpose_confidence: Optional[str] = None
     # The audience the resulting report will be shown to (practitioner/
     # executive/management/external, or None if unspecified) - lets the
     # search planner adjust query axes for who will read the report, not
