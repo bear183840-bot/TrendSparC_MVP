@@ -65,6 +65,26 @@ def test_an_incomplete_split_says_so_instead_of_inventing_a_remainder(monkeypatc
     assert "기타" not in body
 
 
+def test_the_donut_title_sits_in_a_compact_header_not_beside_the_circle(monkeypatch):
+    """Live-reported bug: the title used to be a flex sibling of the donut
+    SVG inside `.ts-donut-card`, so it claimed its own column to the circle's
+    left instead of sitting in a compact header above it - the same
+    `.ts-chart-head` pattern a line/bar chart's title already uses."""
+    from reporting.dashboard_streamlit import components
+
+    captured: list[str] = []
+    monkeypatch.setattr(components.st, "markdown", lambda body, **_: captured.append(body))
+
+    components.render_share_split([_share("IPTV", 59, "유료방송 가입자"), _share("SO", 33, "유료방송 가입자")])
+    body = "".join(captured)
+
+    assert '<div class="ts-donut-head"><b>유료방송 가입자</b></div>' in body
+    assert '<div class="ts-donut-body">' in body
+    # The title must precede the visualization body in the markup, not sit
+    # inside it as a sibling of the <svg>.
+    assert body.index("ts-donut-head") < body.index("ts-donut-body")
+
+
 def test_a_stated_word_decides_the_state_whatever_the_date_says():
     as_of = "2026-08-01"
 

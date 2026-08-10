@@ -1433,3 +1433,60 @@ def headline_kpi(metric_points: list[Any], question: str | None) -> Any | None:
         if any(term in label for term in terms):
             return point
     return None
+
+
+_EXEC_SUMMARY_KPI_LIMIT = 3
+
+
+def executive_summary_supporting_kpis(
+    metric_points: list[Any],
+    question: str | None,
+    headline_point: Any | None,
+    limit: int = _EXEC_SUMMARY_KPI_LIMIT,
+) -> list[Any]:
+    """A few more figures worth a small KPI card beside the summary's
+    headline number - "[핵심 메시지] [KPI][KPI][KPI]", never a text
+    restatement of numbers already drawable as cards.
+
+    Same ranking Key Metrics uses (`rank_kpi_candidates`), minus whichever
+    metric the headline already shows - a caller seeds these into
+    `resolve_slots`'s dedup state (see `common/purpose_slots.
+    kpi_evidence_key`) so Key Metrics does not repeat them either.
+    """
+    candidates = rank_kpi_candidates(metric_points, (question or "").split())
+    if headline_point is not None:
+        headline_key = semantic_metric_key(getattr(headline_point, "label", None))
+        candidates = [
+            point for point in candidates
+            if semantic_metric_key(getattr(point, "label", None)) != headline_key
+        ]
+    return candidates[:limit]
+
+
+def executive_summary_comparison(
+    metric_points: list[Any],
+) -> tuple[str, str, list[Any]] | None:
+    """One comparison-shaped group worth a compact visualization in the
+    Executive Summary - "[competitor comparison visualization]" in the
+    reference layout - or None when nothing here is shaped for one.
+
+    Composition (a stated whole split into named parts, e.g. "KT 25% / SKB
+    19% / LGU+ 16%") is preferred over a bare same-period item comparison:
+    a share-of-whole reads as one relationship, where an item comparison is
+    several independent figures that happen to share a period. Only the
+    single most useful group is returned - the Executive Summary gets one
+    compact visualization, not a full section's worth; `render_metric_bar`/
+    `render_share_split` already own the fuller versions further down the
+    page.
+
+    Returns `("share", whole_name, points)` or `("comparison", period, points)`.
+    """
+    shares = share_groups(metric_points)
+    if shares:
+        whole, points = shares[0]
+        return "share", whole, points
+    groups = metric_comparison_groups(metric_points)
+    if groups:
+        period, points = groups[0]
+        return "comparison", period, points
+    return None

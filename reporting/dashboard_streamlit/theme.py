@@ -622,7 +622,13 @@ def dashboard_css(dark: bool, accent_theme: str = "orange") -> str:
     .ts-timeline-step.active .ts-step-state {{ color:var(--ts-accent); }}
     .ts-timeline-step > span:last-child {{ display:block; font-size:.82rem; color:var(--ts-muted);
         line-height:1.45; }}
-    .ts-donut-card {{ display:flex; align-items:center; gap:16px; flex-wrap:wrap; }}
+    /* Title sits in its own compact header row above the donut+legend body -
+       the same `.ts-chart-head`-style pattern a line/bar chart uses - rather
+       than beside the circle as a flex sibling, which used to claim a whole
+       extra column to the donut's left. */
+    .ts-donut-card {{ display:flex; flex-direction:column; gap:.35rem; }}
+    .ts-donut-head b {{ font-size:.9rem; font-weight:700; color:var(--ts-ink); }}
+    .ts-donut-body {{ display:flex; align-items:center; gap:16px; flex-wrap:wrap; }}
     /* The 25-unit dashoffset already starts the first slice at 12 o'clock
        (circumference is 100 by construction), so no extra rotation. */
     .ts-donut {{ width:118px; height:118px; }}
@@ -760,6 +766,24 @@ def dashboard_css(dark: bool, accent_theme: str = "orange") -> str:
     .ts-landscape + div[data-testid="stHorizontalBlock"] .ts-donut-card {{
       margin-top:0; }}
     .ts-landscape + div[data-testid="stHorizontalBlock"] .ts-chart {{ gap:.2rem; }}
+    /* Below this, two Streamlit columns side by side leave neither the trend
+       line nor the donut+legend enough width to read - "Donut | Line" must
+       stack as "Donut" over "Line" instead of both being squeezed. Streamlit
+       lays every `st.columns()` pair out as one flex row
+       (`stHorizontalBlock`), so this is the same "force flex-direction:
+       column below a breakpoint" pattern the horizontal timeline already
+       uses above, just applied to this composite card's own row. The
+       second-column divider becomes a top border once there is no second
+       column beside it to divide from. */
+    @media (max-width:700px) {{
+      .ts-landscape + div[data-testid="stHorizontalBlock"] {{ flex-direction:column; }}
+      .ts-landscape + div[data-testid="stHorizontalBlock"]
+        > div[data-testid="stColumn"] {{ width:100% !important; flex:1 1 100% !important; }}
+      .ts-landscape + div[data-testid="stHorizontalBlock"]
+        > div[data-testid="stColumn"] + div[data-testid="stColumn"] {{
+        border-left:none; padding-left:0; margin-left:0;
+        border-top:1px solid var(--ts-line); padding-top:.6rem; margin-top:.6rem; }}
+    }}
     .ts-metric-snapshot {{ display:grid; gap:.35rem; }}
     .ts-metric-snapshot > b {{ font-size:.76rem; color:var(--ts-muted); }}
     .ts-metric-snapshot-row {{ display:flex; align-items:baseline; justify-content:space-between;

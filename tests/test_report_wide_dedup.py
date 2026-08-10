@@ -127,3 +127,44 @@ def test_a_slot_composition_still_holds_two_different_blocks():
     by_id, _synthesis, _question = _resolve("mixed_entities")
 
     assert by_id["ranking"].block_types == ("item_bar", "metric_comparison")
+
+
+# --- Executive Summary's headline figure vs. Key Metrics ----------------
+
+
+def test_initial_drawn_seeds_the_dedup_state_before_any_slot_resolves():
+    """Executive Summary renders its headline number before resolve_slots()
+    ever runs (generic_dashboard.py), so its pick has to be seeded in rather
+    than discovered - `metrics`'s own `drawn_before` must already carry it."""
+    from common.block_shapes import headline_kpi
+    from common.purpose_slots import kpi_evidence_key
+    from core.request_pipeline.synthesis_fixture import load_synthesis_fixture
+    from common.contracts import MetricPoint
+
+    # The fixture's own points carry no evidence_claim_id/doc_id, so nothing
+    # in it is quotable enough for headline_kpi to pick - only its purpose_id
+    # is reused here; the grounded points are built fresh.
+    _synthesis, _question, _audience_id, purpose = load_synthesis_fixture(
+        _FIXTURES / "synthesis_revenue_trend.json"
+    )
+    grounded = [
+        MetricPoint(label="매출액", period="2025년", value=45_406,
+                    evidence_claim_id="c1", doc_id="d1"),
+        MetricPoint(label="영업이익", period="2025년", value=3_741,
+                    evidence_claim_id="c2", doc_id="d1"),
+    ]
+    synthesis = _synthesis.model_copy(update={"metric_series": grounded})
+    question = "매출액 현황은?"
+    headline_point = headline_kpi(synthesis.metric_series, question)
+    assert headline_point is not None
+
+    resolved = resolve_slots(
+        purpose.purpose_id, synthesis, None, None, question,
+        initial_drawn=frozenset({kpi_evidence_key(headline_point)}),
+    )
+    by_id_seeded = {slot.slot.slot_id: slot for slot in resolved}
+
+    assert kpi_evidence_key(headline_point) in by_id_seeded["metrics"].drawn_before
+    # Seeding must not remove the slot itself - a KPI grid missing one of
+    # two metrics is still a KPI grid, not "정보 없음".
+    assert by_id_seeded["metrics"].block_type == "kpi_grid"

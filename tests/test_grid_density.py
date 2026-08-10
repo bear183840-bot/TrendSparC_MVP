@@ -63,6 +63,24 @@ def test_a_nine_row_table_keeps_its_declared_width():
     assert _slot_width(slot, synthesis=_synthesis(comparison_points=_comparisons(12))) == 2
 
 
+def test_a_short_timeline_does_not_claim_the_full_landscape_width():
+    """A 3-event timeline used to always take the full 4-unit row regardless
+    of how little it actually draws - "Timeline이 있다는 이유로 dashboard
+    height가 커지는 문제". `_CONTENT_VOLUME["timeline"]` measures it by
+    evidence count the same way every other block is measured."""
+    slot = _slot("timeline", "timeline")
+    short = _synthesis(evidence=[f"근거 {i}" for i in range(3)])
+
+    assert _slot_width(slot, synthesis=short) == 1
+
+
+def test_a_long_timeline_keeps_its_declared_full_width():
+    slot = _slot("timeline", "timeline")
+    long = _synthesis(evidence=[f"근거 {i}" for i in range(12)])
+
+    assert _slot_width(slot, synthesis=long) == 4
+
+
 def test_a_short_prose_card_shrinks():
     assert _slot_width(_slot("market", "narrative_list", ["한 줄"]), synthesis=_synthesis()) == 1
 

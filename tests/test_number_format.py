@@ -19,6 +19,7 @@ from common.number_format import (
     format_number,
     joined_value,
     scale_for,
+    scale_prefixed_unit,
     scaled_number,
     unit_needs_space,
 )
@@ -103,6 +104,29 @@ def test_a_shared_scale_is_honoured_rather_than_recomputed():
 
     assert joined_value(21_535_256, "명", scale) == "2,154만 명"
     assert joined_value(120_735, "명", scale) == "12.1만 명"
+
+
+# --- a chart axis note must not fabricate a compound unit ----------------
+
+
+def test_a_plain_counter_word_stays_glued_to_the_scale():
+    """"만" + "명" reads naturally as one phrase - no separator to protect."""
+    assert scale_prefixed_unit("명", "만") == "만명"
+
+
+def test_a_multi_part_unit_is_kept_apart_from_the_scale():
+    """Live-verified: a chart axis note once said "단위: 만단말장치・단자" -
+    gluing the scale word onto an already-compound unit ("단말장치・단자")
+    fabricated a third, unreadable unit instead of reading as "10-thousands
+    of that unit"."""
+    assert scale_prefixed_unit("단말장치・단자", "만") == "만 단말장치・단자"
+    assert "만단말장치" not in scale_prefixed_unit("단말장치・단자", "만")
+
+
+def test_scale_prefixed_unit_handles_missing_halves():
+    assert scale_prefixed_unit("명", "") == "명"
+    assert scale_prefixed_unit(None, "만") == "만"
+    assert scale_prefixed_unit(None, "") == ""
 
 
 # --- and the render points actually call it ------------------------------

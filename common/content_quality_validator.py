@@ -121,6 +121,47 @@ def is_demographic(entity: str) -> bool:
     return entity_kind(entity) != "entity"
 
 
+def is_market_category_entity(entity: str | None, market_keywords: list[str] | None) -> bool:
+    """Whether `entity` names the market/category itself - e.g. "IPTV"
+    sitting in a competitor list beside "KT"/"SKB"/"LGU+" - rather than a
+    company, product, segment or country actually being compared.
+
+    `entity_kind()` above has no vocabulary for this: a category label and a
+    company name are both a bare noun phrase with no age/gender/household/
+    segment marker, so both default to `"entity"`. This checks the entity
+    against the sector's own registered `SectorProfile.market_keywords`
+    instead - the same field `core/entity/search_terms.py` already anchors
+    market_landscape searches on (see CLAUDE.md) - rather than a new entity
+    classifier or a name-specific denylist. A sector with no registered
+    market keywords excludes nothing: silence here means "unknown", not
+    "safe to drop", so a missing/incomplete profile never removes a real
+    competitor.
+    """
+    if not entity or not market_keywords:
+        return False
+    key = semantic_entity_key(entity)
+    return any(key == semantic_entity_key(keyword) for keyword in market_keywords if keyword)
+
+
+def exclude_market_category_entities(
+    comparison_points: list[Any], market_keywords: list[str] | None,
+) -> list[Any]:
+    """`comparison_points` with any market/category-labelled entity dropped.
+
+    Applied once, centrally, to the synthesis before it reaches slot
+    resolution or any renderer - every Competitive Landscape-shaped block
+    (`competitor_panels`, `benchmark_grid`, `level_matrix`, `table`, `radar`)
+    reads `comparison_points` independently, so filtering each of them
+    separately would be as easy to miss in one as the original bug was.
+    """
+    if not market_keywords:
+        return comparison_points
+    return [
+        point for point in comparison_points
+        if not is_market_category_entity(getattr(point, "entity", None), market_keywords)
+    ]
+
+
 def _age_sort_key(entity: str) -> tuple:
     """Age brackets in their natural order, not in evidence order.
 

@@ -854,6 +854,36 @@ def _landscape_keys(synthesis: Any) -> set[str]:
     return keys
 
 
+def bars_evidence_key(point: Any) -> str:
+    """The consumption key for one bars-family metric point (`bar`/
+    `item_bar`/`ranking_list`/`grouped_bar`/`metric_comparison` all share
+    this family, see `_SHAPE_FAMILIES`).
+
+    Public for the same reason `kpi_evidence_key`/`share_evidence_key` are:
+    the Executive Summary's own comparison visualization
+    (`common.block_shapes.executive_summary_comparison`) is chosen outside
+    `resolve_slots()`, so its facts must be marked drawn in the exact
+    spelling `_consumption()`'s `"metric_comparison"` entry already uses.
+    """
+    return qualified_key("bars", f"metric:{semantic_metric_key(point.label)}")
+
+
+def kpi_evidence_key(point: Any) -> str:
+    """The consumption key for one KPI-shaped metric point.
+
+    Public for the same reason `share_evidence_key` is: a caller outside
+    this module needs to mark its own pick as already drawn in the exact
+    namespace `_kpi_keys`/`resolve_slots` use, so two spellings of "this is
+    the same metric" cannot silently drift apart. The Executive Summary's
+    headline figure (`headline_kpi`) is picked by the same ranking the Key
+    Metrics `kpi_grid` slot uses (`rank_kpi_candidates`) but is rendered
+    outside `resolve_slots()` entirely - without this, the identical
+    top-ranked metric shows up twice: once as the summary's headline number,
+    once again as the first Key Metrics card.
+    """
+    return qualified_key("kpi", f"metric:{semantic_metric_key(point.label)}")
+
+
 def _kpi_keys(synthesis: Any, question: str | None) -> set[str]:
     """The metrics a KPI grid puts on cards - not every metric it could.
 
@@ -1047,12 +1077,19 @@ def resolve_slots(
     report: Any,
     question_answer_type: str | None = None,
     question: str | None = None,
+    initial_drawn: frozenset[str] = frozenset(),
 ) -> list[ResolvedSlot]:
     """Fill each of the purpose's slots with the best block its data supports.
 
     `question` is optional and affects only *which* metrics a KPI grid would
     put on cards, which is what it reports having drawn. Without it the grid
     still reports a bounded set, just ranked by the evidence alone.
+
+    `initial_drawn` seeds the report-wide dedup state with facts something
+    *outside* this resolution pass already showed - today, the Executive
+    Summary's headline figure, which renders before `resolve_slots()` ever
+    runs (see `generic_dashboard.py`). Empty by default, which reproduces the
+    old "nothing shown yet" behaviour exactly.
     """
     slots = slots_for(purpose_id, question_answer_type)
     availability = _availability()
@@ -1072,7 +1109,7 @@ def resolve_slots(
     # over-rejecting - `kpi_grid` and `chart` would both disappear behind
     # whichever block happened to run first. The block itself subtracts, in
     # the one place that knows what it would actually put on screen.
-    drawn: set[str] = set()
+    drawn: set[str] = set(initial_drawn)
 
     def keys_for(candidate: str, synthesis: Any, items: list[str]) -> set[str]:
         # Same facts + same shape is a repeat; same facts in another shape is

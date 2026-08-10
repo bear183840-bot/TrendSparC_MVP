@@ -39,6 +39,7 @@ from common.number_format import (
     scaled_number,
     joined_value,
     scale_for,
+    scale_prefixed_unit,
     unit_needs_space,
 )
 from common.section_titles import section_title
@@ -280,18 +281,32 @@ def render_executive_summary(
     stats: list[tuple[str, int, str]] | None = None,
     heading: str = "Executive Summary",
     headline_point: Any | None = None,
+    supporting_points: list[Any] | None = None,
+    comparison: tuple[str, str, list[Any]] | None = None,
 ) -> None:
-    """Executive Summary card, with the question's own figure beside it.
+    """Executive Summary as a summary *composition*, not a text container.
 
-    The corner used to hold counters - "확인된 지표 155건 / 주의 신호 3건".
-    A count of an internal list is not something a reader can act on, and it
-    sat in the most prominent position on the page. What belongs there is the
-    number the summary is about, chosen by `headline_kpi` using the ranking
-    the KPI grid already uses; when no single figure answers the question the
-    corner is simply empty, on the same rule as every other block here.
+    The core message stays a short paragraph, but numbers already drawable
+    as cards - a few more KPIs beside the headline figure, one comparison or
+    composition visualization when the evidence is shaped for either - are
+    shown as blocks instead of being spelled out in a longer paragraph. Both
+    additions are optional and independent: a question with no comparable
+    figures gets narrative alone, exactly as before.
 
-    `stats` is still accepted so existing callers keep working, and is used
-    only when there is no headline figure to show instead.
+    `supporting_points` (`common.block_shapes.executive_summary_supporting_kpis`)
+    and `comparison` (`common.block_shapes.executive_summary_comparison`) are
+    computed by the caller, not here - this function only decides how to
+    lay out what it is handed, the same selection/render split every other
+    block in this module follows.
+
+    The corner aside used to hold counters - "확인된 지표 155건 / 주의 신호
+    3건". A count of an internal list is not something a reader can act on,
+    and it sat in the most prominent position on the page. What belongs
+    there is the number the summary is about, chosen by `headline_kpi` using
+    the ranking the KPI grid already uses; when no single figure answers the
+    question the corner is simply empty, on the same rule as every other
+    block here. `stats` is still accepted so existing callers keep working,
+    and is used only when there is no headline figure to show instead.
     """
     if headline_point is not None:
         aside = render_headline_kpi(headline_point)
@@ -310,6 +325,14 @@ def render_executive_summary(
         + "</div>",
         unsafe_allow_html=True,
     )
+    if supporting_points:
+        render_kpi_row(supporting_points, limit=len(supporting_points))
+    if comparison is not None:
+        kind, subject, points = comparison
+        if kind == "share":
+            render_share_split(points)
+        else:
+            render_metric_comparison(subject, points)
 
 
 def render_card(title: str, body_html: str, css_class: str = "") -> str:
@@ -859,13 +882,13 @@ def _metric_chart_svg(points: list[Any], title: str) -> str:
     # The axis divides its labels, so the note is where the reader is told by
     # how much. Without it the chart would understate every figure by four
     # orders of magnitude and say nothing about having done so.
-    left_unit = f"{scale_by_group[0][1]}{unit}"
+    left_unit = scale_prefixed_unit(unit, scale_by_group[0][1])
     note_parts = [f"단위: {left_unit}"] if left_unit else []
     if len(groups) > 1:
         right_raw = next(
             (point.unit for label in groups[1] for point in by_label[label] if point.unit), ""
         )
-        right_unit = f"{scale_by_group[1][1]}{right_raw}"
+        right_unit = scale_prefixed_unit(right_raw, scale_by_group[1][1])
         if right_unit and right_unit != left_unit:
             note_parts.append(f"우축 {right_unit}")
     unit_note = (
@@ -1070,10 +1093,11 @@ def render_action_list(
         bar = ""
         if impact_value is not None and max_impact:
             unit = getattr(expected_impact, "impact_unit", None) or ""
+            impact_display = joined_value(impact_value, unit)
             bar = (
-                f'<span class="ts-impact-bar" title="{escape(_format_number(impact_value))}{escape(unit)}">'
+                f'<span class="ts-impact-bar" title="{escape(impact_display)}">'
                 f'<i style="width:{abs(impact_value) / max_impact * 100:.1f}%"></i>'
-                f'<b>{escape(_format_number(impact_value))}{escape(unit)}</b></span>'
+                f'<b>{escape(impact_display)}</b></span>'
             )
         judgement_basis = ai_judgements.get(title)
         impact_cell = (
@@ -1148,12 +1172,18 @@ def render_share_split(metric_points: list[Any]) -> None:
             f'나머지 {_format_number(remainder)}%는 출처에 명시되지 않았습니다.</p>'
             if remainder > SHARE_SUM_TOLERANCE else ""
         )
+        # Title lives in its own compact header above the donut, the same
+        # `.ts-*-head` pattern render_metric_chart uses for `.ts-chart-head` -
+        # not a flex sibling beside the circle, which used to claim a whole
+        # extra column to the donut's left and split it visually from a
+        # companion chart placed beside this card (see render_landscape).
         st.markdown(
-            f'<div class="ts-donut-card"><b>{escape(whole)}</b>'
+            f'<div class="ts-donut-card"><div class="ts-donut-head"><b>{escape(whole)}</b></div>'
+            f'<div class="ts-donut-body">'
             f'<svg viewBox="0 0 42 42" class="ts-donut">'
             f'<circle r="15.9155" cx="21" cy="21" fill="none" stroke="var(--ts-soft)" '
             f'stroke-width="7"></circle>{segments}</svg>'
-            f'<div class="ts-donut-legend">{legend}</div></div>{note}',
+            f'<div class="ts-donut-legend">{legend}</div></div></div>{note}',
             unsafe_allow_html=True,
         )
 
@@ -1420,12 +1450,14 @@ def render_grouped_bars(metric_points: list[Any]) -> None:
     """
     for label, categories, by_subject in grouped_bar_series(metric_points):
         subjects = list(by_subject)[:len(_SERIES_COLORS)]
-        peak = max(
-            abs(point.value) for subject in subjects for point in by_subject[subject]
-        ) or 1
+        all_values = [
+            point.value for subject in subjects for point in by_subject[subject]
+        ]
+        peak = max(abs(value) for value in all_values) or 1
         unit = next(
             (point.unit for subject in subjects for point in by_subject[subject] if point.unit), ""
         )
+        scale = scale_for(all_values, unit)
         legend = "".join(
             f'<span class="ts-chart-key"><i style="background:{_SERIES_COLORS[index]}"></i>'
             f'{escape(subject)}</span>'
@@ -1436,15 +1468,18 @@ def render_grouped_bars(metric_points: list[Any]) -> None:
             bars = "".join(
                 f'<i style="height:{abs(by_subject[subject][position].value) / peak * 100:.1f}%;'
                 f'background:{_SERIES_COLORS[index]}" '
-                f'title="{escape(subject)} {escape(_format_number(by_subject[subject][position].value))}'
-                f'{escape(unit)}"></i>'
+                f'title="{escape(subject)} '
+                f'{escape(joined_value(by_subject[subject][position].value, unit, scale))}"></i>'
                 for index, subject in enumerate(subjects)
             )
             columns += (
                 f'<div class="ts-gbar-col"><div class="ts-gbar-stack">{bars}</div>'
                 f'<span>{escape(category)}</span></div>'
             )
-        unit_note = f'<span class="ts-chart-unit">단위: {escape(unit)}</span>' if unit else ""
+        unit_note = (
+            f'<span class="ts-chart-unit">단위: {escape(scale_prefixed_unit(unit, scale[1]))}</span>'
+            if unit else ""
+        )
         st.markdown(
             f'<div class="ts-chart"><div class="ts-chart-head"><b>{escape(label)}</b>{unit_note}</div>'
             f'<div class="ts-chart-legend">{legend}</div>'
@@ -1537,12 +1572,12 @@ def render_competitor_panels(
             )
             figure_rows = "".join(
                 f'<div class="ts-panel-figure"><small>{escape(point.label)}</small>'
-                f'<b>{escape(_format_number(point.value))}{escape(point.unit or "")}</b></div>'
+                f'<b>{escape(joined_value(point.value, point.unit))}</b></div>'
                 for point in figures
             )
             share_row = (
                 f'<div class="ts-panel-share"><small>{escape(share.share_of or "구성비")}</small>'
-                f'<b>{escape(_format_number(share.value))}%</b></div>'
+                f'<b>{escape(joined_value(share.value, "%"))}</b></div>'
                 if share else ""
             )
             st.markdown(
@@ -2102,9 +2137,12 @@ def render_metric_comparison(
         ordered = ordered[:limit]
     units = {(point.unit or "").strip() for point in ordered}
     if len(units) > 1:
+        # Each row is its own metric here (different units can't share a
+        # scale), so every row picks its own scale via display_value/
+        # joined_value's default rather than the group-wide `scale` param.
         rows = "".join(
             f'<div class="ts-metric-snapshot-row"><span>{escape(point.label)}</span>'
-            f'<b>{escape(_format_number(point.value))}{escape(point.unit or "")}</b></div>'
+            f'<b>{escape(joined_value(point.value, point.unit))}</b></div>'
             for point in ordered
         )
         st.markdown(
@@ -2113,12 +2151,13 @@ def render_metric_comparison(
         )
         return
     unit = ordered[0].unit or ""
+    scale = scale_for([point.value for point in ordered], unit)
     largest = max(abs(point.value) for point in ordered) or 1
     rows = "".join(
         f'<div class="ts-compare-row"><span class="label">{escape(point.label)}</span>'
         f'<div class="ts-compare-track"><div class="ts-compare-fill" '
         f'style="--pct:{abs(point.value) / largest * 100:.1f}%"></div></div>'
-        f'<span class="value">{escape(_format_number(point.value))}{escape(unit)}</span></div>'
+        f'<span class="value">{escape(joined_value(point.value, unit, scale))}</span></div>'
         for point in ordered
     )
     st.markdown(

@@ -119,3 +119,28 @@ def unit_needs_space(unit: str | None) -> bool:
     """Whether this unit is a word rather than a sign."""
     text = _normalized_unit(unit)
     return bool(text) and text not in _TIGHT_UNITS and bool(_SPACED_UNIT_RE.search(text))
+
+
+# A unit that already names more than one thing (an interpunct-joined label
+# like "단말장치・단자") is a compound in its own right. Gluing a magnitude
+# word onto the front of it the same way "만" + "명" makes "만명" instead
+# fabricates a *third*, unreadable unit ("만단말장치・단자") that names
+# nothing - live-verified on a chart axis note. A plain single-concept
+# counter word ("명"/"건"/"위") has no separator and still reads correctly
+# glued to a scale word, so only the separator - not "is this Korean" -
+# decides whether a space goes in.
+_UNIT_SEPARATOR_RE = re.compile(r"[·・/、]")
+
+
+def scale_prefixed_unit(unit: str | None, scale_word: str) -> str:
+    """Combines a magnitude word with a unit for compact display, keeping
+    them apart when `unit` is itself a multi-part label so the result never
+    reads as one fabricated compound unit."""
+    text = _normalized_unit(unit)
+    if not scale_word:
+        return text
+    if not text:
+        return scale_word
+    if _UNIT_SEPARATOR_RE.search(text):
+        return f"{scale_word} {text}"
+    return f"{scale_word}{text}"

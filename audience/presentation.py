@@ -32,11 +32,13 @@ class AudiencePresentation:
     summary_label: str
 
 
+_EXECUTIVE_SUMMARY_LABEL = "Executive Summary"
+
 _DENSITY = {
-    "full": (8, 6, 10, 10, "실무 요약"),
-    "condensed": (4, 4, 7, 7, "의사결정 요약"),
-    "highlight_only": (3, 3, 5, 5, "전략 요약"),
-    "summary": (4, 4, 7, 7, "핵심 요약"),
+    "full": (8, 6, 10, 10, _EXECUTIVE_SUMMARY_LABEL),
+    "condensed": (4, 4, 7, 7, _EXECUTIVE_SUMMARY_LABEL),
+    "highlight_only": (3, 3, 5, 5, _EXECUTIVE_SUMMARY_LABEL),
+    "summary": (4, 4, 7, 7, _EXECUTIVE_SUMMARY_LABEL),
 }
 
 
