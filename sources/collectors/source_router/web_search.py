@@ -30,7 +30,7 @@ import os
 import re
 import sys
 
-from openai import OpenAI
+from openai import APIConnectionError, APITimeoutError, OpenAI
 
 from common.ai_client import openai_client_kwargs
 from sources.collectors.source_router.contracts import KeyFact, WebSearchResult
@@ -41,6 +41,17 @@ _BASE_URL_ENV_VAR = "TRENDSPARC_SOURCE_ROUTER_SEARCH_BASE_URL"
 _DEFAULT_MODEL = "gpt-5-mini"
 
 _DEFAULT_MAX_URLS_PER_QUERY = 2
+
+
+class WebSearchTimeoutError(Exception):
+    """Raised only when the call timed out, never for any other failure.
+
+    A genuine zero-result search and a timed-out search both used to look
+    identical to the caller (both returned `[]`) - `_run_queries()` needs to
+    tell them apart so it can retry a *timed-out* direct query once with a
+    simplified query, without treating an ordinary empty result the same
+    way (retrying a query that legitimately found nothing would just waste
+    another call)."""
 
 
 def is_configured() -> bool:
@@ -166,9 +177,12 @@ def execute_web_search(
     timeout_seconds: int = 30,
     max_urls: int = _DEFAULT_MAX_URLS_PER_QUERY,
 ) -> list[WebSearchResult]:
-    """Run one query. Empty list on any failure or missing key — a search
-    miss is not a crash; the router's own budget/loop logic decides what an
-    empty round means.
+    """Run one query. Empty list on any failure or missing key, EXCEPT a
+    timeout — a search miss is not a crash; the router's own budget/loop
+    logic decides what an empty round means. A timeout raises
+    `WebSearchTimeoutError` instead of returning `[]`, because `_run_queries()`
+    treats a timed-out direct query differently from one that genuinely
+    found nothing (see that class's docstring).
 
     `max_urls` is both told to the model (fewer, stronger results requested)
     and enforced afterward in code (`_parse_results()[:max_urls]`) — the
@@ -197,6 +211,9 @@ def execute_web_search(
                 {"role": "user", "content": query},
             ],
         )
+    except (APITimeoutError, APIConnectionError) as exc:
+        print(f"[source_router.web_search] search TIMED OUT for {query!r}: {exc}", file=sys.stderr)
+        raise WebSearchTimeoutError(str(exc)) from exc
     except Exception as exc:  # noqa: BLE001 - one query must not abort the router
         print(f"[source_router.web_search] search failed for {query!r}: {exc}", file=sys.stderr)
         return []

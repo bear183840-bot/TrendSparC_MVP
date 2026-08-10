@@ -667,6 +667,21 @@ def test_planner_prompt_documents_key_terms_cap_and_segment_splitting():
     assert "segment별로 query를 생성" in text
 
 
+def test_planner_prompt_documents_parallel_axis_splitting():
+    """Added after a live run on "롱폼과 숏폼 미디어 소비 트랜드" combined both
+    parallel topics into one quoted-phrase direct query ('"롱폼" "숏폼" 미디어
+    소비 현황'), which timed out on every attempt across all 3 gap-loop
+    rounds (2026-08-11) while the other topic's own solo query succeeded -
+    the pre-existing segment-splitting rule above only names age segments
+    explicitly, so this generalizes the same principle to any parallel
+    axis a question names, without hardcoding "롱폼"/"숏폼" or any other
+    topic pair."""
+    text = prompts_module.load("planner_common_tail")
+    assert "병렬적인 주제" in text
+    assert "하나의 direct query에 묻지 마십시오" in text
+    assert "병렬 형식" in text
+
+
 def test_planner_prompt_documents_quantitative_benchmark_institution_queries():
     """Added after comparing this planner's queries against a human
     analyst's manual research for a media/ad-model recommendation question -
@@ -2116,8 +2131,10 @@ def test_search_budget_terms_explain_the_derived_number():
     """config.max_web_search_calls is a ceiling, not the run's budget.
 
     "IPTV 가입자 수 현황은?" names no comparison/trend/strategy token, so it
-    derives 4 + 2 = 6 against a ceiling of 12. Recording only
-    `search_calls_used` made stopping at 6 read as a premature abort.
+    derives 14 + 12 = 26 (raised +10 per term, 2026-08-11 stopgap - see
+    _search_budget_terms's docstring), clipped to a ceiling of 12 here.
+    Recording only `search_calls_used` made stopping at the ceiling read as
+    a premature abort.
     """
     plan = SearchPlan(
         intent="i",
@@ -2130,13 +2147,13 @@ def test_search_budget_terms_explain_the_derived_number():
     terms = router_module._search_budget_terms("IPTV 가입자 수 현황은?", plan, 12)
 
     assert terms == {
-        "base": 4,
-        "evidence_needs_bonus": 2,
+        "base": 14,
+        "evidence_needs_bonus": 12,
         "comparison_temporal_bonus": 0,
         "strategy_bonus": 0,
         "ceiling": 12,
     }
-    assert router_module._search_budget("IPTV 가입자 수 현황은?", plan, 12) == 6
+    assert router_module._search_budget("IPTV 가입자 수 현황은?", plan, 12) == 12
 
 
 def test_search_budget_terms_stay_consistent_with_the_budget():
@@ -2167,7 +2184,7 @@ def test_ceiling_still_caps_a_complex_question():
     )
     question = "경쟁사 대비 추이와 대응 전략은?"
 
-    assert router_module._search_budget(question, plan, 12) == 10
+    assert router_module._search_budget(question, plan, 12) == 12
     assert router_module._search_budget(question, plan, 6) == 6
 
 
@@ -2182,9 +2199,131 @@ def test_result_carries_the_budget_it_actually_had(monkeypatch):
 
     result = router_module.research("IPTV 가입자 수 현황은?", SourceRouterConfig())
 
-    assert result.search_budget == 4
+    assert result.search_budget == 14
     assert result.search_budget_basis["ceiling"] == SourceRouterConfig().max_web_search_calls
-    assert result.search_budget_basis["base"] == 4
+    assert result.search_budget_basis["base"] == 14
+
+
+# --- timeout-only retry for direct queries (2026-08-11) ---------------------
+# Live-verified: a direct query combining two quoted key_terms ('"롱폼"
+# "숏폼" 미디어 소비 현황') timed out on every attempt across 3 gap-loop
+# rounds, while the same topic asked alone succeeded - _run_queries() now
+# retries a timed-out *direct* query exactly once with its key_terms
+# dropped to one.
+
+
+def test_simplify_query_for_retry_keeps_first_key_term_and_unquotes_the_rest():
+    query = SearchPlanQuery(
+        query='"롱폼" "숏폼" 미디어 소비 현황', key_terms=["롱폼", "숏폼"], query_role="direct",
+    )
+
+    simplified = router_module._simplify_query_for_retry(query)
+
+    assert simplified.key_terms == ["롱폼"]
+    assert simplified.query == '"롱폼" 숏폼 미디어 소비 현황'
+
+
+def test_simplify_query_for_retry_returns_none_with_one_or_no_key_terms():
+    one_term = SearchPlanQuery(query='"롱폼" 미디어 소비 현황', key_terms=["롱폼"])
+    no_terms = SearchPlanQuery(query="미디어 소비 현황", key_terms=[])
+
+    assert router_module._simplify_query_for_retry(one_term) is None
+    assert router_module._simplify_query_for_retry(no_terms) is None
+
+
+def test_run_queries_retries_a_timed_out_direct_query_with_fewer_key_terms(monkeypatch):
+    attempts: list[str] = []
+
+    def _fake_execute(query, **_):
+        attempts.append(query)
+        if len(attempts) == 1:
+            raise web_search_module.WebSearchTimeoutError("Request timed out.")
+        return [WebSearchResult(url="https://found.example.com/1")]
+
+    monkeypatch.setattr(web_search_module, "execute_web_search", _fake_execute)
+    query = SearchPlanQuery(
+        query='"롱폼" "숏폼" 미디어 소비 현황', key_terms=["롱폼", "숏폼"], query_role="direct",
+    )
+
+    results, used = router_module._run_queries([query], SourceRouterConfig(), remaining_calls=5)
+
+    assert attempts == ['"롱폼" "숏폼" 미디어 소비 현황', '"롱폼" 숏폼 미디어 소비 현황']
+    assert used == 2
+    assert [result.url for result in results] == ["https://found.example.com/1"]
+
+
+def test_run_queries_does_not_retry_a_timed_out_supporting_query(monkeypatch):
+    attempts: list[str] = []
+
+    def _fake_execute(query, **_):
+        attempts.append(query)
+        raise web_search_module.WebSearchTimeoutError("Request timed out.")
+
+    monkeypatch.setattr(web_search_module, "execute_web_search", _fake_execute)
+    query = SearchPlanQuery(
+        query='"롱폼" "숏폼" 미디어 소비 현황', key_terms=["롱폼", "숏폼"], query_role="supporting",
+    )
+
+    results, used = router_module._run_queries([query], SourceRouterConfig(), remaining_calls=5)
+
+    assert len(attempts) == 1
+    assert used == 1
+    assert results == []
+
+
+def test_run_queries_retries_a_direct_query_at_most_once(monkeypatch):
+    attempts: list[str] = []
+
+    def _fake_execute(query, **_):
+        attempts.append(query)
+        raise web_search_module.WebSearchTimeoutError("Request timed out.")
+
+    monkeypatch.setattr(web_search_module, "execute_web_search", _fake_execute)
+    query = SearchPlanQuery(
+        query='"롱폼" "숏폼" 미디어 소비 현황', key_terms=["롱폼", "숏폼"], query_role="direct",
+    )
+
+    results, used = router_module._run_queries([query], SourceRouterConfig(), remaining_calls=5)
+
+    assert len(attempts) == 2
+    assert used == 2
+    assert results == []
+
+
+def test_run_queries_skips_retry_without_remaining_budget(monkeypatch):
+    attempts: list[str] = []
+
+    def _fake_execute(query, **_):
+        attempts.append(query)
+        raise web_search_module.WebSearchTimeoutError("Request timed out.")
+
+    monkeypatch.setattr(web_search_module, "execute_web_search", _fake_execute)
+    query = SearchPlanQuery(
+        query='"롱폼" "숏폼" 미디어 소비 현황', key_terms=["롱폼", "숏폼"], query_role="direct",
+    )
+
+    results, used = router_module._run_queries([query], SourceRouterConfig(), remaining_calls=1)
+
+    assert len(attempts) == 1
+    assert used == 1
+    assert results == []
+
+
+def test_run_queries_skips_retry_when_no_key_terms_to_drop(monkeypatch):
+    attempts: list[str] = []
+
+    def _fake_execute(query, **_):
+        attempts.append(query)
+        raise web_search_module.WebSearchTimeoutError("Request timed out.")
+
+    monkeypatch.setattr(web_search_module, "execute_web_search", _fake_execute)
+    query = SearchPlanQuery(query='"롱폼" 미디어 소비 현황', key_terms=["롱폼"], query_role="direct")
+
+    results, used = router_module._run_queries([query], SourceRouterConfig(), remaining_calls=5)
+
+    assert len(attempts) == 1
+    assert used == 1
+    assert results == []
 
 
 # --- planner prompt: institution anchors must not replace DIRECT ------------
