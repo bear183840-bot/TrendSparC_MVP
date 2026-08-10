@@ -15,7 +15,11 @@ from unittest.mock import patch
 
 import pytest
 
-from common.block_shapes import headline_kpi
+from common.block_shapes import (
+    executive_summary_comparison,
+    executive_summary_supporting_kpis,
+    headline_kpi,
+)
 from common.block_titles import BLOCK_TITLES, SLOT_TITLES, block_title, slot_title
 from common.contracts import MetricPoint
 from common.purpose_slots import PURPOSE_SLOTS
@@ -82,6 +86,61 @@ def test_a_disputed_figure_never_reaches_the_corner():
     assert headline_kpi(points, QUESTION) is None
 
 
+# --- selecting what a summary composition would draw ---------------------
+
+
+def test_supporting_kpis_exclude_the_headlines_own_metric():
+    headline = _point("IPTV 가입자 수", 21_535_256)
+    other = _point("영업이익", 3_741, unit="억원")
+    points = [headline, other]
+
+    picked = executive_summary_supporting_kpis(points, QUESTION, headline)
+
+    assert other in picked
+    assert headline not in picked
+
+
+def test_supporting_kpis_are_capped():
+    points = [_point(f"지표{i}", float(i), unit="억원") for i in range(6)]
+
+    assert len(executive_summary_supporting_kpis(points, None, None, limit=3)) == 3
+
+
+def test_a_stated_whole_is_preferred_over_a_bare_item_comparison():
+    shares = [
+        _point("KT", 25, unit="%", subject="KT", share_of="유료방송 가입자"),
+        _point("SKB", 19, unit="%", subject="SKB", share_of="유료방송 가입자"),
+    ]
+    bare = [
+        _point("매출액", 45_406, unit="억원", subject=None),
+        _point("영업이익", 3_741, unit="억원", subject=None),
+    ]
+
+    kind, subject, points = executive_summary_comparison([*shares, *bare])
+
+    assert kind == "share"
+    assert subject == "유료방송 가입자"
+    # share_groups() normalizes periods, so compare identity rather than
+    # exact object equality.
+    assert {point.subject for point in points} == {"KT", "SKB"}
+
+
+def test_a_bare_comparison_is_used_when_nothing_is_composed():
+    bare = [
+        _point("매출액", 45_406, unit="억원", subject=None),
+        _point("영업이익", 3_741, unit="억원", subject=None),
+    ]
+
+    result = executive_summary_comparison(bare)
+
+    assert result is not None
+    assert result[0] == "comparison"
+
+
+def test_no_comparison_shaped_evidence_returns_nothing_to_draw():
+    assert executive_summary_comparison([_point("가입자 수", 100)]) is None
+
+
 # --- what reaches the page ----------------------------------------------
 
 
@@ -116,6 +175,55 @@ def test_no_figure_means_no_empty_corner():
 
 def test_the_counter_column_is_gone_from_the_default_render():
     assert "건</b>" not in _summary(headline_point=_point("IPTV 가입자 수", 1.0))
+
+
+# --- summary composition: KPI row and comparison/composition visualization --
+
+
+def test_supporting_kpis_render_as_cards_beside_the_headline():
+    """The reference layout's "[핵심 메시지] [KPI][KPI][KPI]" - numbers
+    already drawable as cards must not also be spelled out as a longer
+    paragraph."""
+    body = _summary(
+        headline_point=_point("IPTV 가입자 수", 21_535_256),
+        supporting_points=[_point("영업이익", 3_741, unit="억원"), _point("매출액", 45_406, unit="억원")],
+    )
+
+    assert "ts-kpi-row" in body
+    assert "영업이익" in body and "매출액" in body
+
+
+def test_no_supporting_data_means_narrative_alone():
+    """Regression: default behaviour (no supporting_points/comparison) is
+    unchanged - a question with nothing comparable stays narrative-only."""
+    body = _summary(headline_point=_point("IPTV 가입자 수", 21_535_256))
+
+    assert "ts-kpi-row" not in body
+    assert "ts-compare" not in body
+    assert "ts-donut-card" not in body
+
+
+def test_a_same_period_comparison_renders_as_a_visualization_in_the_summary():
+    body = _summary(
+        headline_point=None,
+        comparison=("comparison", "2025년", [
+            _point("매출액", 45_406, unit="억원"), _point("영업이익", 3_741, unit="억원"),
+        ]),
+    )
+
+    assert "ts-compare" in body
+
+
+def test_a_stated_whole_renders_as_a_donut_in_the_summary():
+    """"KT 25% / SKB 19% / LGU+ 16%" - a composition, not narrative text."""
+    shares = [
+        _point("KT", 25, unit="%", subject="KT", share_of="유료방송 가입자"),
+        _point("SKB", 19, unit="%", subject="SKB", share_of="유료방송 가입자"),
+        _point("LGU+", 16, unit="%", subject="LGU+", share_of="유료방송 가입자"),
+    ]
+    body = _summary(headline_point=None, comparison=("share", "유료방송 가입자", shares))
+
+    assert "ts-donut-card" in body
 
 
 # --- headings -----------------------------------------------------------

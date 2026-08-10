@@ -80,6 +80,18 @@ def test_an_unscaled_chart_still_names_its_unit():
     assert "단위: %" in markup
 
 
+def test_the_note_does_not_fabricate_a_compound_unit_from_a_multi_part_unit():
+    """Live-verified 2026-08-10: a 단말장치・단자 series' axis note read
+    "단위: 만단말장치・단자" - the scale word glued straight onto an
+    already-compound unit, inventing a unit that names nothing."""
+    markup = _metric_chart_svg(
+        _series("단말장치 수", "단말장치・단자", [20_100_000, 20_800_000, 21_535_256]), "추세",
+    )
+
+    assert "만단말장치" not in markup
+    assert "단위: 만 단말장치・단자" in markup
+
+
 def test_the_plot_keeps_its_own_aspect_ratio():
     """`preserveAspectRatio="none"` stretched a three-point line across the
     full card, so its slope stopped meaning anything."""

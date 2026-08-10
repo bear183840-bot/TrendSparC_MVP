@@ -166,6 +166,27 @@ def _metric_comparison(context: SlotContext):
     ]
 
 
+def _undrawn_kpi_points(context: SlotContext) -> list[Any]:
+    """The metric series, minus any label the Executive Summary's headline
+    figure already put on screen.
+
+    Same shape as `_undrawn_share_points`: the Executive Summary renders its
+    headline number before `resolve_slots()` ever runs (see
+    `generic_dashboard.py`), so it cannot be *refused* here the way a second
+    slot's own lead block can. Filtering the candidate points instead lets
+    Key Metrics promote whichever metric is next most important, rather than
+    repeating the exact figure the reader just saw."""
+    from common.purpose_slots import kpi_evidence_key
+
+    drawn = context.drawn_before
+    if not drawn:
+        return list(context.synthesis.metric_series)
+    return [
+        point for point in context.synthesis.metric_series
+        if kpi_evidence_key(point) not in drawn
+    ]
+
+
 def _kpi(context: SlotContext):
     # Selection, not rendering: `render_kpi_row` already ranks by
     # `question_terms` and already folds one label's periods into a
@@ -175,9 +196,10 @@ def _kpi(context: SlotContext):
     # keeps one representative per metric so a single series cannot fill
     # the grid.
     question_terms = context.question.split() if context.question else []
+    candidates = _undrawn_kpi_points(context)
     points = rank_kpi_candidates(
-        context.synthesis.metric_series, question_terms,
-    ) or context.synthesis.metric_series
+        candidates, question_terms,
+    ) or candidates
     limit = getattr(context.presentation, "kpi_limit", 6)
     if context.compact:
         limit = 1

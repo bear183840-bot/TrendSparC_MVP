@@ -21,9 +21,13 @@ def test_profiles_change_density_without_removing_block_capability():
 
     assert practitioner.kpi_limit > executive.kpi_limit >= management.kpi_limit
     assert practitioner.narrative_limit > executive.narrative_limit >= management.narrative_limit
-    assert practitioner.summary_label == "실무 요약"
-    assert executive.summary_label == "의사결정 요약"
-    assert management.summary_label == "전략 요약"
+    # The heading is a fixed role name, not audience-tailored prose - see
+    # common/block_titles.py's SLOT_TITLES["summary"], which already named
+    # this same card "Executive Summary" in English. Density (kpi_limit,
+    # narrative_limit, ...) is still what actually varies by audience.
+    assert practitioner.summary_label == "Executive Summary"
+    assert executive.summary_label == "Executive Summary"
+    assert management.summary_label == "Executive Summary"
 
 
 def test_profile_section_preferences_reorder_supported_slots_stably():

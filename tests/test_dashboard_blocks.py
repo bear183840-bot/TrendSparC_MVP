@@ -14,7 +14,13 @@ from pathlib import Path
 
 import pytest
 
-from common.contracts import ComparisonPoint, DocumentAnalysis, MetricPoint, ReportPurposeClassification
+from common.contracts import (
+    ActionImpact,
+    ComparisonPoint,
+    DocumentAnalysis,
+    MetricPoint,
+    ReportPurposeClassification,
+)
 from core.report_generator.generator import generate_report
 from core.report_planner.planner import plan_report
 from core.report_purpose.classifier import recommended_sections_for
@@ -121,6 +127,97 @@ def test_render_metric_comparison_bar_length_is_the_real_ratio(markup):
     body = "".join(markup)
     assert "--pct:100.0%" in body
     assert "--pct:25.0%" in body
+
+
+def test_render_metric_comparison_scales_large_shared_unit_values(markup):
+    """Live gap: this renderer used to print raw 8-digit values instead of
+    routing through the shared number_format helpers everything else uses."""
+    components.render_metric_comparison(
+        "2025년",
+        [_metric("가입자", "2025년", 21_535_256, "명"), _metric("해지자", "2025년", 1_200_000, "명")],
+    )
+    body = "".join(markup)
+    assert "21,535,256" not in body
+    assert "2,154만" in body
+
+
+def test_render_metric_comparison_scales_each_row_independently_when_units_differ(markup):
+    components.render_metric_comparison(
+        "2025년",
+        [_metric("가입자", "2025년", 21_535_256, "명"), _metric("점유율", "2025년", 59.1, "%")],
+    )
+    body = "".join(markup)
+    assert "21,535,256" not in body
+    assert "2,154만" in body
+    assert "59.1%" in body
+
+
+# --- grouped bars: one metric, several subjects, several shared categories ---
+
+
+def test_render_grouped_bars_scales_large_values_in_tooltip_and_note(markup):
+    points = [
+        MetricPoint(label="가입자", subject=subject, period=period, value=value, unit="명")
+        for subject, period, value in [
+            ("KT", "20대", 21_535_256), ("KT", "30대", 18_000_000),
+            ("LGU+", "20대", 15_200_000), ("LGU+", "30대", 12_400_000),
+        ]
+    ]
+    components.render_grouped_bars(points)
+    body = "".join(markup)
+    assert "21,535,256" not in body
+    assert "2,154만" in body
+    assert "단위: 만명" in body
+
+
+# --- competitor panels: per-entity facts, each attributable to that entity ---
+
+
+def test_render_competitor_panels_scales_each_figure(markup):
+    comparisons = [
+        ComparisonPoint(entity=entity, criterion=criterion, value=value)
+        for entity in ("KT", "SK브로드밴드")
+        for criterion, value in [("가격", "결합할인"), ("콘텐츠", "오리지널 다수")]
+    ]
+    metrics = [
+        MetricPoint(label="가입자 수", subject="KT", period="2025년",
+                    value=21_535_256, unit="명"),
+    ]
+    components.render_competitor_panels(comparisons, metrics)
+    body = "".join(markup)
+    assert "21,535,256" not in body
+    assert "2,154만" in body
+
+
+# --- action list: a bar only where the source stated a size ---
+
+
+def test_render_action_list_scales_the_impact_bar(markup):
+    components.render_action_list([
+        (
+            "요금제 개편",
+            ActionImpact(
+                action="요금제 개편", expected_impact="가입자 30만명 순증",
+                evidence_quote="가입자 30만명 순증 예상",
+                impact_value=300_000, impact_unit="명",
+            ),
+            "",
+        ),
+        (
+            "프로모션 확대",
+            ActionImpact(
+                action="프로모션 확대", expected_impact="대규모 가입자 순증 전망",
+                evidence_quote="대규모 가입자 순증이 전망됨",
+                impact_value=21_535_256, impact_unit="명",
+            ),
+            "",
+        ),
+    ])
+    body = "".join(markup)
+    # The raw magnitude must appear nowhere - not even the impact bar's own
+    # title/label - only the scaled form.
+    assert "21,535,256" not in body
+    assert "2,154만" in body
 
 
 # --- timeline: dated evidence + metric periods, chronologically ---

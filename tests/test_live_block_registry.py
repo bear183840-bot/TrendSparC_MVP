@@ -69,3 +69,41 @@ def test_a_block_whose_data_is_missing_returns_none_not_an_empty_card():
     assert slot_renderer("kpi_grid")(context) is None
     assert slot_renderer("table")(context) is None
     assert slot_renderer("matrix")(context) is None
+
+
+def test_kpi_grid_skips_the_metric_the_executive_summary_already_drew(monkeypatch):
+    """Live gap: headline_kpi (Executive Summary) and _kpi (Key Metrics) both
+    independently ranked the same metric_series with no shared state, so the
+    top-ranked figure appeared twice - once as the summary's headline number,
+    once again as the Key Metrics grid's first card."""
+    from common.contracts import MetricPoint, TrendSynthesis
+    from common.purpose_slots import kpi_evidence_key
+    from reporting.dashboard_streamlit import components
+
+    headline = MetricPoint(
+        label="가입자 수", period="2025년", value=21_535_256, unit="명",
+        evidence_claim_id="c1", doc_id="d1",
+    )
+    other = MetricPoint(
+        label="영업이익", period="2025년", value=3_741, unit="억원",
+        evidence_claim_id="c2", doc_id="d1",
+    )
+    synthesis = TrendSynthesis(
+        request_id="r", sector_id="sk_broadband", metric_series=[headline, other],
+    )
+    context = SlotContext(
+        result=None, synthesis=synthesis, items=[], risks=[], opportunities=[],
+        strengths=[], weaknesses=[],
+        drawn_before=frozenset({kpi_evidence_key(headline)}),
+    )
+
+    draw = slot_renderer("kpi_grid")(context)
+    assert draw is not None
+
+    captured: list[str] = []
+    monkeypatch.setattr(components.st, "markdown", lambda body, **_: captured.append(body))
+    draw()
+    body = "".join(captured)
+
+    assert "가입자 수" not in body
+    assert "영업이익" in body

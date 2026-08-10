@@ -17,10 +17,16 @@ from core.question_coverage import (
     derive_question_coverage,
     minimum_drawable_periods,
 )
-from common.block_shapes import comparison_points_of_kind, headline_kpi
+from common.block_shapes import (
+    comparison_points_of_kind,
+    executive_summary_comparison,
+    executive_summary_supporting_kpis,
+    headline_kpi,
+)
 from common.block_titles import slot_title
 from common.content_quality_validator import select_chartable_series
 from common.content_quality_validator import dedupe_across_blocks
+from common.content_quality_validator import exclude_market_category_entities
 # Importing the package is what registers every block, including the live
 # ones - the registry is only "the one table" if nothing can reach the
 # dashboard without it being populated.
@@ -31,7 +37,10 @@ from common.purpose_slots import (
     LAST_RESORT,
     ResolvedSlot,
     Slot,
+    bars_evidence_key,
+    kpi_evidence_key,
     resolve_slots,
+    share_evidence_key,
     under_evidenced,
 )
 from reporting.dashboard_streamlit.components import (
@@ -629,10 +638,21 @@ def render_generic_dashboard(
     purpose_id: str | None,
 ) -> None:
     action_owner = routed_action_owner(getattr(result, "sector_route", None))
+    market_keywords = getattr(
+        getattr(getattr(result, "sector_route", None), "matched_profile", None),
+        "market_keywords", None,
+    )
     synthesis = result.synthesis.model_copy(update={
         "metric_series": display_metric_points(result.synthesis.metric_series),
         "recommended_actions": actions_for_owner(
             result.synthesis.recommended_actions, action_owner
+        ),
+        # A market/category label ("IPTV") sitting in comparison_points beside
+        # real competitors ("KT"/"SKB"/"LGU+") reads as a competitor to every
+        # block downstream - filtered once here, against the sector's own
+        # registered market_keywords, so no renderer has to remember to do it.
+        "comparison_points": exclude_market_category_entities(
+            result.synthesis.comparison_points, market_keywords,
         ),
     })
     report = result.generated_report
@@ -657,19 +677,42 @@ def render_generic_dashboard(
     presentation = load_audience_presentation(audience_id)
 
     render_page_header(question, sector, audience, purpose)
+    headline_point = headline_kpi(synthesis.metric_series, question)
+    supporting_points = executive_summary_supporting_kpis(
+        synthesis.metric_series, question, headline_point,
+    )
+    comparison = executive_summary_comparison(synthesis.metric_series)
     render_executive_summary(
-        summary, heading=presentation.summary_label,
-        headline_point=headline_kpi(synthesis.metric_series, question),
+        summary, heading=presentation.summary_label, headline_point=headline_point,
+        supporting_points=supporting_points, comparison=comparison,
     )
     # The purpose's slot skeleton drives the page: fixed order, but each slot
     # takes the first block type its data can honestly support. See
     # purpose_slots.py - a slot only reaches "정보 없음" after every candidate
     # for its intent has been tried.
+    #
+    # `initial_drawn` seeds the dedup state with every fact the Executive
+    # Summary just rendered above (headline figure, supporting KPIs, its own
+    # comparison/composition visualization): without it, Key Metrics' own
+    # ranking would pick the same top metrics all over again, since
+    # headline_kpi/executive_summary_supporting_kpis and rank_kpi_candidates
+    # share one ranking and neither knew about the other's pick.
+    exec_summary_drawn: set[str] = set()
+    if headline_point is not None:
+        exec_summary_drawn.add(kpi_evidence_key(headline_point))
+    exec_summary_drawn.update(kpi_evidence_key(point) for point in supporting_points)
+    if comparison is not None:
+        kind, subject, points = comparison
+        if kind == "share":
+            exec_summary_drawn.add(share_evidence_key(subject))
+        else:
+            exec_summary_drawn.update(bars_evidence_key(point) for point in points)
     resolved = order_slots_for_audience(
         resolve_slots(
             purpose_id, synthesis, report,
             getattr(getattr(result, "report_purpose", None), "question_answer_type", None),
             question,
+            initial_drawn=frozenset(exec_summary_drawn),
         ), presentation,
     )
     if under_evidenced(resolved):

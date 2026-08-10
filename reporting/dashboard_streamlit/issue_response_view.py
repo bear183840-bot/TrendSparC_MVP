@@ -9,6 +9,8 @@ import streamlit as st
 from audience.presentation import load_audience_presentation
 from common.action_quality import actions_for_owner, routed_action_owner
 from common.block_shapes import headline_kpi
+from common.content_quality_validator import exclude_market_category_entities
+from common.purpose_slots import kpi_evidence_key
 from reporting.dashboard_streamlit.components import (
     action_impact_lookup,
     headline_stats,
@@ -65,7 +67,19 @@ def _card_header(title: str) -> None:
 
 
 def render_issue_response_dashboard(result: Any, question: str, sector: str, audience: str, purpose: str) -> None:
-    synthesis = result.synthesis
+    market_keywords = getattr(
+        getattr(getattr(result, "sector_route", None), "matched_profile", None),
+        "market_keywords", None,
+    )
+    # A market/category label ("IPTV") sitting in comparison_points beside
+    # real competitors ("KT"/"SKB"/"LGU+") reads as a competitor to the
+    # comparison table below - filtered once here against the sector's own
+    # registered market_keywords, same fix as generic_dashboard.py's.
+    synthesis = result.synthesis.model_copy(update={
+        "comparison_points": exclude_market_category_entities(
+            result.synthesis.comparison_points, market_keywords,
+        ),
+    })
     report = result.generated_report
     summary = clean_citation((report.executive_summary if report else None) or synthesis.synthesis_text)
     market_rows = _points_for_roles(result, {"market_analysis", "search", "regulatory_official"})
@@ -101,12 +115,23 @@ def render_issue_response_dashboard(result: Any, question: str, sector: str, aud
 
     render_page_header(question, sector, audience, purpose)
     # This view only ever renders issue_response reports.
+    headline_point = headline_kpi(synthesis.metric_series, question)
     render_executive_summary(
-        summary, heading=presentation.summary_label,
-        headline_point=headline_kpi(synthesis.metric_series, question),
+        summary, heading=presentation.summary_label, headline_point=headline_point,
     )
+    # Without this filter, Key Metrics repeats the exact figure the summary
+    # just showed: headline_kpi and render_kpi_row's own ranking share one
+    # selection (rank_kpi_candidates), so the top pick is the same for both -
+    # see generic_dashboard.py's identical fix via resolve_slots'
+    # `initial_drawn` for the purpose-skeleton dashboard.
+    kpi_points = synthesis.metric_series
+    if headline_point is not None:
+        headline_key = kpi_evidence_key(headline_point)
+        kpi_points = [
+            point for point in kpi_points if kpi_evidence_key(point) != headline_key
+        ]
     render_kpi_row(
-        synthesis.metric_series, limit=presentation.kpi_limit,
+        kpi_points, limit=presentation.kpi_limit,
         question_terms=question_terms,
     )
 
