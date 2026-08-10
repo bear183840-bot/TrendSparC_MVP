@@ -476,6 +476,21 @@ class MetricPoint(BaseModel):
     doc_id: Optional[str] = None
     source_id: Optional[str] = None
     source_url: Optional[str] = None
+    # Every document that stated this same reading, once normalization has
+    # merged them. `doc_id`/`source_id`/`source_url` above stay as the first
+    # of them so existing readers need no change; these list all of them, so
+    # collapsing two sources into one reading never costs a citation.
+    supporting_doc_ids: list[str] = Field(default_factory=list)
+    supporting_source_urls: list[str] = Field(default_factory=list)
+    # Set only on a value this system calculated rather than read. The one
+    # case today is the unnamed remainder of a partial composition: the
+    # source listed the named slices, so the leftover is arithmetic, not a
+    # reading. It must never look like a figure the document stated, which
+    # is why `evidence_claim_id` stays empty here and `source_claim_ids`
+    # names the slices the subtraction used instead.
+    derived: bool = False
+    derivation: Optional[str] = None
+    source_claim_ids: list[str] = Field(default_factory=list)
 
     @model_validator(mode="after")
     def keep_projection_flags_consistent(self):
@@ -497,6 +512,11 @@ class ComparisonPoint(BaseModel):
     criterion: str
     value: str
     level: Optional[Literal["low", "medium", "high"]] = None
+    # Same role as MetricPoint's: once the model's own comparisons and the
+    # ones recovered from a table are merged, one row can rest on more than
+    # one document. `doc_id`/`source_id`/`source_url` stay as the first.
+    supporting_doc_ids: list[str] = Field(default_factory=list)
+    supporting_source_urls: list[str] = Field(default_factory=list)
     comparison_id: Optional[str] = None
     evidence_claim_id: Optional[str] = None
     evidence_synthesis_claim_id: Optional[str] = None

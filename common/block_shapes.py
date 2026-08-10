@@ -431,6 +431,87 @@ def metric_insight(points: list[Any], grounded_claims: list[Any]) -> tuple[str, 
 # usually are), and drawing those as one circle states something false.
 SHARE_SUM_TOLERANCE = 2.0
 SHARE_MIN_SLICES = 2
+# Below this the remainder is rounding, not a real unnamed rest, and naming
+# it "기타" would put a made-up slice on the chart for nothing.
+SHARE_REMAINDER_MIN = 1.0
+_EXISTING_OTHER_NAMES = {"기타", "그 외", "그외", "나머지", "other", "others", "etc"}
+
+
+def derived_share_remainder(whole: str, slices: list[Any]) -> Any | None:
+    """The unnamed rest of a partial composition, or None.
+
+    A source that lists the top few slices of a whole it has named leaves a
+    remainder that is arithmetic, not a reading - so it is returned as a
+    point marked `derived`, carrying the claim ids of the slices it was
+    subtracted from and no `evidence_claim_id` of its own. Anything that
+    would make the subtraction a guess returns None instead: no named
+    whole, a sum already at 100, a sum over 100, a remainder small enough
+    to be rounding, or a rest the source already named itself.
+    """
+    from common.contracts import MetricPoint
+
+    if not whole or len(slices) < SHARE_MIN_SLICES:
+        return None
+    if any((getattr(point, "unit", None) or "").strip() not in {"%", "％"} for point in slices):
+        return None
+    periods = {getattr(point, "period", None) for point in slices}
+    if len(periods) != 1:
+        return None
+    subjects = [str(getattr(point, "subject", "") or "").strip() for point in slices]
+    if not all(subjects) or len(set(subjects)) != len(subjects):
+        return None
+    if any(subject.casefold() in _EXISTING_OTHER_NAMES for subject in subjects):
+        return None
+    if any(getattr(point, "derived", False) for point in slices):
+        return None
+    known_sum = sum(float(point.value) for point in slices)
+    if known_sum < 0 or known_sum > 100 - SHARE_REMAINDER_MIN:
+        return None
+    remainder = round(100.0 - known_sum, 2)
+    claim_ids = [
+        claim_id for claim_id in (
+            getattr(point, "evidence_synthesis_claim_id", None)
+            or getattr(point, "evidence_claim_id", None)
+            for point in slices
+        ) if claim_id
+    ]
+    doc_ids: list[str] = []
+    urls: list[str] = []
+    for point in slices:
+        for doc_id in (getattr(point, "supporting_doc_ids", None) or [getattr(point, "doc_id", None)]):
+            if doc_id and doc_id not in doc_ids:
+                doc_ids.append(doc_id)
+        for url in (getattr(point, "supporting_source_urls", None) or [getattr(point, "source_url", None)]):
+            if url and url not in urls:
+                urls.append(url)
+    return MetricPoint(
+        label="기타",
+        subject="기타",
+        period=next(iter(periods)) or "시점 미상",
+        value=remainder,
+        unit="%",
+        share_of=whole,
+        derived=True,
+        derivation="100 - sum(known shares)",
+        source_claim_ids=claim_ids,
+        supporting_doc_ids=doc_ids,
+        supporting_source_urls=urls,
+    )
+
+
+def latest_share_group(groups: list[tuple[str, list[Any]]]) -> tuple[str, list[Any]] | None:
+    """The most recent composition among groups that share one whole.
+
+    A "현황" question wants this half-year's split, not last year's; the
+    caller decides whether recency is what matters, this only orders.
+    """
+    dated = [
+        (whole, slices) for whole, slices in groups
+        if slices and is_time_period(getattr(slices[0], "period", None))
+    ]
+    if not dated:
+        return groups[0] if groups else None
+    return max(dated, key=lambda item: str(getattr(item[1][0], "period", "")))
 
 
 def share_groups(metric_points: list[Any]) -> list[tuple[str, list[Any]]]:

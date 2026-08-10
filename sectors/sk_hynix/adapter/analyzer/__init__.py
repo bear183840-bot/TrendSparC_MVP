@@ -42,6 +42,16 @@ _ANALYSIS_MAX_TOKENS = 4096
 # sector has no pre-call density heuristic, so every call starts at the
 # ceiling below and only pays for the higher one when genuinely needed.
 _ANALYSIS_MAX_TOKENS_ESCALATED = 7000
+# Output ceilings paired with the token ceilings above. Without them
+# metric_points/comparison_points are unbounded while max_tokens is not, so
+# a table-dense document overflows and is lost to a JSONDecodeError on
+# truncated JSON. Sized from real demand: the hungriest block contract
+# wants 4 items (ranking_list / composition_breakdown) and the largest
+# whole-dashboard demand observed across the stored runs was 38, while
+# these caps are per call and synthesis pools across documents. Same
+# values as sk_broadband so the sectors stay comparable.
+_MAX_METRIC_POINTS_PER_CALL = 16
+_MAX_COMPARISON_POINTS_PER_CALL = 8
 
 _SECTOR_ROOT = Path(__file__).resolve().parent.parent.parent
 _PROJECT_ROOT = _SECTOR_ROOT.parent.parent
@@ -90,7 +100,8 @@ _ANALYSIS_SCHEMA = {
         },
         "metric_points": {
             "type": "array",
-            "description": "문서에 명시된 수치+시점 쌍만 추출. 추정하거나 계산하지 말 것. 없으면 빈 배열.",
+            "maxItems": _MAX_METRIC_POINTS_PER_CALL,
+            "description": f"문서에 명시된 수치+시점 쌍만 추출. 추정하거나 계산하지 말 것. 없으면 빈 배열. 최대 {_MAX_METRIC_POINTS_PER_CALL}개. 상한에 걸리면 질문의 요구 축에 직접 답하는 수치를 먼저 남기고, 표의 모든 칸을 기계적으로 옮기지 말 것.",
             "items": {
                 "type": "object",
                 "properties": {
@@ -108,7 +119,8 @@ _ANALYSIS_SCHEMA = {
         },
         "comparison_points": {
             "type": "array",
-            "description": "문서에 명시된 대상 간 비교만 추출. level은 문서가 명시적으로 우열을 말할 때만 채우고 그 외엔 null. 없으면 빈 배열.",
+            "maxItems": _MAX_COMPARISON_POINTS_PER_CALL,
+            "description": f"문서에 명시된 대상 간 비교만 추출. level은 문서가 명시적으로 우열을 말할 때만 채우고 그 외엔 null. 없으면 빈 배열. 최대 {_MAX_COMPARISON_POINTS_PER_CALL}개. 상한에 걸리면 질문이 비교를 요구한 기준(criterion)부터 남길 것.",
             "items": {
                 "type": "object",
                 "properties": {

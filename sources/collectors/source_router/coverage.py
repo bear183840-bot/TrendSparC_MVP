@@ -13,6 +13,7 @@ never invents a URL/id that wasn't in the input it was given.
 from __future__ import annotations
 
 import sys
+from collections.abc import Iterable
 from typing import Any
 
 from sources.collectors.source_router import _prompts, _solar
@@ -63,7 +64,19 @@ def _safe_int(value: Any, default: int) -> int:
 
 
 def _str_list(raw: Any) -> list[str]:
-    return [str(value).strip() for value in raw or [] if str(value).strip()]
+    """A bare string is one item, not a list of its characters.
+
+    The schema asks for an array, but a model that answers with a single
+    sentence instead used to be iterated character by character - a live
+    run recorded limitations as ["I", "P", "T", "V", "가", ...] and the
+    whole explanation was destroyed. Non-iterables are wrapped for the
+    same reason.
+    """
+    if raw is None:
+        return []
+    if isinstance(raw, str) or not isinstance(raw, Iterable):
+        raw = [raw]
+    return [str(value).strip() for value in raw if str(value).strip()]
 
 
 def _parse_next_queries(raw: Any) -> list[NextQuery]:

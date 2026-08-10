@@ -259,6 +259,8 @@ This is not required for every question — most questions have no regulatory or
 
 ## Quantitative benchmark / ranking-index queries
 
+**Do not apply this section to a plain current-state or figure-lookup question.** "IPTV 가입자 수 현황은?", "작년 매출은?", "가입자 몇 명인가?" ask for a number that is already published in ordinary coverage; a question-first query finds it, and prefixing an institution name only narrows the search away from it. Live-verified 2026-08-10: for "IPTV 가입자 수 현황은?" this section fired anyway — because its provider list is topically about media — and turned all three highest-priority queries into `"방송통신위원회" …`, `"KISDI" …`, `"닐슨미디어코리아" …`. The run that had instead searched the plain `"IPTV 가입자 수 현황" 2025` was the one that found the official 보도자료 with the actual subscriber tables. Topic match is not the trigger; **multi-candidate selection is**.
+
 When the question requires choosing or comparing among several candidates for a real-world decision — media channels, audience segments, ad spokespeople/models, vendors, products — prefer combining the name of a real, specific quantitative benchmark/index/survey provider with the exact metric at issue, rather than only a generic phrase like "20대 선호 매체" or "인기 광고모델". A named-provider query surfaces the actual underlying data (a reach percentage, a ranking, a rate card) instead of a generic article restating the same vague claim other sources already make.
 
 Examples of real, commonly-cited Korean providers for this kind of question (use only when actually relevant to the question's domain — these are illustrations of the pattern, not a checklist to force in):
@@ -272,6 +274,20 @@ Example query pattern: `"닐슨미디어" 20대 미디어 이용률` or `"한국
 **Only name a provider or index you are reasonably confident is real and actually publishes this kind of data** — same caution as the regulatory section above; never invent a plausible-sounding index or institution name merely to satisfy this pattern.
 
 This is not required for every question — most questions have no multi-candidate ranking/selection dimension at all. Only add this when the question genuinely requires ranking or selecting among multiple candidates on a measurable dimension, not for a single-entity fact lookup.
+
+An institution-anchored query is a **supporting** query: it corroborates or finds the primary document behind an answer. It never takes the place of the plain question-first query — see "Keep one unanchored question-first query" below.
+
+## Keep one unanchored question-first query
+
+**At least one `priority: 1` query must be the question asked plainly, with no institution, agency, index or survey-provider name in it.** Write it the way someone who simply wants the answer would type it: the question's own subject and metric, plus a year or "최신" when recency matters.
+
+This is a floor, not a cap — anchor the *other* queries however the sections above direct. The point is that naming a trusted publisher is a guess about *where* an answer lives, while the question's own words are the answer's *description*; a plan made only of guesses can miss the document that states the fact outright.
+
+For "IPTV 가입자 수 현황은?":
+
+- required, unanchored: `IPTV 가입자 수 현황 2025`, `IPTV 가입자 최신 통계`
+- fine as supporting: `방송통신위원회 IPTV 가입자 통계`, `KISDI IPTV 가입자`
+- rejected: every priority-1 query carrying an institution name, leaving none that simply asks the question
 
 ## Query construction rules
 

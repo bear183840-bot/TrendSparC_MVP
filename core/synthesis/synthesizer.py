@@ -12,6 +12,7 @@ from common.content_quality_validator import (
     dedupe_structured_across_sections,
     extract_metric_points_from_evidence,
 )
+from common.metric_identity import normalize_metric_points
 from common.contracts import (
     DocumentAnalysis,
     SynthesisClaim,
@@ -278,6 +279,11 @@ def synthesize(
     # collapse exact duplicates (same label/period/value/unit/doc_id) rather
     # than showing the identical number twice in one KPI row/chart.
     metric_series = dedupe_structured_across_sections([metric_series])[0]
+    # Runs after validation and after the exact-duplicate pass above, never
+    # before: only a reading that survived grounding may be normalized, and
+    # the pass above cannot see across documents (it compares `doc_id`), so
+    # one 보도자료 arriving as two chunks stayed as two of every figure.
+    metric_series = normalize_metric_points(metric_series)
     metric_series = drop_other_affiliates_metrics(metric_series, sector_id)
     conclusions = [
         SynthesisConclusion(

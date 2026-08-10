@@ -23,6 +23,7 @@ from sources.collectors.source_router.contracts import (
     ConfirmedFact,
     DocumentChunk,
     DocumentSection,
+    EvidenceNeed,
     EvidenceVerification,
     NextQuery,
     SearchPlan,
@@ -1643,3 +1644,162 @@ def test_research_passes_max_urls_per_query_to_web_search(monkeypatch):
     router_module.research("질문", config)
 
     assert seen_kwargs["max_urls"] == 1
+
+
+def test_str_list_keeps_a_bare_string_whole():
+    """A model answering with a sentence must not become a list of letters.
+
+    A live run recorded limitations as ["I", "P", "T", "V", "가", ...] -
+    the schema asked for an array, the model sent one string, and iterating
+    it destroyed the explanation.
+    """
+    assert coverage_module._str_list("IPTV 가입자 수는 반기 기준입니다.") == [
+        "IPTV 가입자 수는 반기 기준입니다."
+    ]
+
+
+def test_str_list_still_flattens_real_lists_and_drops_blanks():
+    assert coverage_module._str_list(["  a  ", "", "  ", "b"]) == ["a", "b"]
+    assert coverage_module._str_list(None) == []
+    assert coverage_module._str_list([]) == []
+
+
+def test_str_list_wraps_a_non_iterable_scalar():
+    assert coverage_module._str_list(7) == ["7"]
+
+
+def test_plan_searches_clamps_the_pipeline_default_audience(monkeypatch):
+    """`_default` is a real runtime value, not a bad input.
+
+    The pipeline falls back to DEFAULT_AUDIENCE_ID ("_default") whenever the
+    caller named no audience, which is every run that did not pass
+    --audience. Before this clamp that value reached SearchPlan.audience -
+    a Literal of the 4 selectable personas - and every such run died with a
+    ValidationError before the first search call.
+    """
+    monkeypatch.setattr(
+        solar_module, "call_json",
+        lambda *a, **k: {"intent": "i", "queries": [{"query": "q", "angle": "a", "purpose": "p", "priority": 1}]},
+    )
+    plan = planner_module.plan_searches("IPTV 가입자 수 현황은?", audience="_default")
+
+    assert plan.audience is None
+    assert plan.queries
+
+
+def test_plan_searches_still_echoes_a_real_audience(monkeypatch):
+    monkeypatch.setattr(
+        solar_module, "call_json",
+        lambda *a, **k: {"intent": "i", "queries": [{"query": "q", "angle": "a", "purpose": "p", "priority": 1}]},
+    )
+    plan = planner_module.plan_searches("질문", audience="executive")
+
+    assert plan.audience == "executive"
+
+
+def test_fallback_plan_clamps_audience_too():
+    """The empty-question fallback builds a SearchPlan of its own."""
+    assert planner_module._fallback_plan("", audience="_default").audience is None
+    assert planner_module._fallback_plan("질문", audience="_default").audience is None
+    assert planner_module._fallback_plan("질문", audience="external").audience == "external"
+
+
+# --- search budget observability -------------------------------------------
+def test_search_budget_terms_explain_the_derived_number():
+    """config.max_web_search_calls is a ceiling, not the run's budget.
+
+    "IPTV 가입자 수 현황은?" names no comparison/trend/strategy token, so it
+    derives 4 + 2 = 6 against a ceiling of 12. Recording only
+    `search_calls_used` made stopping at 6 read as a premature abort.
+    """
+    plan = SearchPlan(
+        intent="i",
+        queries=[SearchPlanQuery(query="q", angle="a", purpose="p", priority=1)],
+        evidence_needs=[
+            EvidenceNeed(evidence_need_id="direct-1", text="t1", requirement_type="direct"),
+            EvidenceNeed(evidence_need_id="direct-2", text="t2", requirement_type="direct"),
+        ],
+    )
+    terms = router_module._search_budget_terms("IPTV 가입자 수 현황은?", plan, 12)
+
+    assert terms == {
+        "base": 4,
+        "evidence_needs_bonus": 2,
+        "comparison_temporal_bonus": 0,
+        "strategy_bonus": 0,
+        "ceiling": 12,
+    }
+    assert router_module._search_budget("IPTV 가입자 수 현황은?", plan, 12) == 6
+
+
+def test_search_budget_terms_stay_consistent_with_the_budget():
+    """The basis is the same arithmetic, not a second implementation."""
+    plan = SearchPlan(
+        intent="i",
+        queries=[SearchPlanQuery(query="q", angle="a", purpose="p", priority=1)],
+        evidence_needs=[
+            EvidenceNeed(evidence_need_id="d1", text="t", requirement_type="direct"),
+            EvidenceNeed(evidence_need_id="d2", text="t", requirement_type="direct"),
+        ],
+    )
+    for question in ("IPTV 가입자 수 현황은?", "경쟁사 대비 추이는?", "원인과 대응 전략은?"):
+        terms = router_module._search_budget_terms(question, plan, 12)
+        expected = min(12, terms["base"] + terms["evidence_needs_bonus"]
+                       + terms["comparison_temporal_bonus"] + terms["strategy_bonus"])
+        assert router_module._search_budget(question, plan, 12) == expected
+
+
+def test_ceiling_still_caps_a_complex_question():
+    plan = SearchPlan(
+        intent="i",
+        queries=[SearchPlanQuery(query="q", angle="a", purpose="p", priority=1)],
+        evidence_needs=[
+            EvidenceNeed(evidence_need_id="d1", text="t", requirement_type="direct"),
+            EvidenceNeed(evidence_need_id="d2", text="t", requirement_type="direct"),
+        ],
+    )
+    question = "경쟁사 대비 추이와 대응 전략은?"
+
+    assert router_module._search_budget(question, plan, 12) == 10
+    assert router_module._search_budget(question, plan, 6) == 6
+
+
+def test_result_carries_the_budget_it_actually_had(monkeypatch):
+    plan = _plan(("q1", 1))
+    monkeypatch.setattr(planner_module, "plan_searches", lambda question, **_: plan)
+    monkeypatch.setattr(web_search_module, "execute_web_search", lambda query, **k: [])
+    monkeypatch.setattr(
+        coverage_module, "check_coverage",
+        lambda *a, **k: CoverageDecision(sufficient=True, reason="enough"),
+    )
+
+    result = router_module.research("IPTV 가입자 수 현황은?", SourceRouterConfig())
+
+    assert result.search_budget == 4
+    assert result.search_budget_basis["ceiling"] == SourceRouterConfig().max_web_search_calls
+    assert result.search_budget_basis["base"] == 4
+
+
+# --- planner prompt: institution anchors must not replace DIRECT ------------
+def test_planner_prompt_blocks_anchoring_a_plain_status_question():
+    prompt = prompts_module.load("planner")
+
+    assert "단순 현재 상태" in prompt or "plain current-state" in prompt
+    assert "IPTV 가입자 수 현황은?" in prompt
+
+
+def test_planner_prompt_requires_one_unanchored_question_first_query():
+    prompt = prompts_module.load("planner")
+
+    assert "Keep one unanchored question-first query" in prompt
+    assert "priority: 1" in prompt
+
+
+def test_planner_prompt_still_teaches_the_benchmark_pattern():
+    """The anchor guidance is narrowed, never removed - a multi-candidate
+    recommendation question still needs it."""
+    prompt = prompts_module.load("planner")
+
+    for provider in ("KISDI", "코바코", "닐슨미디어코리아", "한국기업평판연구소"):
+        assert provider in prompt
+    assert "Quantitative benchmark / ranking-index queries" in prompt

@@ -1767,3 +1767,45 @@ def test_broadband_analyzer_missing_key_raises_stage_error(monkeypatch):
 
     with pytest.raises(PipelineStageError):
         analyze([_document()], "질문")
+
+
+def test_analysis_schema_bounds_every_unbounded_array():
+    """The three analysis arrays must stay bounded.
+
+    Unbounded arrays against a fixed max_tokens is what produced the
+    truncated-JSON document losses: analysis output runs ~8x the source
+    chars, so a full 12,000-char chunk would need ~40,000 output tokens.
+    """
+    schema = analyzer_module._ANALYSIS_SCHEMA["properties"]
+    assert schema["grounded_claims"]["maxItems"] == analyzer_module._MAX_CLAIMS_PER_CALL
+    assert schema["metric_points"]["maxItems"] == analyzer_module._MAX_METRIC_POINTS_PER_CALL
+    assert (
+        schema["comparison_points"]["maxItems"]
+        == analyzer_module._MAX_COMPARISON_POINTS_PER_CALL
+    )
+
+
+def test_analysis_caps_clear_the_hungriest_block_contract():
+    """Caps are per call; synthesis pools across documents.
+
+    The hungriest single block contract (ranking_list /
+    composition_breakdown) wants 4 items, and the largest simultaneous
+    demand from every selected block in one stored dashboard was 38. The
+    guaranteed floor is cap x min_analyzed_documents.
+    """
+    minimum_documents = 3
+    assert analyzer_module._MAX_CLAIMS_PER_CALL * minimum_documents >= 38
+    assert analyzer_module._MAX_METRIC_POINTS_PER_CALL * minimum_documents >= 38
+    assert analyzer_module._MAX_COMPARISON_POINTS_PER_CALL >= 4
+
+
+def test_analysis_schema_states_the_priority_order_for_truncated_output():
+    """A cap that silently keeps whatever came first would drop the answer.
+
+    The question's own requirement axes have to survive the cap, so the
+    schema says so rather than leaving the order to chance.
+    """
+    schema = analyzer_module._ANALYSIS_SCHEMA["properties"]
+    assert "answer_requirements" in schema["grounded_claims"]["description"]
+    assert "요구 축" in schema["metric_points"]["description"]
+    assert "criterion" in schema["comparison_points"]["description"]

@@ -259,12 +259,27 @@ def canonical_time_id(period: str | None) -> str:
     if not year_match:
         return re.sub(r"\s+", " ", raw)
     year = year_match.group(1) or f"20{year_match.group(2)}"
-    quarter = re.search(r"(?:Q\s*([1-4])|([1-4])\s*(?:Q|분기))", raw, re.I)
+    # `(?<!\d)` on the trailing form: without it "2024 Q3" matched the "4 Q"
+    # sitting inside the year and was read as Q4. The leading form (`Q3`) is
+    # tried first, so only a genuinely standalone "3분기"/"3Q" reaches it.
+    quarter = re.search(r"(?:Q\s*([1-4])|(?<!\d)([1-4])\s*(?:Q|분기))", raw, re.I)
     if quarter:
         return f"{year}년 {quarter.group(1) or quarter.group(2)}분기"
     month = re.search(r"(\d{1,2})\s*월", raw)
     if month:
         return f"{year}년 {int(month.group(1))}월"
+    # Half-years, the same way quarters and months are handled above. Without
+    # this branch "2024년 하반기" fell through to "2024년", so the two halves
+    # of one year became one time id - and `share_groups`, which keys on this,
+    # merged two complete compositions into a single group summing to 200%.
+    # `metric_identity.canonical_period` normalizes the same notion for metric
+    # identity; this is its display/sort counterpart, not a second parser.
+    half = re.search(r"(상반기|하반기)|H\s*([12])|([12])\s*H", raw, re.I)
+    if half:
+        name = half.group(1)
+        if not name:
+            name = "상반기" if (half.group(2) or half.group(3)) == "1" else "하반기"
+        return f"{year}년 {name}"
     return f"{year}년"
 
 
@@ -573,6 +588,8 @@ def _period_basis(period: str | None) -> str:
         return "month"
     if re.search(r"[1-4]\s*분기", text):
         return "quarter"
+    if re.search(r"(?:상반기|하반기)", text):
+        return "half"
     if re.search(r"20\d{2}", text):
         return "year"
     return "category"
@@ -1129,9 +1146,18 @@ def dedupe_structured_across_sections(section_items: list[list[Any]]) -> list[li
                 "evidence_claim_id",
                 "evidence_synthesis_claim_id",
                 "evidence_quote",
+                # Merged provenance, filled in later by metric normalization.
+                # It lists which documents stated a fact, which is routing
+                # again, not the fact - and being a list it is unhashable, so
+                # leaving it in the key raised TypeError.
+                "supporting_doc_ids",
+                "supporting_source_urls",
             ):
                 data.pop(field, None)
-            key = tuple(sorted(data.items()))
+            key = tuple(
+                (name, tuple(value) if isinstance(value, list) else value)
+                for name, value in sorted(data.items())
+            )
             if key in seen:
                 continue
             seen.add(key)

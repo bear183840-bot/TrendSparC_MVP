@@ -16,6 +16,7 @@ from sources.collectors.source_router import _prompts, _solar
 from sources.collectors.source_router.contracts import SearchPlan, SearchPlanQuery
 
 _PURPOSE_IDS = {"current_status", "issue_response", "future_business", "root_cause"}
+_AUDIENCE_IDS = {"practitioner", "executive", "management", "external"}
 # Web search treats multiple quoted exact-phrase terms in one query as
 # roughly an AND (same mechanism CLAUDE.md documents for Firecrawl, live-
 # verified here for the GPT-5-mini-based web_search this router uses too) -
@@ -39,16 +40,39 @@ def _clamp_purpose_id(value: object) -> Literal[
     return text if text in _PURPOSE_IDS else None  # type: ignore[return-value]
 
 
+def _clamp_audience(value: object) -> Literal[
+    "practitioner", "executive", "management", "external"
+] | None:
+    """Only the 4 selectable personas reach SearchPlan.audience.
+
+    The pipeline's own fallback is `_default` (DEFAULT_AUDIENCE_ID) - the
+    underscore-prefixed profile it uses when the caller named no audience,
+    deliberately kept out of the selectable set. It is a real runtime value,
+    not a bad input, so it has to become None here rather than blow up:
+    "no persona was chosen" is exactly what this Optional field means, and
+    STEP 2.6's audience adjustment has nothing to adjust toward. Without
+    this clamp every run that did not pass --audience died with a
+    ValidationError before the first search call.
+    """
+    text = str(value or "").strip()
+    return text if text in _AUDIENCE_IDS else None  # type: ignore[return-value]
+
+
 def _fallback_plan(
     question: str, *, audience: str | None = None, purpose_id: str | None = None
 ) -> SearchPlan:
     query = question.strip()
     if not query:
-        return SearchPlan(intent=question, queries=[], audience=audience, purpose_id=_clamp_purpose_id(purpose_id))
+        return SearchPlan(
+            intent=question,
+            queries=[],
+            audience=_clamp_audience(audience),
+            purpose_id=_clamp_purpose_id(purpose_id),
+        )
     return SearchPlan(
         intent=question,
         queries=[SearchPlanQuery(query=query, angle="direct", purpose="fallback", priority=1)],
-        audience=audience,
+        audience=_clamp_audience(audience),
         purpose_id=_clamp_purpose_id(purpose_id),
     )
 
@@ -86,9 +110,11 @@ def plan_searches(
     candidate angles STEP 2 already generates, not to replace them.
 
     `audience` is never inferred - only echoed back onto the returned
-    SearchPlan exactly as given (or None if the caller doesn't know it yet).
+    SearchPlan, clamped to the 4 selectable personas (the pipeline's own
+    `_default` fallback means "nobody picked one", which is None here).
     `purpose_id`, if not given, is classified by the same Solar call via
     `resolved_purpose_id` (defensively clamped to the 4 known values)."""
+    audience = _clamp_audience(audience)
     data = _solar.call_json(
         _prompts.load("planner"),
         {

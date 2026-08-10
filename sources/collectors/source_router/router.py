@@ -270,15 +270,37 @@ def _inspect_source(
     return _inspect_html(question, source, config)
 
 
+def _search_budget_terms(
+    question: str, search_plan: SearchPlan, ceiling: int
+) -> dict[str, int]:
+    """Each term of the budget, so the trace can show the derivation.
+
+    Arithmetic unchanged - this is the same computation _search_budget has
+    always done, named term by term so a run can report why it had the
+    budget it had. `ceiling` (config.max_web_search_calls) is only the cap;
+    reading it as the budget is what made an exactly-met budget look like a
+    premature stop.
+    """
+    return {
+        "base": 4,
+        "evidence_needs_bonus": 2 if len(search_plan.evidence_needs) >= 2 else 0,
+        "comparison_temporal_bonus": 2 if any(
+            token in question.casefold() for token in ("비교", "추이", "변화", "vs", "대비")
+        ) else 0,
+        "strategy_bonus": 2 if any(
+            token in question for token in ("대응", "전략", "원인", "영향", "추천")
+        ) else 0,
+        "ceiling": ceiling,
+    }
+
+
 def _search_budget(question: str, search_plan: SearchPlan, ceiling: int) -> int:
     """Question/requirement-aware call budget; query count is not success."""
-    budget = 4
-    if len(search_plan.evidence_needs) >= 2:
-        budget += 2
-    if any(token in question.casefold() for token in ("비교", "추이", "변화", "vs", "대비")):
-        budget += 2
-    if any(token in question for token in ("대응", "전략", "원인", "영향", "추천")):
-        budget += 2
+    terms = _search_budget_terms(question, search_plan, ceiling)
+    budget = terms["base"] + sum(
+        terms[key] for key in
+        ("evidence_needs_bonus", "comparison_temporal_bonus", "strategy_bonus")
+    )
     return min(ceiling, max(1, budget))
 
 
@@ -377,6 +399,7 @@ def research(
         model_override=config.planner_model,
         timeout_seconds=config.call_timeout_seconds,
     )
+    budget_basis = _search_budget_terms(question, search_plan, config.max_web_search_calls)
     total_search_budget = _search_budget(question, search_plan, config.max_web_search_calls)
 
     search_call_count = 0
@@ -415,6 +438,8 @@ def research(
             final_coverage=final_coverage,
             stop_reason=stop_reason,
             search_calls_used=search_call_count,
+            search_budget=total_search_budget,
+            search_budget_basis=budget_basis,
         )
 
     # Tracks whether `results` changed since the most recent check_coverage()

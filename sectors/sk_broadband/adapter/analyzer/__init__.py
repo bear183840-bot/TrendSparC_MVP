@@ -24,6 +24,7 @@ from common.content_quality_validator import (
 )
 from common.contracts import DocumentAnalysis, SourceDocument
 from common.errors import PipelineStageError
+from common.metric_identity import normalize_comparison_points
 from common.metric_quality import clean_dimension
 from sources.openai_retry import call_with_retry, call_with_truncation_retry
 
@@ -47,6 +48,30 @@ _DENSE_FIGURE_COUNT = 40
 _DEFAULT_REPAIR_MAX_TOKENS = 1600
 _DENSE_REPAIR_MAX_TOKENS = 2600
 _DENSE_REPAIR_CLAIM_COUNT = 8
+# Output ceilings, paired with the token ceilings above. Without them the
+# three analysis arrays are unbounded while max_tokens is not, so a
+# table-dense chunk overflows and the whole document is lost to a
+# JSONDecodeError on truncated JSON - live-verified 2026-08-10, twice at
+# the 7,000-token ceiling, which _analysis_max_tokens() had already picked
+# and so had nowhere left to escalate to.
+#
+# Measured on the stored runs, analysis output runs ~8x the source chars
+# (a 1,725-char SKT IR table produced 13,682 chars of JSON), so a full
+# 12,000-char chunk would need ~40,000 output tokens. The fix has to bound
+# the output, not raise the ceiling.
+#
+# Sized against real demand rather than guessed: across all 31 stored runs
+# the largest simultaneous demand from every selected block in one
+# dashboard was 38 items, and the hungriest single block contract wants 4
+# (ranking_list / composition_breakdown). These caps are per analysis call
+# and synthesis pools across documents, so the guaranteed floor is
+# cap x min_analyzed_documents (3) = 42 claims / 48 metrics / 24
+# comparisons - above the worst observed whole-dashboard demand. Replaying
+# the caps over every stored run never cut a pool below what that run's
+# blocks actually consumed.
+_MAX_CLAIMS_PER_CALL = 14
+_MAX_METRIC_POINTS_PER_CALL = 16
+_MAX_COMPARISON_POINTS_PER_CALL = 8
 _MAX_PDF_CHUNKS_ENV_VAR = "TRENDSPARC_SK_BROADBAND_ANALYZER_MAX_PDF_CHUNKS"
 _STAGE = "sectors.sk_broadband.adapter.analyzer"
 
@@ -72,7 +97,14 @@ _ANALYSIS_SCHEMA = {
         },
         "grounded_claims": {
             "type": "array",
-            "description": "질문에 답하는 핵심 주장과 이를 직접 뒷받침하는 원문 인용. 인용은 원문에 그대로 존재해야 함.",
+            "maxItems": _MAX_CLAIMS_PER_CALL,
+            "description": (
+                "질문에 답하는 핵심 주장과 이를 직접 뒷받침하는 원문 인용. 인용은 원문에 그대로 존재해야 함. "
+                f"최대 {_MAX_CLAIMS_PER_CALL}개. 상한에 걸리면 다음 순서로 남길 것: "
+                "(1) answer_requirements의 요구 축을 직접 확인해 주는 주장, "
+                "(2) information_needs를 직접 뒷받침하는 주장, "
+                "(3) 그 외 보조 근거. 문서에 근거가 없으면 개수를 채우려 하지 말 것."
+            ),
             "items": {
                 "type": "object",
                 "properties": {
@@ -123,7 +155,13 @@ _ANALYSIS_SCHEMA = {
         },
         "metric_points": {
             "type": "array",
-            "description": "문서에 명시된 수치+시점 쌍만 추출. 추정하거나 계산하지 말 것. 없으면 빈 배열.",
+            "maxItems": _MAX_METRIC_POINTS_PER_CALL,
+            "description": (
+                "문서에 명시된 수치+시점 쌍만 추출. 추정하거나 계산하지 말 것. 없으면 빈 배열. "
+                f"최대 {_MAX_METRIC_POINTS_PER_CALL}개. 상한에 걸리면 질문의 요구 축(answer_requirements)에 "
+                "직접 답하는 수치를 먼저 남기고, 표의 모든 칸을 기계적으로 옮기지 말 것. "
+                "라벨이 표의 행 조각(예: '159', 'A | 3.0%')처럼 그 자체로 의미를 갖지 못하는 항목은 제외."
+            ),
             "items": {
                 "type": "object",
                 "properties": {
@@ -180,7 +218,12 @@ _ANALYSIS_SCHEMA = {
         },
         "comparison_points": {
             "type": "array",
-            "description": "문서에 명시된 대상 간 비교만 추출. level은 문서가 명시적으로 우열을 말할 때만 채우고 그 외엔 null. 없으면 빈 배열.",
+            "maxItems": _MAX_COMPARISON_POINTS_PER_CALL,
+            "description": (
+                "문서에 명시된 대상 간 비교만 추출. level은 문서가 명시적으로 우열을 말할 때만 채우고 그 외엔 null. "
+                f"없으면 빈 배열. 최대 {_MAX_COMPARISON_POINTS_PER_CALL}개. 상한에 걸리면 질문이 비교를 요구한 "
+                "기준(criterion)부터 남길 것."
+            ),
             "items": {
                 "type": "object",
                 "properties": {
@@ -967,7 +1010,9 @@ def _verified_metric_points(
 
 _GROUNDED_METRIC_RE = re.compile(
     r"(?P<value>\d[\d,]*(?:\.\d+)?)\s*"
-    r"(?P<unit>%p|%|퍼센트포인트|퍼센트|조\s*원|억\s*원|만\s*명|명|건|개|분|시간|배|점|"
+    # `개(?!월)`: "6개월 평균값" is a duration, not "6개" of anything - a live
+    # run turned that footnote into a metric labelled "※".
+    r"(?P<unit>%p|%|퍼센트포인트|퍼센트|조\s*원|억\s*원|만\s*명|명|건|개(?!월)|분|시간|배|점|"
     r"hours?|minutes?|people|persons?|respondents?|users?|services?|items?)",
     re.IGNORECASE,
 )
@@ -995,15 +1040,82 @@ def _nearest_period(text: str, start: int, end: int) -> str:
     return re.sub(r"\s+", "", nearest.group()).strip()
 
 
+# A number's own thousands separators are not clause boundaries. Masking
+# them before the boundary split is what stops `9,008억 원` from being cut
+# into `008억 원`; blacklisting the resulting fragments afterwards only ever
+# catches the shapes someone happened to see.
+_GROUPED_NUMBER_RE = re.compile(r"\d[\d,]*\d")
+_COMMA_SENTINEL = "\x00"
+
+# A label that opens with a particle or a comparison connective is the tail
+# of the previous clause, not this figure's name - "…로 늘어난 것으로 전년
+# 대비" leaves `으로 전년 대비`. Korean attaches these to the end of the
+# preceding phrase, so their presence at the *start* of a fragment is the
+# signal that the clause boundary was missed.
+_DANGLING_LABEL_PREFIX_RE = re.compile(
+    r"^(?:으로|로서|로써|로|에서|에게|에|와|과|보다|대비|및|또는|등|그리고|이며|이고)\b\s*"
+)
+_CLAUSE_TAIL_ONLY_RE = re.compile(r"^(?:전년\s*)?대비$|^증감(?:률|폭)?$|^대비\s*증감(?:률|폭)?$")
+
+
+# Words that are only a clause tail inside a sentence but are a row's or
+# column's actual name inside a table. "증감폭" alone tells a reader nothing
+# in prose - in `| 증감폭 (증감률) | 242,585 (0.67%) | …` it is exactly what
+# the row measures, and rejecting it would delete a real reading.
+_TABLE_STRUCTURAL_LABELS = {"증감", "증감폭", "증감률", "점유율", "가입자 수", "가입자수", "합계", "계"}
+
+
+def _semantically_complete_label(text: str, *, context: str = "sentence") -> bool:
+    """Whether this stands on its own as the name of a measurement.
+
+    A metric whose label or subject is a sentence fragment is not evidence
+    anyone can read - live-verified 2026-08-10 the sentence path emitted
+    `subject="008억 원) 대비"` and `label="으로 전년 대비 증감률"`, both of
+    which reached the dashboard.
+
+    `context` exists because the same string can be a fragment or a name
+    depending on where it was read from: the structural checks below hold
+    everywhere, but a bare "증감폭" is a dangling tail in prose and a row
+    name in a table. Only the table path may pass `context="table"`, and
+    only after the row's own structure has already been established.
+    """
+    candidate = (text or "").strip()
+    if not candidate or not re.search(r"[가-힣A-Za-z]", candidate):
+        return False
+    if _DANGLING_LABEL_PREFIX_RE.match(candidate):
+        return False
+    if _CLAUSE_TAIL_ONLY_RE.match(candidate) and not (
+        context == "table" and candidate in _TABLE_STRUCTURAL_LABELS
+    ):
+        return False
+    # An unmatched closing bracket means the split landed inside a
+    # parenthetical: "008억 원) 대비" kept the tail of "(9,008억 원)".
+    if candidate.count(")") > candidate.count("(") or candidate.count("）") > candidate.count("（"):
+        return False
+    # A fragment that starts mid-number ("006가구 내") is the far end of a
+    # figure the boundary split cut through.
+    if re.match(r"^\d", candidate) and not re.match(r"^\d{4}\s*년", candidate):
+        return False
+    return True
+
+
 def _metric_label_before(text: str, position: int, fallback: str) -> str:
     prefix = text[:position]
-    fragment = _METRIC_LABEL_BOUNDARY_RE.split(prefix)[-1]
+    # Protect the numeric spans, split on real clause boundaries, restore.
+    masked = _GROUPED_NUMBER_RE.sub(
+        lambda m: m.group().replace(",", _COMMA_SENTINEL), prefix
+    )
+    fragment = _METRIC_LABEL_BOUNDARY_RE.split(masked)[-1].replace(_COMMA_SENTINEL, ",")
     fragment = re.sub(r"^[\s*#|:'\"([{]+|[\s*#|:'\"([{]+$", "", fragment).strip()
     fragment = re.sub(r"\b20\d{2}\s*년?\b", "", fragment).strip(" :-()[]")
     fragment = re.sub(r"^\d+(?:\.\d+)?\s*%p?\s*(?:로|보다|에서)?\s*", "", fragment)
     if fragment.endswith("전년"):
         fragment = "전년"
-    if not fragment:
+    # Drop a leading connective the boundary split left attached before
+    # judging completeness, so "으로 전년 대비 증감" can still recover as
+    # "전년 대비 증감" rather than being thrown away wholesale.
+    fragment = _DANGLING_LABEL_PREFIX_RE.sub("", fragment).strip()
+    if not _semantically_complete_label(fragment):
         fragment = fallback
     return fragment[-70:].strip()
 
@@ -1098,7 +1210,388 @@ def _list_metric_contexts(quote: str, matches: list[re.Match]) -> dict[int, tupl
     return contexts
 
 
-def _recovered_metric_points(grounded_claims: list[dict]) -> list[dict]:
+# --- table-shaped evidence -------------------------------------------------
+#
+# A markdown table row is not a sentence, and reading it as one is what
+# produced the worst dashboard defect this pipeline has had. Live-verified
+# 2026-08-10 on 방송미디어통신위원회's 유료방송 가입자 보도자료:
+#
+#   |  | IPTV (증감률) | 20,565,609 (1.79%) | ... | 21,414,521 (0.49%) |
+#
+# The sentence path only matches a figure that carries its own unit, so the
+# six subscriber counts - the actual answer to "IPTV 가입자 수 현황은?" -
+# matched nothing (their unit lives in the table's `(단위: …)` caption), while
+# each `(1.79%)` did. `_metric_label_before` then read backwards to the
+# nearest comma boundary and produced `609` as the label, because
+# _METRIC_LABEL_BOUNDARY_RE splits on commas and `20,565,609` is comma
+# grouped. Every such row yielded `609 증감률`, `402 증감률`, … and no period
+# at all, which in turn starved `chart`/`bar`/`timeline` of their "3개 이상
+# 시점" contract and left the dashboard on a narrative fallback.
+#
+# These helpers give that path the structure it was missing - column index,
+# header rows and caption - rather than growing a regex blacklist. They are
+# deliberately narrow: only rows that really are pipe-delimited, only
+# headers that sit above the row in the same passage, and never a unit or a
+# period that the source did not state.
+_TABLE_ROW_RE = re.compile(r"^\s*\|.*\|\s*$")
+_TIME_TOKEN_RE = re.compile(
+    r"(?:20\d{2}\s*년|['’]\d{2}\s*년|상반기|하반기|분기|[1-4]\s*Q|Q\s*[1-4]|\d{1,2}\s*월)"
+)
+_CAPTION_UNIT_RE = re.compile(r"[(（]\s*단위\s*[:：]\s*([^)）]+)[)）]")
+_TABLE_FILLER_CELLS = {"", "-", "—", "구 분", "구분", "비고", "증감"}
+_TABLE_CELL_NUMBER_RE = re.compile(
+    r"(?P<value>-?\d[\d,]*(?:\.\d+)?)\s*"
+    r"(?P<unit>%p|%|퍼센트포인트|퍼센트|억\s*원|조\s*원|만\s*명|원|명|건|개|배|점)?"
+)
+
+
+# A table row does not always survive as pipe-delimited text. The PDF
+# pipeline also serialises one as `표 원문 행: 구 분=IPTV (증감률); 2022년=
+# 20,565,609 (1.79%); …` - each cell paired with the column header it sat
+# under. Live-verified 2026-08-10: because it has no leading `|` it fell to
+# the sentence parser, which read the whole run of data cells as one label
+# (`1,149,096 (0.69%); 2024년=21,310,251 …`). It is the same table row and
+# carries its headers inline, so it belongs on the table path.
+_SERIALIZED_ROW_PREFIX_RE = re.compile(r"^\s*표\s*원문\s*행\s*[:：]\s*")
+_SERIALIZED_PAIR_RE = re.compile(r"^\s*(?P<header>[^=;]+?)\s*=\s*(?P<value>.*?)\s*$")
+
+
+def _parse_serialized_table_row(quote: str) -> tuple[list[str], list[str]] | None:
+    """Split `header=value; header=value` into aligned header and cell lists."""
+    if not _SERIALIZED_ROW_PREFIX_RE.match(quote):
+        return None
+    body = _SERIALIZED_ROW_PREFIX_RE.sub("", quote).strip().rstrip(".")
+    headers: list[str] = []
+    cells: list[str] = []
+    for part in body.split(";"):
+        match = _SERIALIZED_PAIR_RE.match(part)
+        if match is None:
+            return None
+        headers.append(match.group("header").strip())
+        cells.append(match.group("value").strip())
+    if len(cells) < 2:
+        return None
+    return headers, cells
+
+
+def _split_table_cells(row: str) -> list[str]:
+    inner = row.strip()
+    if inner.startswith("|"):
+        inner = inner[1:]
+    if inner.endswith("|"):
+        inner = inner[:-1]
+    return [cell.strip() for cell in inner.split("|")]
+
+
+def _is_table_separator(cells: list[str]) -> bool:
+    return bool(cells) and all(cell and set(cell) <= set("-: ") for cell in cells)
+
+
+def _looks_like_data_row(cells: list[str]) -> bool:
+    """A row carrying a bare figure is data, not another header line."""
+    return any(
+        re.search(r"\d", cell) and not _TIME_TOKEN_RE.search(cell) for cell in cells
+    )
+
+
+# A percentage is a share only when the source says what it is a share OF.
+# These name the column as a composition; a growth/usage/conversion rate is
+# a percentage of something else entirely and must never acquire a
+# denominator here.
+_SHARE_CRITERION_RE = re.compile(r"(?:점유율|비중|구성비|구성비율|share)")
+_RATE_CRITERION_RE = re.compile(
+    r"(?:증감|성장|변화|증가율|감소율|이용률|가입률|전환율|달성률|CAGR|전년|YoY)"
+)
+# An explicit total row is the structural proof that the rows partition one
+# whole. Without it the table may simply list a few named entities and say
+# nothing about what they add up to.
+_TOTAL_ROW_RE = re.compile(r"^(?:합\s*계|총\s*계|전\s*체|계)$")
+_TABLE_TITLE_RE = re.compile(r"[<〈《]\s*(?P<title>[^>〉》]+?)\s*[>〉》]")
+
+
+def _table_denominator(lines: list[str], start: int, index: int) -> str | None:
+    """The whole this table's percentage columns divide, or None.
+
+    Only two structural facts are accepted as proof, in this order: the
+    table carries its own total row (합계/총계/전체/계), and the table has a
+    title naming what is being counted. Both must be present - a title alone
+    describes a topic, and a total alone has no name a reader could show.
+    Everything else, including "these add up to about 100", is left as None:
+    a sum is a corroboration, never the evidence that a denominator exists.
+    """
+    has_total = False
+    for line in lines[start:]:
+        if not _TABLE_ROW_RE.match(line):
+            break
+        cells = _split_table_cells(line)
+        named = _table_row_label(cells)
+        if named and _TOTAL_ROW_RE.match(re.sub(r"\s+", " ", named[0]).strip()):
+            has_total = True
+            break
+    if not has_total:
+        return None
+    for i in range(start - 1, max(-1, start - 8), -1):
+        title = _TABLE_TITLE_RE.search(lines[i])
+        if title:
+            return title.group("title").strip()
+    return None
+
+
+def _table_context(
+    passage_text: str, row: str
+) -> tuple[list[list[str]], str | None, str | None] | None:
+    """Header rows above `row` in its own table, plus the table's unit caption.
+
+    Returns None when the row cannot be located, so a quote that was
+    reflowed or came from somewhere else simply falls back to the sentence
+    path instead of being parsed against the wrong table.
+    """
+    # Compared with whitespace collapsed: a stored quote has been through
+    # normalisation, so "|  | IPTV" no longer matches the passage's "| |
+    # IPTV" character for character, and an exact match silently lost the
+    # header rows - which is the whole reason to look the row up.
+    def _key(text: str) -> str:
+        return re.sub(r"\s+", " ", text).strip()
+
+    target = _key(row)
+    lines = passage_text.splitlines()
+    index = next((i for i, line in enumerate(lines) if _key(line) == target), None)
+    if index is None:
+        return None
+    start = index
+    while start - 1 >= 0 and _TABLE_ROW_RE.match(lines[start - 1]):
+        start -= 1
+    headers: list[list[str]] = []
+    for i in range(start, index):
+        cells = _split_table_cells(lines[i])
+        if _is_table_separator(cells):
+            continue
+        if _looks_like_data_row(cells):
+            break
+        headers.append(cells)
+    caption_unit: str | None = None
+    for i in range(start - 1, max(-1, start - 8), -1):
+        match = _CAPTION_UNIT_RE.search(lines[i])
+        if match:
+            caption_unit = match.group(1).strip()
+            break
+    return headers, caption_unit, _table_denominator(lines, start, index)
+
+
+def _column_headers(headers: list[list[str]], columns: int) -> tuple[list[str], list[str]]:
+    """Split each column's stacked header cells into period and criterion.
+
+    A source table states the period on one header line and what is being
+    measured on another (`'25년 상반기` above `점유율(B)`), and repeats a
+    merged cell across the columns it spans. Splitting by whether a cell
+    reads as a time expression keeps both without guessing either.
+    """
+    periods: list[str] = []
+    criteria: list[str] = []
+    for column in range(columns):
+        parts: list[str] = []
+        for header in headers:
+            if column >= len(header):
+                continue
+            cell = header[column].strip()
+            if cell in _TABLE_FILLER_CELLS or cell in parts:
+                continue
+            parts.append(cell)
+        periods.append(" ".join(p for p in parts if _TIME_TOKEN_RE.search(p)).strip())
+        criteria.append(" ".join(p for p in parts if not _TIME_TOKEN_RE.search(p)).strip())
+    return periods, criteria
+
+
+def _table_row_label(cells: list[str]) -> tuple[str, int, bool] | None:
+    """The row's own name, its column, and whether the row states a delta."""
+    for column, cell in enumerate(cells):
+        stripped = cell.strip()
+        if stripped in _TABLE_FILLER_CELLS or not stripped:
+            continue
+        if re.fullmatch(r"[\d,.\s%p()-]+", stripped):
+            continue
+        has_delta = "증감" in stripped
+        label = re.sub(r"[(（][^)）]*[)）]", "", stripped).strip()
+        if not label or re.fullmatch(r"[\d,.\s]+", label):
+            return None
+        return label, column, has_delta
+    return None
+
+
+def _promotable_table_metric(label: str, subject: str | None) -> bool:
+    """Reject the row/column fragments that are not facts on their own."""
+    text = (label or "").strip()
+    if not text or text in _TABLE_FILLER_CELLS:
+        return False
+    if re.fullmatch(r"[\d,.\s%p]+", text):
+        return False
+    if not re.search(r"[가-힣A-Za-z]", text):
+        return False
+    if subject is not None and re.fullmatch(r"[\d,.\s]+", subject.strip()):
+        return False
+    # Same completeness rules as the sentence path, read in table context so
+    # a row genuinely named "증감폭" survives while a run of data cells that
+    # landed in a header slot does not.
+    if not _semantically_complete_label(text, context="table"):
+        return False
+    if subject and not _semantically_complete_label(subject, context="table"):
+        return False
+    return True
+
+
+def _table_row_points(
+    claim: dict, passage_text: str
+) -> tuple[list[dict], list[dict]] | None:
+    """Structure one table row into metric points and comparison candidates."""
+    quote = claim.get("evidence_quote") or ""
+    serialized = _parse_serialized_table_row(quote)
+    if serialized is None and not _TABLE_ROW_RE.match(quote):
+        return None
+    if serialized is not None:
+        # This shape carries its own column headers, so it needs no lookup
+        # in the passage; the unit still comes from the caption if there is
+        # one, exactly as for a pipe-delimited row.
+        serialized_headers, cells = serialized
+        headers = [serialized_headers]
+        caption_unit = None
+        # A serialized row carries no table body, so nothing here can prove
+        # what a percentage column would be a share of.
+        denominator = None
+        if passage_text:
+            caption = _CAPTION_UNIT_RE.search(passage_text)
+            caption_unit = caption.group(1).strip() if caption else None
+    else:
+        # Losing the passage costs the period and the caption unit, never the
+        # row's own structure - a table row must not fall back to the sentence
+        # parser, which is exactly where `609 증감률` came from.
+        context = _table_context(passage_text, quote) if passage_text else None
+        headers, caption_unit, denominator = (
+            context if context is not None else ([], None, None)
+        )
+        cells = _split_table_cells(quote)
+    named = _table_row_label(cells)
+    if named is None:
+        return None
+    entity, label_column, row_states_delta = named
+    periods, criteria = _column_headers(headers, len(cells))
+    metrics: list[dict] = []
+    comparisons: list[dict] = []
+    for column, cell in enumerate(cells):
+        if column == label_column or cell.strip() in _TABLE_FILLER_CELLS:
+            continue
+        matches = [m for m in _TABLE_CELL_NUMBER_RE.finditer(cell) if m.group("value")]
+        if not matches:
+            continue
+        period = periods[column] if column < len(periods) else ""
+        criterion = criteria[column] if column < len(criteria) else ""
+        for order, match in enumerate(matches):
+            raw_unit = match.group("unit")
+            # A parenthesised percentage beside a bare count is the row's
+            # own stated change, and only when the row says so.
+            is_delta = order > 0 and bool(raw_unit) and "%" in raw_unit
+            if order > 0 and not (is_delta and row_states_delta):
+                continue
+            unit = _canonical_recovered_unit(raw_unit) if raw_unit else caption_unit
+            label = f"{entity} {criterion}".strip() if criterion else entity
+            if is_delta:
+                label = f"{label} 증감률"
+            if not _promotable_table_metric(label, entity):
+                continue
+            value = float(match.group("value").replace(",", ""))
+            if value.is_integer():
+                value = int(value)
+            metrics.append({
+                "label": label,
+                "subject": entity,
+                "period": period or "시점 미상",
+                "value": value,
+                "unit": unit,
+                "is_forecast": False,
+                "value_type": "actual",
+                "is_relative": is_delta,
+                "comparison_period": None,
+                "value_origin": "source",
+                # A share, only when three structural facts agree: the table
+                # proved a whole exists (`denominator`), this column names
+                # itself a composition, and the reading is not a rate. A
+                # growth column sits in the same table as a share column, so
+                # the table alone is not enough - and `is_delta` covers the
+                # parenthesised change written beside a count.
+                "share_of": (
+                    denominator
+                    if (
+                        denominator
+                        and unit == "%"
+                        and not is_delta
+                        and _SHARE_CRITERION_RE.search(criterion)
+                        and not _RATE_CRITERION_RE.search(criterion)
+                    )
+                    else None
+                ),
+                "evidence_claim_id": claim.get("claim_id"),
+            })
+            if criterion and period and not is_delta:
+                comparisons.append({
+                    "entity": entity,
+                    "criterion": f"{criterion} {period}".strip(),
+                    "value": f"{match.group('value')}{unit or ''}".strip(),
+                    "level": None,
+                    "evidence_claim_id": claim.get("claim_id"),
+                    "_unit": unit,
+                })
+    return metrics, comparisons
+
+
+def _passage_lookup(evidence_passages: list[dict] | None) -> dict[str, str]:
+    return {
+        str(passage.get("passage_id")): passage.get("text") or ""
+        for passage in evidence_passages or []
+    }
+
+
+def _dedupe_metric_points(points: list[dict]) -> list[dict]:
+    """Collapse identical readings, keep genuinely different ones.
+
+    Identity is (label, subject, period, unit, value): a table repeated in
+    two chunks of the same PDF restates the same reading, but two periods of
+    the same series are different facts and both must survive.
+    """
+    seen: set[tuple] = set()
+    unique: list[dict] = []
+    for point in points:
+        key = (
+            point.get("label"), point.get("subject"), point.get("period"),
+            point.get("unit"), point.get("value"),
+        )
+        if key in seen:
+            continue
+        seen.add(key)
+        unique.append(point)
+    return unique
+
+
+def _recovered_table_comparison_points(comparisons: list[dict]) -> list[dict]:
+    """Only a criterion two named rows actually share becomes a comparison.
+
+    Requires the same criterion, the same period (both are already baked
+    into `criterion` by _table_row_points), a compatible unit and at least
+    two distinct entities - so a single-row table never invents a rivalry.
+    """
+    grouped: dict[tuple[str, str | None], list[dict]] = {}
+    for item in comparisons:
+        grouped.setdefault((item["criterion"], item.get("_unit")), []).append(item)
+    kept: list[dict] = []
+    for group in grouped.values():
+        if len({item["entity"] for item in group}) < 2:
+            continue
+        for item in group:
+            kept.append({key: value for key, value in item.items() if key != "_unit"})
+    return kept
+
+
+def _recovered_metric_points(
+    grounded_claims: list[dict], evidence_passages: list[dict] | None = None
+) -> list[dict]:
     """Deterministically structure figures from already-verified quotes.
 
     Solar can return sound `claim_type=metric` claims while leaving the
@@ -1107,10 +1600,18 @@ def _recovered_metric_points(grounded_claims: list[dict]) -> list[dict]:
     fact. It only restores the structured handoff needed by dashboard blocks.
     """
     recovered: list[dict] = []
+    passages = _passage_lookup(evidence_passages)
     for claim in grounded_claims:
         if claim.get("claim_type") not in {"metric", "comparison"}:
             continue
         quote = claim.get("evidence_quote") or ""
+        # A pipe-delimited row is read against its own table's headers; the
+        # sentence parser below would read its commas as label boundaries.
+        passage_text = passages.get(str(claim.get("evidence_passage_id")), "")
+        table = _table_row_points(claim, passage_text)
+        if table is not None:
+            recovered.extend(table[0])
+            continue
         matches = list(_GROUNDED_METRIC_RE.finditer(quote))
         list_contexts = _list_metric_contexts(quote, matches)
         base_label = (
@@ -1142,7 +1643,14 @@ def _recovered_metric_points(grounded_claims: list[dict]) -> list[dict]:
             if value.is_integer():
                 value = int(value)
             local_label = _metric_label_before(quote, metric_start, "")
-            if local_label.casefold() in _WEAK_METRIC_LABELS or len(local_label) < 2:
+            if (
+                local_label.casefold() in _WEAK_METRIC_LABELS
+                or len(local_label) < 2
+                or not _semantically_complete_label(local_label)
+            ):
+                # Cleared rather than kept: a fragment makes a worse subject
+                # than no subject at all, and `subject` is what composition
+                # and comparison grouping key on.
                 local_label = ""
             canonical_unit = (
                 "분"
@@ -1151,6 +1659,12 @@ def _recovered_metric_points(grounded_claims: list[dict]) -> list[dict]:
             )
             if index in list_contexts and canonical_unit != "%p":
                 label, subject = list_contexts[index]
+                # The list-context path builds its own item name, so it needs
+                # the same completeness gate as `local_label` above.
+                if not _semantically_complete_label(subject or ""):
+                    subject = None
+                if not _semantically_complete_label(label or ""):
+                    label = base_label
                 last_label = label
             elif canonical_unit == "%p":
                 label = f"{last_label or base_label} 증감폭"
@@ -1183,7 +1697,31 @@ def _recovered_metric_points(grounded_claims: list[dict]) -> list[dict]:
                 "evidence_claim_id": claim["claim_id"],
                 "evidence_quote": quote,
             })
-    return recovered
+    return _dedupe_metric_points(recovered)
+
+
+def _recovered_comparison_points(
+    grounded_claims: list[dict], evidence_passages: list[dict] | None = None
+) -> list[dict]:
+    """Comparisons a table states outright, for when the model emits none.
+
+    Live-verified 2026-08-10: Solar returned `comparison_points: []` for
+    every document of a 보도자료 whose tables compare IPTV/SO/위성 and
+    KT/SKB/LGU+ on one shared 점유율 column, so every comparison-shaped
+    block fell back to prose. Unlike metric recovery this had no
+    deterministic counterpart at all - `_verified_comparison_points` only
+    validates what the model already produced.
+    """
+    passages = _passage_lookup(evidence_passages)
+    candidates: list[dict] = []
+    for claim in grounded_claims:
+        passage_text = passages.get(str(claim.get("evidence_passage_id")), "")
+        if not passage_text:
+            continue
+        table = _table_row_points(claim, passage_text)
+        if table is not None:
+            candidates.extend(table[1])
+    return _recovered_table_comparison_points(candidates)
 
 
 def _merge_metric_points(verified: list[dict], recovered: list[dict]) -> list[dict]:
@@ -1623,10 +2161,20 @@ def _analyze_document(
                 _verified_metric_points(
                     data, analyzed_content, grounded_claims, evidence_passages
                 ),
-                _recovered_metric_points(grounded_claims),
+                _recovered_metric_points(grounded_claims, evidence_passages),
             )
         )
         comparison_points = _verified_comparison_points(data, grounded_claims)
+        # Additive, not either/or. As a fallback this ran only when the
+        # model produced nothing, so live-verified 2026-08-10 a single model
+        # comparison (ARPU) suppressed the three-operator 점유율 comparison
+        # sitting in the same document's table, and every comparison-shaped
+        # block fell back to prose. The model's own reading is never
+        # overwritten - it is listed first and identical rows merge.
+        comparison_points = normalize_comparison_points([
+            *comparison_points,
+            *_recovered_comparison_points(grounded_claims, evidence_passages),
+        ])
         emit_ai_usage(
             stage=_STAGE,
             model=_model(),

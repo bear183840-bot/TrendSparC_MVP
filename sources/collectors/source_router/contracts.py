@@ -402,3 +402,14 @@ class SourceRouterResult(BaseModel):
     # 2026-08-09 so this is visible on the result itself instead of only
     # derivable by counting web_search.py's stderr log lines by hand.
     search_calls_used: int = 0
+    # The budget this run actually had, which is NOT
+    # config.max_web_search_calls - that is only a ceiling. router's
+    # _search_budget() derives a smaller per-question number from the
+    # question's own complexity, so a plain status question runs on 6 while
+    # the config reads 12. Recording only `search_calls_used` made
+    # "search_call_budget_exhausted at 6 of 12" look like a premature abort;
+    # it was the budget being met exactly. `search_budget_basis` names each
+    # term so the derivation can be read off the trace instead of re-derived
+    # from the source.
+    search_budget: Optional[int] = None
+    search_budget_basis: dict[str, int] = Field(default_factory=dict)
