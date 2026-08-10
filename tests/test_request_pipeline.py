@@ -409,6 +409,116 @@ def test_pipeline_recollects_when_analyzer_leaves_fewer_than_profile_minimum(mon
     )
 
 
+def test_analysis_recollection_carries_missing_needs_into_retry_evidence_requirements(monkeypatch):
+    """2026-08-10 regression: missing_needs/structural_gaps used to be computed
+    correctly but only embedded in the human-readable validation_feedback
+    string, which nothing in source_router reads (the old ai_search_harness.py
+    prompt did; that path was dropped when Source Router replaced it as the
+    collector). The retry's second collect() call must actually receive them
+    via evidence_requirements - the field source_router's refiner turns into
+    supporting EvidenceNeeds - or the "gap-specific" 2nd round is really just
+    the first round's query again with more excluded_urls."""
+    initial = [
+        SourceDocument(doc_id="d1", source_id="s1", title="자료 1", url="https://one.example/a", content="가" * 300),
+        SourceDocument(doc_id="d_bad", source_id="sx", title="자료 X", url="https://bad.example/a", content="나" * 300),
+    ]
+    replacements = [
+        SourceDocument(doc_id="d2", source_id="s2", title="자료 2", url="https://two.example/a", content="다" * 300),
+        SourceDocument(doc_id="d3", source_id="s3", title="자료 3", url="https://three.example/a", content="라" * 300),
+    ]
+    collector_plans = []
+
+    def fake_collect(source_plan):
+        collector_plans.append(source_plan)
+        return initial if len(collector_plans) == 1 else replacements
+
+    def fake_analyze(documents, question, information_needs=None, evidence_requirements=None):
+        # No analysis ever reports covered_information_needs, so every
+        # information_need the first round asked for is "missing" after it -
+        # exactly the case that should feed the second round's evidence_requirements.
+        return [
+            DocumentAnalysis(doc_id=document.doc_id, relevant_to_question=True, usable_for_synthesis=True)
+            for document in documents
+        ]
+
+    monkeypatch.setattr(sk_broadband_collector, "collect", fake_collect)
+    monkeypatch.setattr(sk_broadband_processor, "process", lambda documents: documents)
+    monkeypatch.setattr(sk_broadband_validator, "validate", lambda documents, search_context=None: documents)
+    monkeypatch.setattr(sk_broadband_analyzer, "analyze", fake_analyze)
+
+    # A trend question forces a deterministic, non-empty structural_gaps
+    # (core/question_coverage.py's minimum_distinct_periods requirement) -
+    # a more reliable trigger for this test than information_needs, whose
+    # rule-based fallback content varies by question and can be empty.
+    result = run_pipeline(
+        _make_request(
+            "SK브로드밴드 IPTV 가입자 수 지난 3년간 추이는?",
+            requested_sector_id="sk_broadband",
+        ),
+        dry_run=False,
+    )
+
+    assert result.halted_at_stage is None
+    assert len(collector_plans) == 2
+    first_evidence_requirements = collector_plans[0].evidence_requirements
+    retry_evidence_requirements = collector_plans[1].evidence_requirements
+    assert any("동일 지표 시계열" in requirement for requirement in retry_evidence_requirements)
+    assert retry_evidence_requirements != first_evidence_requirements
+    # The original static evidence_requirements survive too - this is an
+    # addition, not a replacement.
+    for requirement in first_evidence_requirements:
+        assert requirement in retry_evidence_requirements
+
+
+def test_validator_recollection_does_not_touch_evidence_requirements(monkeypatch):
+    """The validator-stage retry runs before any analyzer call exists, so
+    there is no missing_needs/structural_gaps signal yet to add - only
+    document count is known at that point. Confirms the analyzer-stage fix
+    doesn't leak into the earlier, count-only retry."""
+    first_documents = [
+        SourceDocument(doc_id="d1", source_id="source-1", title="자료 1", url="https://one.example.com/a", content="가" * 300),
+        SourceDocument(doc_id="bad", source_id="source-x", title="제거 자료", url="https://bad.example.com/a", content="나" * 300),
+    ]
+    retry_documents = [
+        SourceDocument(doc_id="d2", source_id="source-2", title="자료 2", url="https://two.example.com/a", content="다" * 300),
+        SourceDocument(doc_id="d3", source_id="source-3", title="자료 3", url="https://three.example.com/a", content="라" * 300),
+    ]
+    collector_plans = []
+
+    def fake_collect(source_plan):
+        collector_plans.append(source_plan)
+        return first_documents if len(collector_plans) == 1 else retry_documents
+
+    validation_calls = []
+
+    def fake_validate(documents, search_context=None):
+        validation_calls.append((list(documents), search_context))
+        return [documents[0]] if len(validation_calls) == 1 else list(documents[:2])
+
+    def fake_analyze(documents, question, information_needs=None, target_block_shapes=None):
+        return [
+            DocumentAnalysis(doc_id=document.doc_id, summary="관련", key_points=["근거"],
+                              sentiment="neutral", relevant_to_question=True)
+            for document in documents
+        ]
+
+    monkeypatch.setattr(sk_broadband_collector, "collect", fake_collect)
+    monkeypatch.setattr(sk_broadband_processor, "process", lambda documents: documents)
+    monkeypatch.setattr(sk_broadband_validator, "validate", fake_validate)
+    monkeypatch.setattr(sk_broadband_analyzer, "analyze", fake_analyze)
+
+    run_pipeline(
+        _make_request("SK브로드밴드의 최신 IPTV 경쟁 현황은?", requested_sector_id="sk_broadband"),
+        dry_run=False,
+    )
+
+    # collector_plans[1] is the validator-stage retry (see
+    # test_pipeline_recollects_when_validation_leaves_fewer_than_profile_minimum
+    # for the full trace) - its evidence_requirements must equal the original
+    # plan's, not have anything appended.
+    assert collector_plans[1].evidence_requirements == collector_plans[0].evidence_requirements
+
+
 def test_failed_analysis_recollection_preserves_initial_usable_analyses(monkeypatch):
     initial = [
         SourceDocument(doc_id=f"d{i}", source_id=f"s{i}", title=f"자료 {i}",

@@ -9,6 +9,7 @@ Does not touch ai_search_harness.py or the rest of the router pipeline.
 Usage:
     python scripts/verify_planner_queries.py
     python scripts/verify_planner_queries.py --question "..."
+    python scripts/verify_planner_queries.py --purpose-id issue_response --audience executive
 """
 
 from __future__ import annotations
@@ -41,6 +42,16 @@ _DEFAULT_QUESTION = "중앙그룹 회생 사태에 따른 IPTV사의 대응 방�
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--question", default=_DEFAULT_QUESTION)
+    parser.add_argument(
+        "--audience", default=None,
+        choices=["practitioner", "executive", "management", "external"],
+        help="Who the resulting report would be shown to (default: unspecified, skips STEP 2.6)",
+    )
+    parser.add_argument(
+        "--purpose-id", default=None, dest="purpose_id",
+        choices=["current_status", "issue_response", "future_business", "root_cause"],
+        help="What kind of report this is (default: let the planner classify it itself)",
+    )
     args = parser.parse_args()
 
     if not os.environ.get(_solar.API_KEY_ENV_VAR, "").strip():
@@ -50,10 +61,12 @@ def main() -> None:
             "Fill it in and re-run."
         )
 
-    plan = planner_module.plan_searches(args.question)
+    plan = planner_module.plan_searches(args.question, audience=args.audience, purpose_id=args.purpose_id)
 
     print(f"question: {args.question}")
     print(f"intent: {plan.intent}")
+    print(f"audience: {plan.audience}")
+    print(f"purpose_id: {plan.purpose_id}")
     print(f"query_count: {len(plan.queries)}")
     print()
     for priority in (1, 2, 3):

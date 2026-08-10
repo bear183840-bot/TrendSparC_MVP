@@ -126,6 +126,54 @@ def test_prompts_load_returns_non_empty_text_for_every_stage():
 
 
 # ---------------------------------------------------------------------------
+# prompts/planner.md content invariants — regression guard for the
+# audience/purpose_id STEP 2.5/2.6/2.7 refactor (this file's first prompt-
+# text invariant test, same spirit as tests/test_prompt_invariants.py for
+# the main pipeline's prompts).
+# ---------------------------------------------------------------------------
+
+
+def test_planner_prompt_preserves_step2_candidate_dimensions():
+    """STEP 2's general candidate-angle list must survive the STEP 2.5/2.6/
+    2.7 insertion untouched - this feature adds axes, it must not narrow
+    the ones already there."""
+    text = prompts_module.load("planner")
+    for dimension in [
+        "official / primary sources",
+        "direct comparison",
+        "quantitative data",
+        "independent evaluation",
+        "criticism / counterevidence",
+    ]:
+        assert dimension in text
+
+
+def test_planner_prompt_preserves_strategy_response_subitems_after_move_into_step25():
+    """The former standalone "Strategy / Response / Recommendation
+    Questions" section's 6 sub-items were moved into STEP 2.5's
+    issue_response branch, not deleted."""
+    text = prompts_module.load("planner")
+    for heading in [
+        "Current factual state",
+        "Affected relationships and dependencies",
+        "Applicable regulatory, legal, contractual, or policy framework",
+        "Operational and financial risks",
+        "Precedents or comparable cases, when useful",
+        "Evidence needed to derive actionable recommendations",
+    ]:
+        assert heading in text
+
+
+def test_planner_prompt_documents_audience_and_purpose_id_inputs():
+    text = prompts_module.load("planner")
+    assert "audience" in text
+    assert "purpose_id" in text
+    assert "STEP 2.5" in text
+    assert "STEP 2.6" in text
+    assert "STEP 2.7" in text
+
+
+# ---------------------------------------------------------------------------
 # _solar.py — shared Solar Pro 3 JSON-chat helper
 # ---------------------------------------------------------------------------
 
@@ -266,6 +314,184 @@ def test_plan_searches_applies_quoting_from_model_supplied_key_terms(monkeypatch
 
     assert plan.queries[0].query == '방송통신위원회 "중앙그룹" "프로그램 사용료" 가이드라인'
     assert plan.queries[0].key_terms == ["중앙그룹", "프로그램 사용료"]
+
+
+def test_plan_searches_sends_unspecified_and_infer_defaults_in_payload(monkeypatch):
+    captured = {}
+
+    def _fake_call_json(system_prompt, payload, *, caller, model_override=None, timeout_seconds=30):
+        captured.update(payload)
+        return None
+
+    monkeypatch.setattr(solar_module, "call_json", _fake_call_json)
+
+    planner_module.plan_searches("질문")
+
+    assert captured["audience"] == "unspecified"
+    assert captured["purpose_id"] == "infer"
+
+
+def test_plan_searches_forwards_given_audience_and_purpose_id_in_payload(monkeypatch):
+    captured = {}
+
+    def _fake_call_json(system_prompt, payload, *, caller, model_override=None, timeout_seconds=30):
+        captured.update(payload)
+        return None
+
+    monkeypatch.setattr(solar_module, "call_json", _fake_call_json)
+
+    planner_module.plan_searches("질문", audience="executive", purpose_id="issue_response")
+
+    assert captured["audience"] == "executive"
+    assert captured["purpose_id"] == "issue_response"
+
+
+def _plan_response(**overrides):
+    base = {
+        "intent": "질문",
+        "queries": [{"query": "쿼리", "angle": "a", "purpose": "p", "priority": 1}],
+    }
+    base.update(overrides)
+    return base
+
+
+def test_plan_searches_keeps_explicit_purpose_id_over_model_resolved_value(monkeypatch):
+    """A caller-supplied purpose_id (already classified upstream by
+    core/report_purpose/classifier.py) is more trustworthy than the
+    planner's own guess - resolved_purpose_id must never override it."""
+    _patch_solar(monkeypatch, [_plan_response(resolved_purpose_id="root_cause")])
+
+    plan = planner_module.plan_searches("질문", purpose_id="issue_response")
+
+    assert plan.purpose_id == "issue_response"
+
+
+def test_plan_searches_clamps_model_resolved_purpose_id_when_not_given(monkeypatch):
+    _patch_solar(monkeypatch, [_plan_response(resolved_purpose_id="current_status")])
+
+    plan = planner_module.plan_searches("질문")
+
+    assert plan.purpose_id == "current_status"
+
+
+def test_plan_searches_rejects_invalid_model_resolved_purpose_id(monkeypatch):
+    _patch_solar(monkeypatch, [_plan_response(resolved_purpose_id="not_a_real_purpose")])
+
+    plan = planner_module.plan_searches("질문")
+
+    assert plan.purpose_id is None
+
+
+def test_plan_searches_echoes_audience_ignoring_model_output(monkeypatch):
+    """audience is never inferred by the model - only echoed from the
+    caller-supplied value, regardless of what (if anything) the response
+    contains."""
+    _patch_solar(monkeypatch, [_plan_response()])
+
+    plan = planner_module.plan_searches("질문", audience="practitioner")
+
+    assert plan.audience == "practitioner"
+
+
+def test_plan_searches_fallback_carries_audience_and_purpose_id(monkeypatch):
+    monkeypatch.delenv(solar_module.API_KEY_ENV_VAR, raising=False)
+
+    plan = planner_module.plan_searches(
+        "HBM 시장 전망은?", audience="management", purpose_id="future_business"
+    )
+
+    assert plan.audience == "management"
+    assert plan.purpose_id == "future_business"
+
+
+def test_plan_searches_caps_quoted_key_terms_at_two(monkeypatch):
+    """Live-verified 2026-08-10: a query quoting 5 key_terms ("20대" "30대"
+    "40대" "TV광고" "IPTV 광고 효과") returned almost nothing across 8 search
+    calls, because web search treats multiple quoted phrases as roughly an
+    AND. Only the first 2 key_terms may be quoted, regardless of how many
+    the model names."""
+    _patch_solar(
+        monkeypatch,
+        [
+            {
+                "intent": "질문",
+                "queries": [
+                    {
+                        "query": "20대 30대 40대 TV광고 선호 매체 IPTV 광고 효과",
+                        "angle": "a",
+                        "purpose": "p",
+                        "priority": 1,
+                        "key_terms": ["20대", "30대", "40대", "TV광고", "IPTV 광고 효과"],
+                    }
+                ],
+            }
+        ],
+    )
+
+    plan = planner_module.plan_searches("질문")
+
+    assert plan.queries[0].key_terms == ["20대", "30대"]
+    assert plan.queries[0].query == '"20대" "30대" 40대 TV광고 선호 매체 IPTV 광고 효과'
+
+
+def test_plan_searches_keeps_key_terms_at_or_below_cap_unaffected(monkeypatch):
+    _patch_solar(
+        monkeypatch,
+        [
+            {
+                "intent": "질문",
+                "queries": [
+                    {
+                        "query": "방송통신위원회 중앙그룹 프로그램 사용료 가이드라인",
+                        "angle": "regulatory",
+                        "purpose": "확인",
+                        "priority": 1,
+                        "key_terms": ["중앙그룹", "프로그램 사용료"],
+                    }
+                ],
+            }
+        ],
+    )
+
+    plan = planner_module.plan_searches("질문")
+
+    assert plan.queries[0].key_terms == ["중앙그룹", "프로그램 사용료"]
+    assert plan.queries[0].query == '방송통신위원회 "중앙그룹" "프로그램 사용료" 가이드라인'
+
+
+def test_planner_prompt_documents_key_terms_cap_and_segment_splitting():
+    text = prompts_module.load("planner")
+    assert "at most 2" in text
+    assert "one query per segment" in text
+
+
+def test_planner_prompt_documents_quantitative_benchmark_institution_queries():
+    """Added after comparing this planner's queries against a human
+    analyst's manual research for a media/ad-model recommendation question -
+    the human anchored on named benchmark providers (reach %, reputation
+    index, rate cards) instead of generic phrasing; this section teaches the
+    same named-provider + precise-metric pattern already proven by the
+    Regulatory / institutional terminology queries section above it."""
+    text = prompts_module.load("planner")
+    assert "Quantitative benchmark" in text
+    for institution in ["KISDI", "코바코", "닐슨미디어", "메조미디어", "한국기업평판연구소", "FUNdex"]:
+        assert institution in text
+    assert "never invent a plausible-sounding index or institution name" in text
+
+
+def test_coverage_prompt_documents_entity_anchored_followup():
+    """First prompt-text invariant test for coverage.md (parallel to the
+    planner.md ones above). Same comparison against a human analyst's manual
+    research: a broad discovery search found a specific named candidate, and
+    the human's next queries anchored on that literal name instead of
+    repeating the same broad search - this step teaches check_coverage() to
+    do the same via the existing next_queries mechanism, without letting it
+    crowd out ordinary missing_information gaps (router.py takes only the
+    first `max_priority2_queries` of next_queries, in returned order)."""
+    text = prompts_module.load("coverage")
+    assert "newly-discovered named candidates" in text
+    assert "does not override STEP 6" in text.replace("**", "")
+    assert "does not by itself obligate a dedicated query" in text
 
 
 # ---------------------------------------------------------------------------
@@ -977,6 +1203,31 @@ def _plan(*queries_by_priority: tuple[str, int]) -> SearchPlan:
         intent="질문",
         queries=[SearchPlanQuery(query=q, priority=p) for q, p in queries_by_priority],
     )
+
+
+def test_research_forwards_audience_and_purpose_id_to_plan_searches(monkeypatch):
+    """Regression guard: research() already accepted audience/purpose_id as
+    its own kwargs, but used to call plan_searches() with only `question` -
+    so STEP 2.5/2.6 in planner.md never actually saw them. Fixed by threading
+    both through at the one call site."""
+    captured = {}
+
+    def _fake_plan_searches(question, **kwargs):
+        captured.update(kwargs)
+        return _plan(("q1", 1))
+
+    monkeypatch.setattr(planner_module, "plan_searches", _fake_plan_searches)
+    monkeypatch.setattr(web_search_module, "execute_web_search", lambda query, **_: [])
+    monkeypatch.setattr(
+        coverage_module, "check_coverage", lambda *a, **k: CoverageDecision(sufficient=True, reason="enough")
+    )
+
+    router_module.research(
+        "질문", SourceRouterConfig(), purpose_id="issue_response", audience="executive"
+    )
+
+    assert captured["audience"] == "executive"
+    assert captured["purpose_id"] == "issue_response"
 
 
 def test_research_stops_when_sufficient_after_priority1(monkeypatch):

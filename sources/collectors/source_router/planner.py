@@ -10,17 +10,46 @@ search with.
 
 from __future__ import annotations
 
+from typing import Literal
+
 from sources.collectors.source_router import _prompts, _solar
 from sources.collectors.source_router.contracts import SearchPlan, SearchPlanQuery
 
+_PURPOSE_IDS = {"current_status", "issue_response", "future_business", "root_cause"}
+# Web search treats multiple quoted exact-phrase terms in one query as
+# roughly an AND (same mechanism CLAUDE.md documents for Firecrawl, live-
+# verified here for the GPT-5-mini-based web_search this router uses too) -
+# quoting more than a couple of them in one query makes a document matching
+# all of them at once vanishingly unlikely. Live-verified 2026-08-10: a
+# query with 5 quoted key_terms ("20대" "30대" "40대" "TV광고" "IPTV 광고
+# 효과") returned almost nothing across 8 search calls. 2 preserves the one
+# pattern that genuinely needs two quoted terms together (a regulator name +
+# a precise legal term, see prompts/planner.md's "Regulatory / institutional
+# terminology queries" section).
+_MAX_KEY_TERMS_PER_QUERY = 2
 
-def _fallback_plan(question: str) -> SearchPlan:
+
+def _clamp_purpose_id(value: object) -> Literal[
+    "current_status", "issue_response", "future_business", "root_cause"
+] | None:
+    """Same defensive-clamp spirit as coverage.py's module-private _clamp*
+    helpers (not imported directly - that module's helpers are private to
+    it, and this clamp is small enough not to be worth sharing)."""
+    text = str(value or "").strip()
+    return text if text in _PURPOSE_IDS else None  # type: ignore[return-value]
+
+
+def _fallback_plan(
+    question: str, *, audience: str | None = None, purpose_id: str | None = None
+) -> SearchPlan:
     query = question.strip()
     if not query:
-        return SearchPlan(intent=question, queries=[])
+        return SearchPlan(intent=question, queries=[], audience=audience, purpose_id=_clamp_purpose_id(purpose_id))
     return SearchPlan(
         intent=question,
         queries=[SearchPlanQuery(query=query, angle="direct", purpose="fallback", priority=1)],
+        audience=audience,
+        purpose_id=_clamp_purpose_id(purpose_id),
     )
 
 
@@ -44,17 +73,35 @@ def _apply_quoting(query: str, key_terms: list[str]) -> str:
 
 
 def plan_searches(
-    question: str, *, model_override: str | None = None, timeout_seconds: int = 30
+    question: str,
+    *,
+    audience: str | None = None,
+    purpose_id: str | None = None,
+    model_override: str | None = None,
+    timeout_seconds: int = 30,
 ) -> SearchPlan:
+    """Plans WHAT to search, now also shaped by who the report is for
+    (`audience`) and what kind of report it is (`purpose_id`) -
+    prompts/planner.md's STEP 2.5/2.6 use these to expand/adjust the
+    candidate angles STEP 2 already generates, not to replace them.
+
+    `audience` is never inferred - only echoed back onto the returned
+    SearchPlan exactly as given (or None if the caller doesn't know it yet).
+    `purpose_id`, if not given, is classified by the same Solar call via
+    `resolved_purpose_id` (defensively clamped to the 4 known values)."""
     data = _solar.call_json(
         _prompts.load("planner"),
-        {"question": question},
+        {
+            "question": question,
+            "audience": audience or "unspecified",
+            "purpose_id": purpose_id or "infer",
+        },
         caller="planner",
         model_override=model_override,
         timeout_seconds=timeout_seconds,
     )
     if not data:
-        return _fallback_plan(question)
+        return _fallback_plan(question, audience=audience, purpose_id=purpose_id)
     raw_queries = data.get("queries") or data.get("search_plan") or []
     queries = []
     for item in raw_queries:
@@ -63,7 +110,9 @@ def plan_searches(
         raw_query = str(item.get("query", "")).strip()
         if not raw_query:
             continue
-        key_terms = [str(term).strip() for term in item.get("key_terms") or [] if str(term).strip()]
+        key_terms = [
+            str(term).strip() for term in item.get("key_terms") or [] if str(term).strip()
+        ][:_MAX_KEY_TERMS_PER_QUERY]
         queries.append(
             SearchPlanQuery(
                 query=_apply_quoting(raw_query, key_terms),
@@ -74,5 +123,11 @@ def plan_searches(
             )
         )
     if not queries:
-        return _fallback_plan(question)
-    return SearchPlan(intent=str(data.get("intent", question)), queries=queries)
+        return _fallback_plan(question, audience=audience, purpose_id=purpose_id)
+    resolved_purpose_id = purpose_id or _clamp_purpose_id(data.get("resolved_purpose_id"))
+    return SearchPlan(
+        intent=str(data.get("intent", question)),
+        queries=queries,
+        audience=audience,
+        purpose_id=resolved_purpose_id,
+    )

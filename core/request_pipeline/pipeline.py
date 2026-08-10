@@ -229,6 +229,11 @@ def _run_pipeline_stages(
         result.collection_events = progress_sink
     requested_sector_id = requested_sector_id if requested_sector_id is not None else request.requested_sector_id
     profiles = scan_sectors(SECTORS_DIR)
+    # Resolved once up front (not down at synthesis, where this used to be
+    # computed) so the source_planner stage's WebSearchContext can carry it
+    # into query generation - the report's audience shouldn't only matter
+    # after evidence is already collected.
+    audience_id = request.target_audience or _DEFAULT_AUDIENCE_ID
 
     direct_answer = direct_response_for(request.question)
     if direct_answer is not None:
@@ -378,6 +383,7 @@ def _run_pipeline_stages(
                     request.question, result.entities.perspective
                 ),
                 report_purpose_id=result.report_purpose.purpose_id,
+                audience=audience_id,
                 information_needs=result.entities.information_needs,
                 answer_requirements=result.entities.answer_requirements,
                 evidence_requirements=result.entities.evidence_requirements,
@@ -590,7 +596,22 @@ def _run_pipeline_stages(
                             ],
                         }
                     )
-                    retry_plan = result.source_plan.model_copy(update={"search_context": retry_context})
+                    # validation_feedback above is human-readable audit trail only -
+                    # nothing in source_router reads it (the old ai_search_harness.py
+                    # prompt did; that path was dropped when Source Router replaced it
+                    # as the collector, PR #23). missing_needs/structural_gaps are
+                    # already short, concrete requirement phrases, so folding them
+                    # into evidence_requirements is what actually makes the retry's
+                    # search gap-specific instead of re-running the first round's
+                    # query with only excluded_urls grown.
+                    retry_plan = result.source_plan.model_copy(update={
+                        "search_context": retry_context,
+                        "evidence_requirements": list(dict.fromkeys([
+                            *result.source_plan.evidence_requirements,
+                            *missing_needs,
+                            *structural_gaps,
+                        ])),
+                    })
 
                     progress_token = bind_collection_events(result.collection_events)
                     try:
@@ -732,7 +753,6 @@ def _run_pipeline_stages(
         _halt("synthesis", exc.reason, exc.detail)
         return result
 
-    audience_id = request.target_audience or _DEFAULT_AUDIENCE_ID
     _run_report_stages(result, request, audience_id, _maybe_force_fail, _halt)
     return result
 

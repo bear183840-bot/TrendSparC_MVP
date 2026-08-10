@@ -26,7 +26,7 @@ from common.content_quality_validator import (
 )
 from common.contracts import DocumentAnalysis, SourceDocument
 from common.errors import PipelineStageError
-from sources.openai_retry import call_with_retry
+from sources.openai_retry import call_with_truncation_retry
 
 _API_KEY_ENV_VAR = "TRENDSPARC_SK_HYNIX_ANALYZER_API_KEY"
 # Optional - points this stage at an OpenAI-API-compatible alternative
@@ -35,6 +35,13 @@ _API_KEY_ENV_VAR = "TRENDSPARC_SK_HYNIX_ANALYZER_API_KEY"
 _BASE_URL_ENV_VAR = "TRENDSPARC_SK_HYNIX_ANALYZER_BASE_URL"
 _MODEL = "gpt-4o"  # adjust to whichever OpenAI model the paid key should use
 _STAGE = "sectors.sk_hynix.adapter.analyzer"
+_ANALYSIS_MAX_TOKENS = 4096
+# Escalation rung tried only when the first attempt is actually cut off
+# (finish_reason == "length") - see call_with_truncation_retry. Matches
+# sk_broadband's dense-content ceiling for consistency across sectors; this
+# sector has no pre-call density heuristic, so every call starts at the
+# ceiling below and only pays for the higher one when genuinely needed.
+_ANALYSIS_MAX_TOKENS_ESCALATED = 7000
 
 _SECTOR_ROOT = Path(__file__).resolve().parent.parent.parent
 _PROJECT_ROOT = _SECTOR_ROOT.parent.parent
@@ -178,22 +185,25 @@ def _analyze_document(client: OpenAI, system_prompt: str, document: SourceDocume
     )
 
     try:
-        response = call_with_retry(lambda: client.chat.completions.create(
-            model=_MODEL,
-            max_tokens=4096,
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_content},
-            ],
-            response_format={
-                "type": "json_schema",
-                "json_schema": {
-                    "name": "document_analysis",
-                    "schema": _ANALYSIS_SCHEMA,
-                    "strict": True,
+        response, _ = call_with_truncation_retry(
+            lambda max_tokens: client.chat.completions.create(
+                model=_MODEL,
+                max_tokens=max_tokens,
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_content},
+                ],
+                response_format={
+                    "type": "json_schema",
+                    "json_schema": {
+                        "name": "document_analysis",
+                        "schema": _ANALYSIS_SCHEMA,
+                        "strict": True,
+                    },
                 },
-            },
-        ))
+            ),
+            [_ANALYSIS_MAX_TOKENS, _ANALYSIS_MAX_TOKENS_ESCALATED],
+        )
     except Exception as exc:  # OpenAI API/network failure, not a template_only case
         raise PipelineStageError(
             stage=_STAGE,

@@ -163,6 +163,18 @@ Create a new query when the search results reveal a gap that was not anticipated
 
 ---
 
+## STEP 6.5 — Anchor follow-up queries on newly-discovered named candidates
+
+A `summary` or `key_facts` entry may name a specific candidate relevant to the question — a person, product, index, or organization — that the original search plan could not have named in advance because it was only discovered by this round's broad search. A discovered-but-unverified candidate name is itself a coverage gap, separate from whatever `missing_information` already lists: the original plan's angle ("find candidates") is satisfied, but the follow-through ("is *this specific* candidate actually a fit — on the dimension the question cares about, e.g. audience fit, cost, brand fit") is not.
+
+When this happens, a `next_queries` entry should combine that literal discovered name with the specific remaining evidence dimension, instead of only generating another generic query on the original broad angle.
+
+Example: a query aimed at "find likely ad-model candidates" surfaces a search result naming a fictional example actor "이가을" (illustration only — not a real person; substitute the real name actually found in the results). A generic follow-up would repeat the same broad candidate search. An anchored follow-up instead asks about that specific name: `"이가을" 20대 선호도` or `"이가을" 광고 모델료`.
+
+**This does not override STEP 6's "generate the smallest number of additional queries necessary."** An anchored follow-up competes for the same limited `next_queries` slots as an ordinary `missing_information`-driven query — it is not automatically more urgent, and discovering a name does not by itself obligate a dedicated query for it. Weigh an anchored follow-up against unresolved `missing_information` gaps using the same judgment as STEP 6, and order `next_queries` by actual importance to answering the question: do not let anchoring queries default to the front (or generate one per discovered name) at the cost of pushing a genuinely important `missing_information` gap out of the returned list.
+
+---
+
 ## STEP 7 — Decide sufficiency
 
 Set `sufficient` to true only when:

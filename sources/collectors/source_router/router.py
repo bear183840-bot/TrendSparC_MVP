@@ -343,6 +343,7 @@ def research(
     answer_requirements: list[str] | None = None,
     evidence_requirements: list[str] | None = None,
     purpose_id: str | None = None,
+    audience: str | None = None,
     excluded_urls: list[str] | None = None,
     excluded_domains: list[str] | None = None,
 ) -> SourceRouterResult:
@@ -360,7 +361,11 @@ def research(
     about, previously indistinguishable."""
     config = config or SourceRouterConfig()
     search_plan: SearchPlan = planner_module.plan_searches(
-        question, model_override=config.planner_model, timeout_seconds=config.call_timeout_seconds
+        question,
+        audience=audience,
+        purpose_id=purpose_id,
+        model_override=config.planner_model,
+        timeout_seconds=config.call_timeout_seconds,
     )
     search_plan = refiner_module.refine_search_plan(
         question,
