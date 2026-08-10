@@ -1,8 +1,11 @@
 """Isolated, low-cost smoke test for sources/collectors/source_router/
 planner.py's Search Planner (Solar Pro 3) - one call only, no web_search
 execution, no coverage checks, no source inspection. Useful for iterating on
-prompts/planner.md and immediately seeing what queries it produces, without
-paying for a full research() run.
+the planner's system prompt (now assembled from prompts/planner_common_head.md
++ prompts/planner_purposes/*.md + prompts/planner_audiences/*.md +
+prompts/planner_common_tail.md - see planner.py's `_assemble_system_prompt`)
+and immediately seeing what queries it produces, without paying for a full
+research() run.
 
 Does not touch ai_search_harness.py or the rest of the router pipeline.
 
