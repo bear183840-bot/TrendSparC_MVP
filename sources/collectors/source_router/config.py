@@ -26,7 +26,13 @@ class SourceRouterConfig:
     # separately, see web_search.py's module docstring), just real latency
     # for this call shape. 30s was cutting off calls that would have
     # succeeded; 60s leaves real margin above the one measured sample.
-    call_timeout_seconds: int = 60
+    # Raised again 2026-08-11 (temporary stopgap): a live run combining two
+    # parallel topics into one quoted-phrase query ("롱폼과 숏폼 미디어 소비
+    # 트랜드") timed out on every attempt at 60s, burning search budget for
+    # zero evidence. 90s buys more margin while the actual fix (splitting
+    # such queries before they're ever sent, see planner_common_tail.md) is
+    # rolled out.
+    call_timeout_seconds: int = 90
 
     # doc1 §4's query-count guidance is prompt-level (told to the planner),
     # not enforced numerically — these are hard ceilings applied on top,
@@ -69,7 +75,13 @@ class SourceRouterConfig:
     # long run cannot spend a fresh budget per tier. router._search_budget()
     # then picks the run's actual budget below this, from the question's own
     # comparison/trend/response complexity and its evidence-need count.
-    max_web_search_calls: int = 12
+    # Raised 12 -> 40 (2026-08-11, temporary stopgap alongside
+    # _search_budget_terms()'s own increase): this ceiling clips whatever
+    # _search_budget() computes via min(ceiling, budget), so raising the
+    # per-question budget terms without raising this cap would have been a
+    # no-op — a question that now scores 26 (base 14 + evidence_needs_bonus
+    # 12) was previously being clipped down to 12 regardless.
+    max_web_search_calls: int = 40
 
     # Cost guards added after a live-cost review found two uncapped points:
     # a single execute_web_search() call could return an unbounded number of
