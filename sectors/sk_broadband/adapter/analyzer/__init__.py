@@ -1440,7 +1440,7 @@ def _promotable_table_metric(label: str, subject: str | None) -> bool:
 
 
 def _table_row_points(
-    claim: dict, passage_text: str
+    claim: dict, passage_text: str, document_text: str = ""
 ) -> tuple[list[dict], list[dict]] | None:
     """Structure one table row into metric points and comparison candidates."""
     quote = claim.get("evidence_quote") or ""
@@ -1461,10 +1461,25 @@ def _table_row_points(
             caption = _CAPTION_UNIT_RE.search(passage_text)
             caption_unit = caption.group(1).strip() if caption else None
     else:
-        # Losing the passage costs the period and the caption unit, never the
-        # row's own structure - a table row must not fall back to the sentence
-        # parser, which is exactly where `609 증감률` came from.
+        # Passage first, then the whole document. Evidence passages are cut
+        # for retrieval, not along table boundaries: live-verified 2026-08-10
+        # the 보도자료's caption (line 37) and its two header rows (39, 41)
+        # landed in a different passage from the IPTV row (42), so every
+        # figure in that table came back with `period="시점 미상"` and no
+        # criterion - which is what starved comparison recovery and left the
+        # KPI label as bare "IPTV". Widening the lookup does not widen what
+        # counts as the same table: `_table_context` walks up only while the
+        # lines above are still table rows, so it stops at the blank line or
+        # prose separating one table from the next, and its caption search is
+        # bounded to that table's own head.
         context = _table_context(passage_text, quote) if passage_text else None
+        # Finding the row is not the same as finding its table. A passage cut
+        # to the row itself locates it and returns no headers at all, so the
+        # test has to be "did this yield headers", not "did this return".
+        if (context is None or not context[0]) and document_text:
+            wider = _table_context(document_text, quote)
+            if wider is not None and wider[0]:
+                context = wider
         headers, caption_unit, denominator = (
             context if context is not None else ([], None, None)
         )
@@ -1590,7 +1605,9 @@ def _recovered_table_comparison_points(comparisons: list[dict]) -> list[dict]:
 
 
 def _recovered_metric_points(
-    grounded_claims: list[dict], evidence_passages: list[dict] | None = None
+    grounded_claims: list[dict],
+    evidence_passages: list[dict] | None = None,
+    document_text: str = "",
 ) -> list[dict]:
     """Deterministically structure figures from already-verified quotes.
 
@@ -1608,7 +1625,7 @@ def _recovered_metric_points(
         # A pipe-delimited row is read against its own table's headers; the
         # sentence parser below would read its commas as label boundaries.
         passage_text = passages.get(str(claim.get("evidence_passage_id")), "")
-        table = _table_row_points(claim, passage_text)
+        table = _table_row_points(claim, passage_text, document_text)
         if table is not None:
             recovered.extend(table[0])
             continue
@@ -1701,7 +1718,9 @@ def _recovered_metric_points(
 
 
 def _recovered_comparison_points(
-    grounded_claims: list[dict], evidence_passages: list[dict] | None = None
+    grounded_claims: list[dict],
+    evidence_passages: list[dict] | None = None,
+    document_text: str = "",
 ) -> list[dict]:
     """Comparisons a table states outright, for when the model emits none.
 
@@ -1716,9 +1735,7 @@ def _recovered_comparison_points(
     candidates: list[dict] = []
     for claim in grounded_claims:
         passage_text = passages.get(str(claim.get("evidence_passage_id")), "")
-        if not passage_text:
-            continue
-        table = _table_row_points(claim, passage_text)
+        table = _table_row_points(claim, passage_text, document_text)
         if table is not None:
             candidates.extend(table[1])
     return _recovered_table_comparison_points(candidates)
@@ -2161,7 +2178,9 @@ def _analyze_document(
                 _verified_metric_points(
                     data, analyzed_content, grounded_claims, evidence_passages
                 ),
-                _recovered_metric_points(grounded_claims, evidence_passages),
+                _recovered_metric_points(
+                    grounded_claims, evidence_passages, analyzed_content
+                ),
             )
         )
         comparison_points = _verified_comparison_points(data, grounded_claims)
@@ -2173,7 +2192,9 @@ def _analyze_document(
         # overwritten - it is listed first and identical rows merge.
         comparison_points = normalize_comparison_points([
             *comparison_points,
-            *_recovered_comparison_points(grounded_claims, evidence_passages),
+            *_recovered_comparison_points(
+                grounded_claims, evidence_passages, analyzed_content
+            ),
         ])
         emit_ai_usage(
             stage=_STAGE,
