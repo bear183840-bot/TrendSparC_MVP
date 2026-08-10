@@ -19,6 +19,7 @@ from typing import Any
 from common.content_quality_validator import (
     _RELATIVE_YEAR_OFFSETS,
     classify_metric_shape,
+    rank_by_relevance,
     has_relative_period,
     resolve_relative_period,
     dated_items,
@@ -1311,3 +1312,82 @@ def has_recurring_terms(grounded_claims: list[Any], minimum: int = 3) -> bool:
 
 def has_cause_map(risks: list[str], impacts: list[str], actions: list[str]) -> bool:
     return sum(1 for column in (risks, impacts, actions) if column) >= 2
+
+
+# --- KPI candidate selection ----------------------------------------------
+#
+# KPI had no selection at all: `kpi_grid` availability was a count
+# (`len(metric_series) >= 2`) and the block handed the whole series to the
+# renderer in list order, so the first card was whichever metric synthesis
+# happened to put first. Live-verified 2026-08-10 that produced
+# "609 증감률 1.8%" and later "유료방송시장 전체 가입자 수 3,629만 (2023년)"
+# for the question "IPTV 가입자 수 현황은?" - neither the question nor the
+# recency of the figure was ever consulted.
+#
+# `render_kpi_row` already ranks by `question_terms` and already collapses
+# one label's several periods into a latest-plus-delta card; the generic
+# slot path simply never passed the question through. This adds the two
+# things that ranking cannot do on its own: dropping a metric whose value
+# two sources disagree about, and keeping one representative per metric so
+# a single series cannot fill the grid.
+KPI_MAX_CANDIDATES = 6
+
+
+def rank_kpi_candidates(
+    metric_points: list[Any],
+    question_terms: list[str] | None = None,
+    limit: int = KPI_MAX_CANDIDATES,
+) -> list[Any]:
+    """Representative, conflict-free metrics for a KPI row, best first.
+
+    Relevance to the question outranks recency, and recency only breaks
+    ties inside one metric: a 2025 advertising-market figure must not
+    displace a 2024 subscriber count when subscribers are what was asked
+    about. A metric whose identity carries two different values is left out
+    entirely - picking the first, the latest or the average would each be
+    inventing an answer the evidence does not give.
+    """
+    from common.metric_identity import (
+        canonical_period,
+        conflicting_metric_groups,
+        metric_identity,
+    )
+
+    conflicted = {
+        metric_identity(point)
+        for group in conflicting_metric_groups(metric_points)
+        for point in group
+    }
+    representatives: dict[str, Any] = {}
+    for point in metric_points:
+        if metric_identity(point) in conflicted:
+            continue
+        key = semantic_metric_key(getattr(point, "label", None))
+        current = representatives.get(key)
+        if current is None:
+            representatives[key] = point
+            continue
+        # Same metric, several periods: the KPI card shows one reading and
+        # the series belongs to a chart, so keep the most recent stated one.
+        incumbent = canonical_period(getattr(current, "period", None)) or ""
+        challenger = canonical_period(getattr(point, "period", None)) or ""
+        if challenger > incumbent:
+            representatives[key] = point
+
+    # `rank_by_relevance` answers "does this match at all", which is the
+    # right question where it is used and the wrong one here: for "IPTV
+    # 가입자 수 현황은?" both "IPTV 가입자 수" and "유료방송시장 전체 가입자
+    # 수" match, so the original list order decided the first card - which is
+    # how the whole-market figure kept leading a question about IPTV.
+    # Counting the distinct terms a label covers separates them without
+    # changing that helper for its other callers.
+    terms = [term.casefold() for term in (question_terms or []) if len(term) >= 2]
+
+    def _score(point: Any) -> int:
+        label = f"{getattr(point, 'label', '') or ''} {getattr(point, 'subject', '') or ''}".casefold()
+        return sum(1 for term in terms if term in label)
+
+    candidates = list(representatives.values())
+    if terms:
+        candidates.sort(key=_score, reverse=True)
+    return candidates[:limit]

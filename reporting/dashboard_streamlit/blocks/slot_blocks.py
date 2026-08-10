@@ -30,6 +30,7 @@ from pydantic import BaseModel
 from reporting.dashboard_streamlit.blocks.base import BlockDefinition, SlotContext
 from reporting.dashboard_streamlit.blocks.registry import register
 from common.block_shapes import (
+    rank_kpi_candidates,
     has_benchmark_grid,
     comparison_points_of_kind,
     comparison_points_not_covered_by_ranking,
@@ -165,12 +166,25 @@ def _metric_comparison(context: SlotContext):
 
 
 def _kpi(context: SlotContext):
-    points = context.synthesis.metric_series
+    # Selection, not rendering: `render_kpi_row` already ranks by
+    # `question_terms` and already folds one label's periods into a
+    # latest-plus-delta card, but this path never passed the question, so
+    # the first card was whatever synthesis happened to list first. The
+    # helper additionally drops metrics two sources disagree about and
+    # keeps one representative per metric so a single series cannot fill
+    # the grid.
+    question_terms = context.question.split() if context.question else []
+    points = rank_kpi_candidates(
+        context.synthesis.metric_series, question_terms,
+    ) or context.synthesis.metric_series
     limit = getattr(context.presentation, "kpi_limit", 6)
     if context.compact:
         limit = 1
     return (
-        lambda: render_kpi_row(points, limit=limit, compact=context.compact)
+        lambda: render_kpi_row(
+            points, limit=limit, question_terms=question_terms,
+            compact=context.compact,
+        )
     ) if points else None
 
 
