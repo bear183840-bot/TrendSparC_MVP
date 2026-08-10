@@ -143,6 +143,12 @@ class ResolvedSlot:
     block_types: tuple[str, ...]
     section_id: str | None
     items: list[str]
+    # Evidence identities already drawn by an earlier slot on this page. A
+    # renderer that draws a *set* of things - every composed whole, every
+    # ranked group - subtracts these so it adds what is new instead of
+    # repeating a card the reader has already scrolled past. Empty for a
+    # caller that resolves one slot in isolation.
+    drawn_before: frozenset[str] = frozenset()
 
     @property
     def block_type(self) -> str:
@@ -750,6 +756,49 @@ def _comparison_keys(points: list[Any]) -> set[str]:
     }
 
 
+def share_evidence_key(whole: object) -> str:
+    """The consumption key for one composed whole.
+
+    Public because a renderer that subtracts already-drawn compositions has
+    to compute the same key the resolver did; two spellings of this rule
+    would silently stop matching the first time either changed.
+    """
+    return f"share:{semantic_metric_key(str(whole or ''))}"
+
+
+def _share_keys(groups: list[tuple[str, list[Any]]]) -> set[str]:
+    """One key per composed whole, in a namespace only compositions use.
+
+    A donut and a stacked rail of the same `share_of` group are the same
+    three numbers drawn twice, so both have to land on the same key. The
+    period is already inside the whole's own name wherever a source dated it
+    ("'25년 하반기 가입자 수·점유율"), so keying on the whole does not merge
+    two half-years into one.
+    """
+    return {share_evidence_key(whole) for whole, _ in groups}
+
+
+def _landscape_keys(synthesis: Any) -> set[str]:
+    """Exactly what the landscape card draws - not every metric there is.
+
+    This used to return a key for every label in the synthesis, which was
+    both too coarse to dedupe against (the donut it draws had no key of its
+    own, so a second donut elsewhere looked like new data) and too greedy to
+    dedupe with (every KPI in the report looked already-drawn).
+    """
+    parts = block_shapes.landscape_parts(synthesis.metric_series)
+    if parts is None:
+        return set()
+    core_kind, core_points, complement_kind, complement_points = parts
+    keys = {f"metric:{semantic_metric_key(point.label)}" for point in core_points}
+    if complement_kind == "share":
+        whole = (getattr(complement_points[0], "share_of", "") or "") if complement_points else ""
+        keys |= {share_evidence_key(whole)} if whole else set()
+    else:
+        keys |= {f"metric:{semantic_metric_key(point.label)}" for point in complement_points}
+    return keys
+
+
 def _consumption() -> dict[str, Callable[[Any, list[str]], set[str]]]:
     """block_type -> the identity of the data it would put on screen.
 
@@ -766,7 +815,7 @@ def _consumption() -> dict[str, Callable[[Any, list[str]], set[str]]]:
     """
     by_label = block_shapes.group_metric_points_by_label
     return {
-        "landscape": lambda s, i: _metric_label_keys(list(by_label(s.metric_series).values())),
+        "landscape": lambda s, i: _landscape_keys(s),
         "chart": lambda s, i: {
             f"metric:{semantic_metric_key(label)}"
             for label, points in by_label(s.metric_series).items()
@@ -785,12 +834,10 @@ def _consumption() -> dict[str, Callable[[Any, list[str]], set[str]]]:
             f"metric:{semantic_metric_key(label)}"
             for label, _, _ in block_shapes.grouped_bar_series(s.metric_series)
         },
-        "share_split": lambda s, i: {
-            f"metric:{label}" for label, _ in block_shapes.share_groups(s.metric_series)
-        },
-        "composition_breakdown": lambda s, i: {
-            f"metric:{label}" for label, _ in block_shapes.share_groups(s.metric_series)
-        },
+        "share_split": lambda s, i: _share_keys(block_shapes.share_groups(s.metric_series)),
+        "composition_breakdown": lambda s, i: _share_keys(
+            block_shapes.share_groups(s.metric_series)
+        ),
         "metric_comparison": lambda s, i: {
             f"metric:{semantic_metric_key(point.label)}"
             for _, points in (
@@ -931,6 +978,23 @@ def resolve_slots(
     consumption = _consumption()
     claimed: set[str] = set()
     resolved: list[ResolvedSlot] = []
+    # Every evidence identity anything on the page has drawn so far. Claiming
+    # a *block type* once was never the same rule as showing a *fact* once:
+    # the composition donut reached the page twice under two different block
+    # ids, because `landscape` and `share_split` are different types drawing
+    # the identical three percentages.
+    #
+    # This is carried to each slot rather than used to veto a block here.
+    # Several block types honestly key on every metric label they might draw
+    # from (a KPI grid ranks the whole series and shows six), so "every fact
+    # is already drawn" is not a question this stage can answer without
+    # over-rejecting - `kpi_grid` and `chart` would both disappear behind
+    # whichever block happened to run first. The block itself subtracts, in
+    # the one place that knows what it would actually put on screen.
+    drawn: set[str] = set()
+
+    def keys_for(candidate: str, synthesis: Any, items: list[str]) -> set[str]:
+        return consumption.get(candidate, _coarse_key(candidate))(synthesis, items)
 
     def drawable(candidate: str, synthesis: Any, items: list[str]) -> bool:
         if candidate in claimed and candidate not in _REUSABLE_BLOCKS:
@@ -943,22 +1007,24 @@ def resolve_slots(
     # ranking bars as a companion left 영향, whose own first choice they were,
     # with prose. Leads are decided in skeleton order exactly as before, so
     # this pass reproduces the single-block behaviour verbatim.
-    leads: list[tuple[Slot, str | None, str | None, list[str]]] = []
+    leads: list[tuple[Slot, str | None, str | None, list[str], frozenset[str]]] = []
     for slot in slots:
         section_id, items = slot_evidence_items(slot, synthesis, report)
+        before = frozenset(drawn)
         lead = next(
             (c for c in slot.candidates if drawable(c, synthesis, items)), None
         )
         if lead is not None:
             claimed.add(lead)
-        leads.append((slot, lead, section_id, items))
+            drawn |= keys_for(lead, synthesis, items)
+        leads.append((slot, lead, section_id, items, before))
 
     # Pass 2: whatever is still unclaimed may join the slot it also fits, as
-    # long as it shows facts the lead did not already put on screen.
-    for slot, lead, section_id, items in leads:
+    # long as it shows facts nothing on the page has put on screen yet.
+    for slot, lead, section_id, items, before in leads:
         chosen = [lead] if lead else []
         if lead:
-            drawn_here = consumption.get(lead, _coarse_key(lead))(synthesis, items)
+            drawn_here = keys_for(lead, synthesis, items)
             for candidate in slot.candidates:
                 if len(chosen) >= _MAX_BLOCKS_PER_SLOT:
                     break
@@ -966,7 +1032,7 @@ def resolve_slots(
                 # so it never tags along behind a block that already answered.
                 if candidate == "narrative_list" or not drawable(candidate, synthesis, items):
                     continue
-                keys = consumption.get(candidate, _coarse_key(candidate))(synthesis, items)
+                keys = keys_for(candidate, synthesis, items)
                 # A companion whose every fact is already in this card is the
                 # same data twice under one heading.
                 if keys and keys <= drawn_here:
@@ -974,6 +1040,7 @@ def resolve_slots(
                 chosen.append(candidate)
                 claimed.add(candidate)
                 drawn_here |= keys
+                drawn |= keys
         if not chosen and slot.optional:
             continue
         resolved.append(ResolvedSlot(
@@ -981,6 +1048,7 @@ def resolve_slots(
             block_types=tuple(chosen) or (LAST_RESORT,),
             section_id=section_id,
             items=items,
+            drawn_before=before,
         ))
     return resolved
 

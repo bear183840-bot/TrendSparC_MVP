@@ -1246,8 +1246,17 @@ def importance_ranked(grounded_claims: list[Any], limit: int = 5) -> list[Any]:
 
 
 def has_importance_ranking(grounded_claims: list[Any]) -> bool:
-    # One bar is not a ranking; it's a single claim with a number stuck to it.
-    return len(importance_ranked(grounded_claims)) >= 2
+    """Whether these scores actually rank anything.
+
+    Two conditions. One bar is not a ranking - it's a single claim with a
+    number stuck to it. And a set of claims the model scored identically is
+    not one either: a live run drew four bars all reading 100/100 under the
+    heading 영향도, which is a full-width block whose entire content is "the
+    model did not distinguish these". A ranking has to separate at least two
+    things or it has nothing to say.
+    """
+    ranked = importance_ranked(grounded_claims)
+    return len(ranked) >= 2 and len({claim.importance for claim in ranked}) >= 2
 
 
 # Function words and reporting verbs that recur in every Korean article

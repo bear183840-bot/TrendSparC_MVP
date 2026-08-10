@@ -36,6 +36,13 @@ class SlotContext:
     # Direct registry callers historically receive the complete block.
     # The dashboard opts into the first-screen budget explicitly.
     compact: bool = False
+    # Evidence identities an earlier slot on this page already drew, in the
+    # namespace `purpose_slots._consumption()` uses. Slot resolution can only
+    # drop a block whose facts are *entirely* already shown; a block that
+    # draws a set - one card per composed whole - subtracts these itself so
+    # the half of it that is new still gets drawn. Empty means "nothing yet",
+    # which is what a caller rendering one block in isolation wants.
+    drawn_before: frozenset[str] = frozenset()
 
 
 # Returns a zero-arg callable that draws the block, or None when the data

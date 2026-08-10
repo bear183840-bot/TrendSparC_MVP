@@ -240,8 +240,31 @@ def _matrix(context: SlotContext):
     return (lambda: render_decision_matrix(points)) if has_decision_matrix(points) else None
 
 
+def _undrawn_share_points(context: SlotContext) -> list[Any]:
+    """The composition slices whose whole is not already on the page.
+
+    Slot resolution can only refuse a block outright, so a `share_split`
+    holding two compositions of which one was already drawn inside a
+    `landscape` card still qualified - and redrew that one. Filtering the
+    points is the difference between "this block is redundant" and "this
+    half of it is".
+    """
+    from common.purpose_slots import share_evidence_key
+
+    drawn = context.drawn_before
+    if not drawn:
+        return list(context.synthesis.metric_series)
+    return [
+        point for point in context.synthesis.metric_series
+        if share_evidence_key(getattr(point, "share_of", None)) not in drawn
+    ]
+
+
 def _share_split(context: SlotContext):
-    return lambda: render_share_split(context.synthesis.metric_series)
+    points = _undrawn_share_points(context)
+    if not share_groups(points):
+        return None
+    return lambda: render_share_split(points)
 
 
 def _factor_list(context: SlotContext):
@@ -286,11 +309,12 @@ def _ranking_list(context: SlotContext):
 
 
 def _composition_breakdown(context: SlotContext):
-    groups = share_groups(context.synthesis.metric_series)
+    points = _undrawn_share_points(context)
+    groups = share_groups(points)
     if not any(len(slices) >= 4 for _, slices in groups):
         return None
     limit = getattr(context.presentation, "ranking_limit", 7)
-    return lambda: render_composition_breakdown(context.synthesis.metric_series, limit=limit)
+    return lambda: render_composition_breakdown(points, limit=limit)
 
 
 def _benchmark_table(context: SlotContext):
@@ -314,7 +338,11 @@ def _driver_bars(context: SlotContext):
             if any("가" <= char <= "힣" for char in (claim.claim or ""))
         ]
     limit = 2 if context.compact else 5
-    if len(importance_ranked(claims, limit=limit)) < 2:
+    ranked = importance_ranked(claims, limit=limit)
+    # Same rule as `has_importance_ranking`, re-applied after the Korean
+    # filter above: dropping claims can leave the survivors all on one score,
+    # and a block of equal-length bars is a ranking that ranks nothing.
+    if len(ranked) < 2 or len({claim.importance for claim in ranked}) < 2:
         return None
     return lambda: render_importance_bars(
         claims,

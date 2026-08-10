@@ -17,6 +17,7 @@ from core.question_coverage import (
     derive_question_coverage,
     minimum_drawable_periods,
 )
+from common.block_shapes import comparison_points_of_kind
 from common.content_quality_validator import select_chartable_series
 from common.content_quality_validator import dedupe_across_blocks
 # Importing the package is what registers every block, including the live
@@ -214,13 +215,88 @@ _BLOCK_UNITS = {
 _GRID_UNITS = 4
 
 
-def _slot_width(slot: ResolvedSlot, compact: bool = False) -> int:
-    """Units this slot occupies - the widest block in its composition wins."""
+# What a block would actually put on screen, by block type. `_BLOCK_UNITS`
+# above says how wide a block needs to be when it is *full*; this is what
+# shrinks it when it is not. A comparison table of two entities and a
+# comparison table of nine both took two units, so the page ran to four
+# screens with half of it whitespace inside cards.
+#
+# Deliberately measured, never guessed: a block type absent from this table
+# keeps its full width rather than being shrunk on a hunch.
+_CONTENT_VOLUME: dict[str, Any] = {
+    "narrative_list": lambda synthesis, items: len(items),
+    "factor_list": lambda synthesis, items: len(items),
+    "action_list": lambda synthesis, items: len(synthesis.recommended_actions or []),
+    "chart": lambda synthesis, items: len(
+        {point.period for point in select_chartable_series(synthesis.metric_series)}
+    ),
+    "timeline": lambda synthesis, items: len(synthesis.evidence or []),
+    "table": lambda synthesis, items: len(
+        {point.entity for point in comparison_points_of_kind(synthesis.comparison_points, False)}
+    ),
+    "segment_table": lambda synthesis, items: len(
+        {point.entity for point in comparison_points_of_kind(synthesis.comparison_points, True)}
+    ),
+    "benchmark_table": lambda synthesis, items: len(
+        {point.entity for point in synthesis.comparison_points}
+    ),
+    "level_matrix": lambda synthesis, items: len(
+        {point.entity for point in synthesis.comparison_points}
+    ),
+    "competitor_panels": lambda synthesis, items: len(
+        {point.entity for point in synthesis.comparison_points}
+    ),
+    "metric_comparison": lambda synthesis, items: len(synthesis.metric_series),
+    "grouped_bar": lambda synthesis, items: len(synthesis.metric_series),
+    "cause_map": lambda synthesis, items: len(synthesis.factors or synthesis.risks or []),
+}
+
+# Volume -> units. Three things fit a quarter-width card comfortably; past
+# nine a block needs its declared width or it starts wrapping mid-row.
+_VOLUME_UNITS: tuple[tuple[int, int], ...] = ((3, 1), (9, 2))
+
+
+def _content_volume(slot: ResolvedSlot, synthesis: Any) -> int | None:
+    """How many things this slot's lead block would draw, or None if unknown."""
+    measure = _CONTENT_VOLUME.get(slot.block_type)
+    if measure is None:
+        return None
+    try:
+        return measure(synthesis, slot.items)
+    except AttributeError:
+        # A caller passing a partial synthesis stand-in gets the declared
+        # width rather than a crash - sizing is presentation, not evidence.
+        return None
+
+
+def _slot_width(
+    slot: ResolvedSlot, compact: bool = False, synthesis: Any | None = None,
+) -> int:
+    """Units this slot occupies - the widest block in its composition wins,
+    narrowed to what its content actually fills.
+
+    `synthesis` is optional so a caller measuring the skeleton alone still
+    gets the declared widths; only the live page, which has the data, shrinks.
+    """
     block_types = slot.block_types[:1] if compact else slot.block_types
-    return max((_BLOCK_UNITS.get(block_type, 2) for block_type in block_types), default=2)
+    declared = max((_BLOCK_UNITS.get(block_type, 2) for block_type in block_types), default=2)
+    if synthesis is None or len(block_types) > 1:
+        # A composition draws two blocks stacked in one card; the second one's
+        # volume is not measured here, so shrinking on the lead alone would
+        # squeeze a card that is in fact full.
+        return declared
+    volume = _content_volume(slot, synthesis)
+    if volume is None:
+        return declared
+    for threshold, units in _VOLUME_UNITS:
+        if volume <= threshold:
+            return max(1, min(declared, units))
+    return declared
 
 
-def _grid_rows(slots: list[ResolvedSlot], compact: bool = False) -> list[list[ResolvedSlot]]:
+def _grid_rows(
+    slots: list[ResolvedSlot], compact: bool = False, synthesis: Any | None = None,
+) -> list[list[ResolvedSlot]]:
     """Greedy left-to-right packing that keeps the skeleton's reading order.
 
     Deliberately not a masonry re-order: the purpose skeleton is an argument
@@ -232,7 +308,7 @@ def _grid_rows(slots: list[ResolvedSlot], compact: bool = False) -> list[list[Re
     current: list[ResolvedSlot] = []
     used = 0
     for slot in slots:
-        width = _slot_width(slot, compact=compact)
+        width = _slot_width(slot, compact=compact, synthesis=synthesis)
         if used + width > _GRID_UNITS:
             rows.append(current)
             current, used = [], 0
@@ -310,6 +386,7 @@ def _render_slot(
                 presentation,
                 compact,
                 question,
+                slot.drawn_before,
             )
             for block_type in block_types
         ) if draw is not None
@@ -334,6 +411,7 @@ def _body_renderer(
     presentation: Any | None = None,
     compact: bool = True,
     question: str = "",
+    drawn_before: frozenset[str] = frozenset(),
 ):
     """A zero-arg callable that draws this block, or None if it would draw
     nothing. Returning None is what keeps an empty card off the page.
@@ -359,6 +437,7 @@ def _body_renderer(
         presentation=presentation,
         question=question,
         compact=compact,
+        drawn_before=drawn_before,
     ))
 
 
@@ -619,8 +698,8 @@ def render_generic_dashboard(
     dashboard_slots = _question_structure_order(
         dashboard_slots, coverage_requirement, synthesis.metric_series
     )
-    for row in _grid_rows(dashboard_slots, compact=True):
-        widths = [_slot_width(slot, compact=True) for slot in row]
+    for row in _grid_rows(dashboard_slots, compact=True, synthesis=synthesis):
+        widths = [_slot_width(slot, compact=True, synthesis=synthesis) for slot in row]
         remainder = _GRID_UNITS - sum(widths)
         keyword_last = any(
             kind in {"keyword_tags", "recurring_terms"} for kind in row[-1].block_types

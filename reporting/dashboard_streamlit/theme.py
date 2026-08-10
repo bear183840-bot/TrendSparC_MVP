@@ -427,7 +427,13 @@ def dashboard_css(dark: bool, accent_theme: str = "orange") -> str:
     .ts-chart-key {{ display:inline-flex; align-items:center; gap:.3rem; font-size:.68rem;
       font-weight:600; color:var(--ts-muted); }}
     .ts-chart-key i {{ width:9px; height:2.5px; border-radius:2px; }}
-    .ts-chart-svg {{ display:block; width:100%; height:165px; overflow:visible; }}
+    /* Capped, and its own aspect ratio rather than a fixed height stretched
+       to the column. `preserveAspectRatio="none"` plus width:100% turned a
+       three-point line into a 1500px-wide rule whose slope no longer meant
+       anything; the plot only needs to be wide enough to separate its x
+       positions. */
+    .ts-chart-svg {{ display:block; width:100%; max-width:540px;
+      aspect-ratio:356/150; height:auto; overflow:visible; }}
     .ts-chart-axis {{ font-family:"Pretendard Variable",Pretendard,sans-serif; font-size:9px;
       fill:var(--ts-muted); }}
     .ts-card ul {{ margin:.4rem 0 0; padding-left:1.15rem; }} .ts-card li {{ margin:.55rem 0; line-height:1.4; }}
@@ -524,9 +530,14 @@ def dashboard_css(dark: bool, accent_theme: str = "orange") -> str:
     .ts-item-index {{ color:var(--ts-accent); font-weight:800; }}
     .ts-inline-evidence {{ display:grid; place-items:center; width:22px; height:22px; border-radius:50%;
       color:white; background:color-mix(in srgb,var(--ts-accent) 75%,#6e2525); text-decoration:none; font-weight:900; }}
-    .ts-badge-uncorroborated {{ display:inline-block; margin-left:.4rem; padding:.05rem .45rem; border-radius:999px;
-      font-size:.68rem; font-weight:700; white-space:nowrap; color:var(--ts-muted);
-      border:1px solid var(--ts-line); background:var(--ts-soft); vertical-align:middle; }}
+    /* A provenance caveat, sized like one. At bold .68rem inside a chip it
+       carried more weight than the sentence it qualified and broke the
+       reading flow of every prose card; it still has to stay visible and
+       stay next to its own item, so it is quietened rather than hidden. */
+    .ts-badge-uncorroborated {{ display:inline; margin-left:.35rem; padding:0;
+      font-size:.64rem; font-weight:500; white-space:nowrap; color:var(--ts-muted);
+      border:none; background:none; vertical-align:baseline; opacity:.8; }}
+    .ts-badge-uncorroborated::before {{ content:"· "; }}
     .ts-purpose-card.timeline .ts-compact-list {{ position:relative; padding-left:.45rem; }}
     .ts-purpose-card.timeline .ts-compact-list li {{ border-left:2px solid var(--ts-accent); padding-left:.7rem; }}
     /* Two lines, then ellipsis with the full sentence on hover. The reason
@@ -761,6 +772,14 @@ def dashboard_css(dark: bool, accent_theme: str = "orange") -> str:
     .ts-term {{ display:inline-flex; align-items:center; gap:5px; padding:3px 9px;
         border:1px solid var(--ts-border); border-radius:999px; font-size:0.82rem; }}
     .ts-term b {{ color:var(--ts-accent); font-variant-numeric:tabular-nums; }}
+    /* Word frequency is supporting detail, not a finding. At the same weight
+       as a comparison table it read as one, so it takes hashtag scale: no
+       chip border, muted, and small enough to scan past. */
+    .ts-terms-quiet {{ gap:4px 8px; }}
+    .ts-terms-quiet .ts-term {{ border:none; padding:1px 0; font-size:0.72rem;
+      color:var(--ts-muted); gap:3px; }}
+    .ts-terms-quiet .ts-term::before {{ content:"#"; color:var(--ts-border); }}
+    .ts-terms-quiet .ts-term b {{ font-weight:600; font-size:0.66rem; opacity:.75; }}
     .ts-ranking {{ display:grid; gap:.42rem; }}
     .ts-ranking-row {{ display:grid; grid-template-columns:28px minmax(90px,1fr) minmax(80px,1.35fr) 72px;
       align-items:center; gap:.55rem; padding:.34rem 0; border-top:1px solid var(--ts-border);

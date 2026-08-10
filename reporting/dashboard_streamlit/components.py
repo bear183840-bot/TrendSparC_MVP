@@ -32,6 +32,7 @@ from common.content_quality_validator import (
 # Data-shape predicates live in common/block_shapes.py (no Streamlit
 # dependency) and are re-exported here so the renderers that use them, and
 # every existing caller, keep importing from one place.
+from common.metric_identity import metric_identity
 from common.section_titles import section_title
 from common.block_shapes import (  # noqa: F401
     LEVEL_RADIUS_FRACTION as _LEVEL_RADIUS_FRACTION,
@@ -224,11 +225,29 @@ _HEADLINE_STATS: dict[str, tuple[tuple[str, str, str], ...]] = {
 _DEFAULT_HEADLINE_STATS = _HEADLINE_STATS["issue_response"]
 
 
+def _distinct_measurements(points: list[Any]) -> int:
+    """How many different things were measured, not how many readings landed.
+
+    A live run put "확인된 지표 226건" beside a page showing perhaps a dozen
+    figures, because the list counts every reading: the same 가입자 수 in two
+    documents, at two periods, restated in a table and in the sentence above
+    it. As a headline that number answers no question a reader has - it is
+    the size of an intermediate array. Counting identities makes it the
+    claim it looked like all along, and readings that disagree still collapse
+    to the one measurement they disagree about.
+    """
+    return len({metric_identity(point) for point in points})
+
+
+# Fields whose length is not the number the label promises.
+_HEADLINE_COUNTERS = {"metric_series": _distinct_measurements}
+
+
 def headline_stats(synthesis: Any, purpose_id: str | None) -> list[tuple[str, int, str]]:
     """(label, count, accent) for the summary card's side column."""
     spec = _HEADLINE_STATS.get(purpose_id or "", _DEFAULT_HEADLINE_STATS)
     return [
-        (label, len(getattr(synthesis, field, None) or []), accent)
+        (label, _HEADLINE_COUNTERS.get(field, len)(getattr(synthesis, field, None) or []), accent)
         for field, label, accent in spec
     ]
 
@@ -498,6 +517,8 @@ def render_metric_chart(
 
 
 # Chart geometry, in the SVG's own viewBox units (it scales to the container).
+# Kept in step with `.ts-chart-svg { aspect-ratio: 356/150 }` in theme.py -
+# the CSS holds the ratio because the browser needs it before the SVG loads.
 _CHART_W, _CHART_H = 356, 150
 _CHART_LEFT, _CHART_RIGHT = 46, 344      # plot area, leaving a gutter for y labels
 _CHART_TOP, _CHART_BOTTOM = 12, 112      # plot area vertically
@@ -555,6 +576,39 @@ def _chart_y_ticks(low: float, high: float) -> list[float]:
         base = 0.0 if low >= 0 and low <= step else math.floor(low / step) * step
         top = base + step * (_CHART_GRID_LINES - 1)
     return [top - step * index for index in range(_CHART_GRID_LINES)]
+
+
+# Korean magnitude words, largest first. Only exact powers of ten that have a
+# word of their own: there is no unit for 10^6, so 25,000,000 is 2,500만, not
+# "25M".
+_AXIS_SCALES: tuple[tuple[float, str], ...] = ((1e12, "조"), (1e8, "억"), (1e4, "만"))
+
+# Below this a scaled axis reads worse than the raw one: 0.25억 is harder than
+# 25,000,000 is long. Ten keeps at least two significant digits on the axis.
+_AXIS_SCALE_MIN = 10.0
+
+# Shares, rates and indices are already small numbers whose unit *is* the
+# scale. "2.5만%" is not a thing.
+_UNSCALED_UNITS = frozenset({"%", "%p", "％", "배", "점", "위", "건", ""})
+
+
+def axis_scale(values: list[float], unit: str | None) -> tuple[float, str]:
+    """`(divisor, prefix)` for displaying an axis - never for storing a value.
+
+    A subscriber axis was reading 25,000,000 at every gridline, which is
+    accurate and unusable; the reader has to count digits to tell one tick
+    from the next. Only the *label* is divided, and the magnitude word moves
+    into the unit note so the axis still says what it is measuring. The
+    stored `MetricPoint.value` is untouched, so nothing downstream - a KPI
+    card, a table, the evidence trail - sees a rounded number.
+    """
+    if (unit or "").strip() in _UNSCALED_UNITS:
+        return 1.0, ""
+    peak = max((abs(value) for value in values), default=0.0)
+    for divisor, prefix in _AXIS_SCALES:
+        if peak / divisor >= _AXIS_SCALE_MIN:
+            return divisor, prefix
+    return 1.0, ""
 
 
 def _axis_groups(by_label: dict) -> list[list[str]]:
@@ -621,10 +675,19 @@ def _metric_chart_svg(points: list[Any], title: str) -> str:
 
     groups = _axis_groups(by_label)
     ticks_by_group = []
+    scale_by_group: list[tuple[float, str]] = []
     for group in groups:
         group_values = [point.value for label in group for point in by_label[label]]
         ticks_by_group.append(_chart_y_ticks(min(group_values), max(group_values)))
+        group_unit = next(
+            (point.unit for label in group for point in by_label[label] if point.unit), ""
+        )
+        scale_by_group.append(axis_scale(group_values, group_unit))
     axis_of_label = {label: index for index, group in enumerate(groups) for label in group}
+
+    def tick_label(axis: int, tick: float) -> str:
+        divisor, _prefix = scale_by_group[axis]
+        return _format_number(tick / divisor)
 
     def x_of(period: str) -> float:
         if len(periods) == 1:
@@ -645,7 +708,7 @@ def _metric_chart_svg(points: list[Any], title: str) -> str:
         for tick in ticks_by_group[0]
     )
     y_labels = "".join(
-        f'<text x="2" y="{y_on(0, tick) + 3:.1f}">{escape(_format_number(tick))}</text>'
+        f'<text x="2" y="{y_on(0, tick) + 3:.1f}">{escape(tick_label(0, tick))}</text>'
         for tick in ticks_by_group[0]
     )
     # The right-hand axis is tinted with its series' colour, because on a dual
@@ -657,7 +720,7 @@ def _metric_chart_svg(points: list[Any], title: str) -> str:
             f'<g class="ts-chart-axis" text-anchor="end" fill="var(--ts-teal)">'
             + "".join(
                 f'<text x="{_CHART_W - 2}" y="{y_on(1, tick) + 3:.1f}">'
-                f'{escape(_format_number(tick))}</text>'
+                f'{escape(tick_label(1, tick))}</text>'
                 for tick in ticks_by_group[1]
             )
             + "</g>"
@@ -724,7 +787,22 @@ def _metric_chart_svg(points: list[Any], title: str) -> str:
         + "</span>"
         for label in by_label
     )
-    unit_note = f'<span class="ts-chart-unit">단위: {escape(unit)}</span>' if unit else ""
+    # The axis divides its labels, so the note is where the reader is told by
+    # how much. Without it the chart would understate every figure by four
+    # orders of magnitude and say nothing about having done so.
+    left_unit = f"{scale_by_group[0][1]}{unit}"
+    note_parts = [f"단위: {left_unit}"] if left_unit else []
+    if len(groups) > 1:
+        right_raw = next(
+            (point.unit for label in groups[1] for point in by_label[label] if point.unit), ""
+        )
+        right_unit = f"{scale_by_group[1][1]}{right_raw}"
+        if right_unit and right_unit != left_unit:
+            note_parts.append(f"우축 {right_unit}")
+    unit_note = (
+        f'<span class="ts-chart-unit">{escape(" · ".join(note_parts))}</span>'
+        if note_parts else ""
+    )
     if any(getattr(point, "is_forecast", False) for point in points):
         projected_types = list(dict.fromkeys(
             _VALUE_TYPE_LABELS.get(getattr(point, "value_type", "forecast"), "전망")
@@ -737,7 +815,7 @@ def _metric_chart_svg(points: list[Any], title: str) -> str:
     return (
         f'<div class="ts-chart"><div class="ts-chart-head"><b>{escape(title)}</b>{unit_note}</div>'
         f'<div class="ts-chart-legend">{legend}</div>'
-        f'<svg viewBox="0 0 {_CHART_W} {_CHART_H}" preserveAspectRatio="none" class="ts-chart-svg">'
+        f'<svg viewBox="0 0 {_CHART_W} {_CHART_H}" class="ts-chart-svg">'
         '<defs><linearGradient id="tsChartFill" x1="0" y1="0" x2="0" y2="1">'
         '<stop offset="0" stop-color="var(--ts-accent)" stop-opacity=".22"></stop>'
         '<stop offset="1" stop-color="var(--ts-accent)" stop-opacity="0"></stop></linearGradient></defs>'
@@ -1492,15 +1570,18 @@ def render_recurring_terms(grounded_claims: list[Any], limit: int = 8) -> None:
     terms = recurring_terms(grounded_claims or [], limit=limit)
     if not terms:
         return
+    # How the count was arrived at is a caveat, not a finding, and it was
+    # taking three lines of body text under a block whose whole content is a
+    # word count. It belongs where a reader goes looking for it - on the
+    # chip - not in the reading flow ahead of the analysis.
+    method = "이 표현이 등장한 서로 다른 출처 문서의 수. 빈도만 센 것이며 중요도 판단이 아닙니다."
     chips = "".join(
         f'<span class="ts-term" title="{escape(clean_citation(claim.claim))}">'
-        f'{escape(term)}<b>{count}</b></span>'
+        f'{escape(term)}<b title="{escape(method)}">{count}</b></span>'
         for term, count, claim in terms
     )
     st.markdown(
-        f'<div class="ts-terms">{chips}</div>'
-        '<p class="ts-factor-note">숫자는 그 표현이 등장한 <b>서로 다른 출처 문서의 수</b>입니다. '
-        '빈도만 센 것이며 중요도 판단이 아닙니다.</p>',
+        f'<div class="ts-terms ts-terms-quiet" title="{escape(method)}">{chips}</div>',
         unsafe_allow_html=True,
     )
 
@@ -1577,7 +1658,11 @@ def render_importance_bars(
     the model thought were all middling doesn't render as one dominant driver.
     """
     ranked = importance_ranked(grounded_claims or [], limit=limit)
-    if len(ranked) < 2:
+    # Two bars of equal length are not a ranking, and a card headed 영향도
+    # whose every row reads 100 tells the reader only that the model declined
+    # to choose. `has_importance_ranking` refuses these at slot resolution;
+    # this is the same rule where the drawing happens.
+    if len(ranked) < 2 or len({claim.importance for claim in ranked}) < 2:
         return
     # The reason is printed, not hidden behind a tooltip. A score the reader
     # can see and a justification they have to hover to find is exactly the
@@ -1607,7 +1692,10 @@ def render_importance_bars(
         '각 항목 아래에 그렇게 본 이유를 함께 적었습니다.</p>'
     )
     st.markdown(
-        '<section class="ts-drivers"><div class="ts-block-title">질문 결론 영향도 '
+        # "질문 결론 영향도" named a quantity nobody could point at. What the
+        # bars actually order is which findings the model thought mattered
+        # most for this question, so the heading says that.
+        '<section class="ts-drivers"><div class="ts-block-title">질문에 더 중요한 근거 순 '
         '<span class="ts-ai-badge">AI 판단</span></div>' + target +
         note + rows + "</section>",
         unsafe_allow_html=True,
