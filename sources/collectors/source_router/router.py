@@ -86,6 +86,26 @@ def _merge_results(
     return _cap_results(list(by_url.values()), max_results)
 
 
+def _simplify_query_for_retry(query: SearchPlanQuery) -> SearchPlanQuery | None:
+    """Drop every key_term but the first, unquoting the rest in `query.query`.
+
+    A direct query combining two quoted key_terms (e.g. `"롱폼" "숏폼" 미디어
+    소비 현황`) asks web search to satisfy both exact phrases at once, which
+    is exactly the shape live-verified to time out reliably (2026-08-11).
+    Retrying the identical query would just time out again, so this keeps
+    only the query's first key_term quoted and un-quotes the rest, leaving
+    the rest of the query text intact - a strictly smaller ask, not a
+    different one. Returns None when there is nothing to drop (0 or 1
+    key_terms), so the caller knows a retry would be pointless."""
+    if len(query.key_terms) < 2:
+        return None
+    kept, dropped = query.key_terms[0], query.key_terms[1:]
+    simplified_text = query.query
+    for term in dropped:
+        simplified_text = simplified_text.replace(f'"{term}"', term)
+    return query.model_copy(update={"query": simplified_text, "key_terms": [kept]})
+
+
 def _run_queries(
     queries: list[SearchPlanQuery],
     config: SourceRouterConfig,
@@ -102,12 +122,35 @@ def _run_queries(
         if used >= remaining_calls:
             break
         used += 1
-        found = web_search_module.execute_web_search(
-            query.query,
-            model_override=config.search_model,
-            timeout_seconds=config.call_timeout_seconds,
-            max_urls=config.max_urls_per_query,
-        )
+        try:
+            found = web_search_module.execute_web_search(
+                query.query,
+                model_override=config.search_model,
+                timeout_seconds=config.call_timeout_seconds,
+                max_urls=config.max_urls_per_query,
+            )
+        except web_search_module.WebSearchTimeoutError:
+            found = []
+            # Only direct queries get a retry: they're the ones the
+            # coverage hard-gate (_enforce_direct_original_sources) can
+            # never mark satisfied without a verified source, so losing one
+            # to a timeout is far more costly than losing a supporting
+            # query. One retry only - a second timeout is just left as a
+            # miss, never a second retry.
+            if query.query_role == "direct" and used < remaining_calls:
+                simplified = _simplify_query_for_retry(query)
+                if simplified is not None:
+                    used += 1
+                    try:
+                        found = web_search_module.execute_web_search(
+                            simplified.query,
+                            model_override=config.search_model,
+                            timeout_seconds=config.call_timeout_seconds,
+                            max_urls=config.max_urls_per_query,
+                        )
+                        query = simplified
+                    except web_search_module.WebSearchTimeoutError:
+                        found = []
         for result in found:
             domain = (urlparse(result.url).hostname or "").casefold()
             if result.url in (excluded_urls or set()):
@@ -275,19 +318,26 @@ def _search_budget_terms(
 ) -> dict[str, int]:
     """Each term of the budget, so the trace can show the derivation.
 
-    Arithmetic unchanged - this is the same computation _search_budget has
-    always done, named term by term so a run can report why it had the
-    budget it had. `ceiling` (config.max_web_search_calls) is only the cap;
-    reading it as the budget is what made an exactly-met budget look like a
-    premature stop.
+    `ceiling` (config.max_web_search_calls) is only the cap; reading it as
+    the budget is what made an exactly-met budget look like a premature
+    stop.
+
+    Every term below raised +10 (2026-08-11, temporary stopgap): a live run
+    on "롱폼과 숏폼 미디어 소비 트랜드" scored only base+evidence_needs_bonus
+    (6 total) because none of the comparison_temporal_bonus/strategy_bonus
+    keyword lists recognize a question joining two parallel topics with "와/
+    과" instead of "비교"/"vs"/"대비" - that budget was exhausted (2 of 6
+    calls wasted on timed-out queries) before either topic got a verified
+    source. This does not fix the keyword list's blind spot (see the plan's
+    "다음 라운드 후보" note); it only buys more room while that's true.
     """
     return {
-        "base": 4,
-        "evidence_needs_bonus": 2 if len(search_plan.evidence_needs) >= 2 else 0,
-        "comparison_temporal_bonus": 2 if any(
+        "base": 14,
+        "evidence_needs_bonus": 12 if len(search_plan.evidence_needs) >= 2 else 0,
+        "comparison_temporal_bonus": 12 if any(
             token in question.casefold() for token in ("비교", "추이", "변화", "vs", "대비")
         ) else 0,
-        "strategy_bonus": 2 if any(
+        "strategy_bonus": 12 if any(
             token in question for token in ("대응", "전략", "원인", "영향", "추천")
         ) else 0,
         "ceiling": ceiling,
