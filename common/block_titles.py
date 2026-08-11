@@ -47,7 +47,12 @@ SLOT_TITLES: dict[str, str] = {
     "risk": "Risks",
     # 원인분석
     "drivers": "Drivers",
-    "improvement": "Improvement",
+    # Was "Improvement" - live-verified 2026-08-11: this is the same
+    # action-recommendation slot every other purpose titles "Recommended
+    # Actions" (see "response"/"recommendation" above), just under
+    # root_cause's own slot id. One heading for one role, regardless of
+    # which purpose's skeleton reaches it.
+    "improvement": "Recommended Actions",
 }
 
 # Headings a renderer draws *inside* a card, keyed by block type. Separate

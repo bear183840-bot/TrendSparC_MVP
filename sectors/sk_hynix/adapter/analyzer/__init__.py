@@ -8,7 +8,7 @@ from pathlib import Path
 
 from openai import OpenAI
 
-from common.ai_client import openai_client_kwargs
+from common.ai_client import openai_client_kwargs, resolve_model
 from common.analyzer_quality import (
     filter_points_by_verified_claim,
     split_content,
@@ -27,7 +27,13 @@ from sources.openai_retry import call_with_truncation_retry
 
 _API_KEY_ENV_VAR = "TRENDSPARC_SK_HYNIX_ANALYZER_API_KEY"
 _BASE_URL_ENV_VAR = "TRENDSPARC_SK_HYNIX_ANALYZER_BASE_URL"
-_MODEL = "gpt-4o"
+_MODEL_ENV_VAR = "TRENDSPARC_SK_HYNIX_ANALYZER_MODEL"
+
+
+def _model() -> str:
+    return resolve_model(_MODEL_ENV_VAR, _BASE_URL_ENV_VAR, default_openai_model="gpt-4o")
+
+
 _STAGE = "sectors.sk_hynix.adapter.analyzer"
 _ANALYSIS_MAX_TOKENS = 4_500
 _ANALYSIS_MAX_TOKENS_ESCALATED = 7_000
@@ -49,7 +55,11 @@ _CLAIM_SCHEMA = {
     "properties": {
         "claim_id": {"type": "string"},
         "claim_type": {"type": "string", "enum": _CLAIM_TYPES},
-        "claim": {"type": "string"},
+        "claim": {
+            "type": "string",
+            "description": "한국어로 쓸 것. 원문이 영어 등 다른 언어여도 반드시 한국어로 번역·요약. "
+                            "고유명사(회사명·제품명 등)만 원문 표기 유지 가능.",
+        },
         "evidence_passage_id": {"type": ["string", "null"]},
         "evidence_quote": {"type": "string"},
         "evidence_location": {"type": ["string", "null"]},
@@ -102,7 +112,7 @@ def _repair_failed_claims(client: OpenAI, failed: list[dict], passages: list[dic
     payload = {"claims": [{"claim_id": c["claim_id"], "claim": c["claim"]} for c in failed], "passages": passages}
     try:
         response = client.chat.completions.create(
-            model=_MODEL, max_tokens=800, temperature=0,
+            model=_model(), max_tokens=800, temperature=0,
             messages=[{"role": "system", "content": "Repair citations only. Never alter a claim; return an exact quote from a supplied passage or null."}, {"role": "user", "content": json.dumps(payload, ensure_ascii=False)}],
             response_format={"type": "json_schema", "json_schema": {"name": "sk_hynix_quote_repair", "schema": _REPAIR_SCHEMA, "strict": True}},
         )
@@ -118,7 +128,7 @@ def _analyze_part(client: OpenAI, system_prompt: str, document: SourceDocument, 
     user_content = json.dumps({"question": question, "document": {"title": document.title, "url": document.url, "evidence_passages": passages}}, ensure_ascii=False)
     try:
         response, _ = call_with_truncation_retry(
-            lambda max_tokens: client.chat.completions.create(model=_MODEL, max_tokens=max_tokens, messages=[{"role": "system", "content": system_prompt}, {"role": "user", "content": user_content}], response_format={"type": "json_schema", "json_schema": {"name": "sk_hynix_document_analysis", "schema": _ANALYSIS_SCHEMA, "strict": True}}),
+            lambda max_tokens: client.chat.completions.create(model=_model(), max_tokens=max_tokens, messages=[{"role": "system", "content": system_prompt}, {"role": "user", "content": user_content}], response_format={"type": "json_schema", "json_schema": {"name": "sk_hynix_document_analysis", "schema": _ANALYSIS_SCHEMA, "strict": True}}),
             [_ANALYSIS_MAX_TOKENS, _ANALYSIS_MAX_TOKENS_ESCALATED],
         )
         message = response.choices[0].message

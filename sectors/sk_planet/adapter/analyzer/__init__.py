@@ -3,19 +3,21 @@ from __future__ import annotations
 import json, os
 from pathlib import Path
 from openai import OpenAI
-from common.ai_client import openai_client_kwargs
+from common.ai_client import openai_client_kwargs, resolve_model
 from common.analyzer_quality import filter_points_by_verified_claim, split_content, split_evidence_passages, verify_claim_quotes
 from common.content_quality_validator import COMPARISON_COMPLETENESS_INSTRUCTION, RELATIVE_METRIC_EXTRACTION_INSTRUCTION, SWOT_COMPLETENESS_INSTRUCTION, TABLE_COMPLETENESS_INSTRUCTION
 from common.contracts import DocumentAnalysis, SourceDocument
 from common.errors import PipelineStageError
 from sources.openai_retry import call_with_truncation_retry
 
-_API_KEY_ENV_VAR="TRENDSPARC_SK_PLANET_ANALYZER_API_KEY"; _BASE_URL_ENV_VAR="TRENDSPARC_SK_PLANET_ANALYZER_BASE_URL"; _MODEL="gpt-4o"; _STAGE="sectors.sk_planet.adapter.analyzer"
+_API_KEY_ENV_VAR="TRENDSPARC_SK_PLANET_ANALYZER_API_KEY"; _BASE_URL_ENV_VAR="TRENDSPARC_SK_PLANET_ANALYZER_BASE_URL"; _MODEL_ENV_VAR="TRENDSPARC_SK_PLANET_ANALYZER_MODEL"; _STAGE="sectors.sk_planet.adapter.analyzer"
+def _model() -> str:
+    return resolve_model(_MODEL_ENV_VAR, _BASE_URL_ENV_VAR, default_openai_model="gpt-4o")
 _ANALYSIS_MAX_TOKENS=4500; _ANALYSIS_MAX_TOKENS_ESCALATED=7000; _MAX_CLAIMS_PER_CALL=20; _MAX_METRIC_POINTS_PER_CALL=16; _MAX_COMPARISON_POINTS_PER_CALL=8
 _SECTOR_ROOT=Path(__file__).resolve().parent.parent.parent; _PROJECT_ROOT=_SECTOR_ROOT.parent.parent
 _ANALYZER_PROMPT_PATH=_PROJECT_ROOT/"prompts"/"analyzer_system_prompt.md"; _SECTOR_PROMPT_PATH=_SECTOR_ROOT/"prompts"/"analyzer_prompt.md"
 _TYPES=["key_point","business_impact","risk","opportunity","strength","weakness","comparison","metric","factor","action","monitoring"]
-_CLAIM={"type":"object","properties":{"claim_id":{"type":"string"},"claim_type":{"type":"string","enum":_TYPES},"claim":{"type":"string"},"evidence_passage_id":{"type":["string","null"]},"evidence_quote":{"type":"string"},"evidence_location":{"type":["string","null"]},"as_of_date":{"type":["string","null"]},"confidence":{"type":"string","enum":["low","medium","high"]}},"required":["claim_id","claim_type","claim","evidence_passage_id","evidence_quote","evidence_location","as_of_date","confidence"],"additionalProperties":False}
+_CLAIM={"type":"object","properties":{"claim_id":{"type":"string"},"claim_type":{"type":"string","enum":_TYPES},"claim":{"type":"string","description":"한국어로 쓸 것. 원문이 영어 등 다른 언어여도 반드시 한국어로 번역·요약. 고유명사(회사명·제품명 등)만 원문 표기 유지 가능."},"evidence_passage_id":{"type":["string","null"]},"evidence_quote":{"type":"string"},"evidence_location":{"type":["string","null"]},"as_of_date":{"type":["string","null"]},"confidence":{"type":"string","enum":["low","medium","high"]}},"required":["claim_id","claim_type","claim","evidence_passage_id","evidence_quote","evidence_location","as_of_date","confidence"],"additionalProperties":False}
 _METRIC={"type":"object","properties":{"label":{"type":"string"},"period":{"type":"string"},"value":{"type":"number"},"unit":{"type":["string","null"]},"subject":{"type":["string","null"]},"is_relative":{"type":"boolean"},"comparison_period":{"type":["string","null"]},"value_origin":{"type":"string","enum":["source"]},"evidence_claim_id":{"type":"string"}},"required":["label","period","value","unit","subject","is_relative","comparison_period","value_origin","evidence_claim_id"],"additionalProperties":False}
 _COMPARISON={"type":"object","properties":{"entity":{"type":"string"},"criterion":{"type":"string"},"value":{"type":"string"},"level":{"type":["string","null"],"enum":["low","medium","high",None]},"evidence_claim_id":{"type":"string"}},"required":["entity","criterion","value","level","evidence_claim_id"],"additionalProperties":False}
 _ANALYSIS_SCHEMA={"type":"object","properties":{"summary":{"type":"string"},"relevance_level":{"type":"string","enum":["direct","partial","background","irrelevant"]},"grounded_claims":{"type":"array","maxItems":_MAX_CLAIMS_PER_CALL,"items":_CLAIM},"metric_points":{"type":"array","maxItems":_MAX_METRIC_POINTS_PER_CALL,"items":_METRIC},"comparison_points":{"type":"array","maxItems":_MAX_COMPARISON_POINTS_PER_CALL,"items":_COMPARISON},"analysis_confidence":{"type":"string","enum":["low","medium","high"]}},"required":["summary","relevance_level","grounded_claims","metric_points","comparison_points","analysis_confidence"],"additionalProperties":False}
@@ -23,13 +25,13 @@ _REPAIR={"type":"object","properties":{"repairs":{"type":"array","items":{"type"
 def _load_system_prompt(): return "\n\n".join([_ANALYZER_PROMPT_PATH.read_text(encoding="utf-8"),_SECTOR_PROMPT_PATH.read_text(encoding="utf-8"),SWOT_COMPLETENESS_INSTRUCTION,COMPARISON_COMPLETENESS_INSTRUCTION,TABLE_COMPLETENESS_INSTRUCTION,RELATIVE_METRIC_EXTRACTION_INSTRUCTION])
 def _repair(client,failed,passages):
  if not failed:return []
- try:r=client.chat.completions.create(model=_MODEL,max_tokens=800,temperature=0,messages=[{"role":"system","content":"Repair citations only. Never alter a claim; return an exact quote from a supplied passage or null."},{"role":"user","content":json.dumps({"claims":[{"claim_id":c["claim_id"],"claim":c["claim"]} for c in failed],"passages":passages},ensure_ascii=False)}],response_format={"type":"json_schema","json_schema":{"name":"sk_planet_quote_repair","schema":_REPAIR,"strict":True}}); repairs=json.loads(r.choices[0].message.content)["repairs"]
+ try:r=client.chat.completions.create(model=_model(),max_tokens=800,temperature=0,messages=[{"role":"system","content":"Repair citations only. Never alter a claim; return an exact quote from a supplied passage or null."},{"role":"user","content":json.dumps({"claims":[{"claim_id":c["claim_id"],"claim":c["claim"]} for c in failed],"passages":passages},ensure_ascii=False)}],response_format={"type":"json_schema","json_schema":{"name":"sk_planet_quote_repair","schema":_REPAIR,"strict":True}}); repairs=json.loads(r.choices[0].message.content)["repairs"]
  except Exception:return []
  originals={c["claim_id"]:c for c in failed}; return [{**originals[x["claim_id"]],**x} for x in repairs if x.get("claim_id") in originals and x.get("evidence_quote")]
 def _part(client,prompt,doc,question,content):
  passages=split_evidence_passages(content); user=json.dumps({"question":question,"document":{"title":doc.title,"url":doc.url,"evidence_passages":passages}},ensure_ascii=False)
  try:
-  response,_=call_with_truncation_retry(lambda m:client.chat.completions.create(model=_MODEL,max_tokens=m,messages=[{"role":"system","content":prompt},{"role":"user","content":user}],response_format={"type":"json_schema","json_schema":{"name":"sk_planet_document_analysis","schema":_ANALYSIS_SCHEMA,"strict":True}}),[_ANALYSIS_MAX_TOKENS,_ANALYSIS_MAX_TOKENS_ESCALATED]); message=response.choices[0].message
+  response,_=call_with_truncation_retry(lambda m:client.chat.completions.create(model=_model(),max_tokens=m,messages=[{"role":"system","content":prompt},{"role":"user","content":user}],response_format={"type":"json_schema","json_schema":{"name":"sk_planet_document_analysis","schema":_ANALYSIS_SCHEMA,"strict":True}}),[_ANALYSIS_MAX_TOKENS,_ANALYSIS_MAX_TOKENS_ESCALATED]); message=response.choices[0].message
   if message.refusal:raise PipelineStageError(stage=_STAGE,reason="analysis refused",detail=message.refusal)
   data=json.loads(message.content)
  except PipelineStageError:raise

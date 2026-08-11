@@ -779,8 +779,16 @@ def _landscape_context(points: list[Any]) -> tuple[set[str], set[str], set[str],
         families.add("market_size")
     if re.search(r"\b(?:share|cagr|growth|rate)\b|점유율|비중|구성비|성장률|증가율|감소율|증감률", raw):
         families.add("market_structure")
+    # Year-only, not the full (flag, year, quarter) sort key: this is an
+    # "are these two blocks describing the same time context" overlap test,
+    # not a chronological ordering, and a trend point stated as a bare
+    # "2025년" legitimately shares its year with a share point stated as
+    # "2025년 상반기" - narrowing this to full sort-key equality would make
+    # a landscape's donut incompatible with its own trend chart the moment
+    # either side states a quarter/half the other doesn't, for no reason
+    # this check actually cares about.
     periods = {
-        period_sort_key(getattr(point, "period", ""))
+        period_sort_key(getattr(point, "period", ""))[:2]
         for point in points if is_time_period(getattr(point, "period", ""))
     }
     return topics, scopes, families, periods
@@ -1526,36 +1534,46 @@ def rank_kpi_candidates(
     return candidates[:limit]
 
 
-def headline_kpi(metric_points: list[Any], question: str | None) -> Any | None:
+def headline_kpi(
+    metric_points: list[Any], question: str | None, core_entities: list[str] | None = None,
+) -> Any | None:
     """The one figure that answers the question, or None if there isn't one.
 
     Deliberately not a new notion of importance. It is the top of
     `rank_kpi_candidates` - the same relevance-over-recency ranking the KPI
-    grid already uses - narrowed by the two conditions that make a figure
+    grid already uses - narrowed by the conditions that make a figure
     quotable on its own:
 
     * it is grounded, meaning it carries the claim id of a quote verified
       against the source text (`evidence_claim_id`), and a document to go
       back to;
     * it actually answers *this* question, meaning its label matches at
-      least one term of it.
+      least one term of it;
+    * when `core_entities` is given (see `executive_summary_supporting_kpis`
+      for why - generic sector words like "배터리" match a market-wide
+      figure exactly as well as the company being asked about), it also
+      names one of them.
 
-    The second condition is what leaves the slot empty rather than filling
-    it. A question that no single number answers - "왜 가입자가 줄었나" - has
-    no headline KPI, and putting the largest figure lying around there would
-    assert a relevance nothing established.
+    These are what leave the slot empty rather than filling it. A question
+    that no single number answers - "왜 가입자가 줄었나" - has no headline
+    KPI, and putting the largest figure lying around there would assert a
+    relevance nothing established.
     """
     terms = [term.casefold() for term in (question or "").split() if len(term) >= 2]
     if not terms:
         return None
+    entities = [entity.casefold() for entity in (core_entities or []) if entity]
     for point in rank_kpi_candidates(metric_points, (question or "").split()):
         if not getattr(point, "evidence_claim_id", None):
             continue
         if not (getattr(point, "doc_id", None) or getattr(point, "source_url", None)):
             continue
         label = f"{getattr(point, 'label', '') or ''} {getattr(point, 'subject', '') or ''}".casefold()
-        if any(term in label for term in terms):
-            return point
+        if not any(term in label for term in terms):
+            continue
+        if entities and not any(entity in label for entity in entities):
+            continue
+        return point
     return None
 
 
@@ -1567,6 +1585,7 @@ def executive_summary_supporting_kpis(
     question: str | None,
     headline_point: Any | None,
     limit: int = _EXEC_SUMMARY_KPI_LIMIT,
+    core_entities: list[str] | None = None,
 ) -> list[Any]:
     """A few more figures worth a small KPI card beside the summary's
     headline number - "[핵심 메시지] [KPI][KPI][KPI]", never a text
@@ -1576,8 +1595,31 @@ def executive_summary_supporting_kpis(
     metric the headline already shows - a caller seeds these into
     `resolve_slots`'s dedup state (see `common/purpose_slots.
     kpi_evidence_key`) so Key Metrics does not repeat them either.
+
+    `core_entities` (the entity stage's own extracted organizations/
+    technologies for this question, when the caller has them) is an
+    optional hard filter on top of the soft ranking. Live-verified
+    2026-08-11: "SK온 배터리 사업 수익성 부진의 원인은?" ranked a
+    2040-forecast humanoid-robot battery-demand figure into a supporting
+    KPI slot, because `rank_kpi_candidates`'s term overlap counts generic
+    sector words ("배터리") the same as the actual company name ("SK온") -
+    a figure about the whole battery market scored exactly as "relevant" as
+    one about the company being asked about. Entities are a much sharper
+    signal (they name *who* the question is about, not just its topic
+    vocabulary), so when they're available, a candidate whose label+subject
+    names none of them is dropped rather than padded in to fill the quota -
+    same "don't force-fill" principle as `_driver_bars`.
     """
     candidates = rank_kpi_candidates(metric_points, (question or "").split())
+    if core_entities:
+        entities = [entity.casefold() for entity in core_entities if entity]
+        candidates = [
+            point for point in candidates
+            if any(
+                entity in f"{getattr(point, 'label', '') or ''} {getattr(point, 'subject', '') or ''}".casefold()
+                for entity in entities
+            )
+        ]
     if headline_point is not None:
         headline_key = semantic_metric_key(getattr(headline_point, "label", None))
         candidates = [

@@ -723,9 +723,17 @@ def render_generic_dashboard(
     presentation = load_audience_presentation(audience_id)
 
     render_page_header(question, sector, audience, purpose)
-    headline_point = headline_kpi(synthesis.metric_series, question)
+    # Organizations only, not technologies: a technology entity like "배터리"
+    # or "ESS" is the sector's own topic vocabulary - true of a company's own
+    # figures and of an unrelated industry-wide statistic alike, so it can't
+    # tell them apart. An organization name is what actually distinguishes
+    # "about the company this question asks about" from "about the market
+    # generally" - see `executive_summary_supporting_kpis`'s docstring.
+    entities = getattr(result, "entities", None)
+    core_entities = list(getattr(entities, "organizations", None) or [])
+    headline_point = headline_kpi(synthesis.metric_series, question, core_entities)
     supporting_points = executive_summary_supporting_kpis(
-        synthesis.metric_series, question, headline_point,
+        synthesis.metric_series, question, headline_point, core_entities=core_entities,
     )
     comparison = executive_summary_comparison(synthesis.metric_series)
     # If Landscape will pair this same composition with its trend chart

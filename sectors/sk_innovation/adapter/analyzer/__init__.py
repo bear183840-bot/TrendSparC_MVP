@@ -8,7 +8,7 @@ from pathlib import Path
 
 from openai import OpenAI
 
-from common.ai_client import openai_client_kwargs
+from common.ai_client import openai_client_kwargs, resolve_model
 from common.analyzer_quality import (
     filter_points_by_verified_claim,
     split_content,
@@ -27,7 +27,13 @@ from sources.openai_retry import call_with_truncation_retry
 
 _API_KEY_ENV_VAR = "TRENDSPARC_SK_INNOVATION_ANALYZER_API_KEY"
 _BASE_URL_ENV_VAR = "TRENDSPARC_SK_INNOVATION_ANALYZER_BASE_URL"
-_MODEL = "gpt-4o"
+_MODEL_ENV_VAR = "TRENDSPARC_SK_INNOVATION_ANALYZER_MODEL"
+
+
+def _model() -> str:
+    return resolve_model(_MODEL_ENV_VAR, _BASE_URL_ENV_VAR, default_openai_model="gpt-4o")
+
+
 _STAGE = "sectors.sk_innovation.adapter.analyzer"
 _ANALYSIS_MAX_TOKENS = 4_500
 _ANALYSIS_MAX_TOKENS_ESCALATED = 7_000
@@ -58,7 +64,11 @@ _CLAIM_SCHEMA = {
     "properties": {
         "claim_id": {"type": "string"},
         "claim_type": {"type": "string", "enum": _CLAIM_TYPES},
-        "claim": {"type": "string"},
+        "claim": {
+            "type": "string",
+            "description": "한국어로 쓸 것. 원문이 영어 등 다른 언어여도 반드시 한국어로 번역·요약. "
+                            "고유명사(회사명·제품명 등)만 원문 표기 유지 가능.",
+        },
         "evidence_passage_id": {"type": ["string", "null"]},
         "evidence_quote": {"type": "string"},
         "evidence_location": {"type": ["string", "null"]},
@@ -214,7 +224,7 @@ def _repair_failed_claims(
     }
     try:
         response = client.chat.completions.create(
-            model=_MODEL,
+            model=_model(),
             max_tokens=800,
             temperature=0,
             messages=[
@@ -296,7 +306,7 @@ def _analyze_part(
     try:
         response, _ = call_with_truncation_retry(
             lambda max_tokens: client.chat.completions.create(
-                model=_MODEL,
+                model=_model(),
                 max_tokens=max_tokens,
                 messages=[
                     {"role": "system", "content": system_prompt},

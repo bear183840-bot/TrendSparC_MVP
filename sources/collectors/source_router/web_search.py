@@ -131,6 +131,31 @@ def _coerce_value(raw) -> float | None:
         return None
 
 
+_VALID_VALUE_TYPES = {"actual", "estimate", "forecast", "target", "guidance", "planned"}
+
+
+def _coerce_value_type(raw) -> str | None:
+    """KeyFact.value_type is a strict enum, but this is a plain-text-prompted
+    reply (not a strict JSON schema tool call - see this module's docstring),
+    so the model sometimes writes a compound guess like "actual/forecast"
+    instead of committing to one value. Live-verified 2026-08-11: that exact
+    string crashed the whole search call with a pydantic ValidationError,
+    same failure mode _coerce_value already guards value against. Splits on
+    common delimiters and keeps the first recognized token; falls back to
+    None ("the model didn't commit to one") rather than guessing which half
+    is right - same spirit as _coerce_value's "no clean number stated"."""
+    if not raw:
+        return None
+    text = str(raw).strip().casefold()
+    if text in _VALID_VALUE_TYPES:
+        return text
+    for token in re.split(r"[/,&]|\bor\b", text):
+        token = token.strip()
+        if token in _VALID_VALUE_TYPES:
+            return token
+    return None
+
+
 def _parse_results(text: str, grounded: set[str]) -> list[WebSearchResult]:
     match = re.search(r"\[.*\]", text, re.DOTALL)
     if not match:
@@ -155,7 +180,7 @@ def _parse_results(text: str, grounded: set[str]) -> list[WebSearchResult]:
                 value=_coerce_value(fact.get("value")),
                 unit=fact.get("unit") or None,
                 time=fact.get("time") or None,
-                value_type=fact.get("value_type") or None,
+                value_type=_coerce_value_type(fact.get("value_type")),
             )
             for fact in item.get("key_facts", []) or []
             if isinstance(fact, dict) and str(fact.get("text", "")).strip()

@@ -244,6 +244,15 @@ def dashboard_css(dark: bool, accent_theme: str = "orange") -> str:
     .ts-landing {{ min-height:43vh; display:flex; flex-direction:column; align-items:center;
       justify-content:flex-end; padding:3vh 0 2.1rem; text-align:center; }}
     .ts-landing .ts-wordmark {{ font-size:5.35rem; }}
+    /* Sits directly above the logo, deliberately quieter than both the
+       wordmark and "What Trend should we Spark?" - a one-line service
+       description, not a second title. `.ts-landing` is already
+       `justify-content:flex-end`, so adding this as the section's first
+       child pushes the whole (tagline+logo+title) group up as one unit
+       rather than shifting the logo/title's own position - no separate
+       margin tuning needed to keep their relative spacing intact. */
+    .ts-landing-tagline {{ margin:0 0 4rem!important; font-size:1.04rem!important;
+      font-weight:700!important; color:var(--ts-muted)!important; letter-spacing:-.005em; }}
     .ts-question-title {{ margin:1.6rem 0 0!important; font-family:"Pretendard Variable",Pretendard,sans-serif!important;
       font-size:clamp(1.5rem,2.4vw,2.35rem)!important; font-weight:600!important; letter-spacing:-.02em!important;
       color:var(--ts-ink)!important; }}
@@ -296,8 +305,14 @@ def dashboard_css(dark: bool, accent_theme: str = "orange") -> str:
        summary the whole width instead of leaving a hole. */
     .ts-headline-kpi {{ display:flex; flex-direction:column; justify-content:center;
       gap:.12rem; height:100%; padding:0 .35rem; }}
-    .ts-headline-kpi small {{ color:var(--ts-muted); font-size:.68rem; font-weight:700;
-      text-transform:uppercase; letter-spacing:.05em; }}
+    /* Live-verified 2026-08-11: an uppercase+letterspaced label mixing a
+       Latin abbreviation with Korean ("ESS 우선 협상권") read as garbled at
+       .68rem - the transform doesn't change Korean glyphs, but it does
+       shrink/space the Latin run enough that "ESS" misread as noise next to
+       the Korean that follows. Bumped size and dropped the transform/
+       spacing that bought legibility for pure-Latin acronyms at the cost of
+       mixed-script ones. */
+    .ts-headline-kpi small {{ color:var(--ts-muted); font-size:.72rem; font-weight:700; }}
     .ts-headline-kpi b {{ font-size:1.9rem; font-weight:850; letter-spacing:-.03em;
       color:var(--ts-ink); line-height:1.05; }}
     .ts-headline-unit {{ font-size:.72rem; font-weight:600; color:var(--ts-muted); }}
@@ -793,6 +808,21 @@ def dashboard_css(dark: bool, accent_theme: str = "orange") -> str:
        chart+donut pair apart under it. Streamlit draws the expander
        itself, so only its chrome is restyled; content stays full - this
        is density, not truncation. */
+    /* `st.form` (the intake question box) carries Streamlit's own default
+       max-width:1080px, centered with auto margins - that's the width the
+       page is actually designed around. Live-verified 2026-08-11: an
+       earlier pass widened the form to match the "저장된 실행 결과 열기"
+       expander below it instead of narrowing the expander to match the
+       form, which was backwards - the form's width is the page's real
+       baseline (it also sets the meta row/Start! button's width, since
+       those are columns *inside* it), not the expander's incidental full
+       width. Scoped to `.ts-saved-run-row` (wraps just this one expander,
+       via a keyed `st.container`) rather than `[data-testid="stExpander"]`
+       generally, which would also shrink unrelated expanders elsewhere on
+       the page (AI Insight, Evidence & Sources, ...) that were never part
+       of this row. */
+    [class*="st-key-landing_saved_run"] [data-testid="stExpander"] {{
+      max-width:1080px; margin-left:auto; margin-right:auto; }}
     [data-testid="stExpander"] details {{ border:1px solid var(--ts-accent); border-radius:8px;
       background:var(--ts-panel); margin:.3rem 0 0; }}
     [data-testid="stExpander"] summary {{ color:var(--ts-accent); font-weight:700;
@@ -825,9 +855,16 @@ def dashboard_css(dark: bool, accent_theme: str = "orange") -> str:
        Live-verified 2026-08-11. `flex:0 0 auto` makes the column shrink-wrap
        its content instead of stretching to its nominal fraction; the chart
        column takes whatever is left. */
+    /* Live-verified again 2026-08-11: `flex:1 1 auto` on the chart column
+       still left a wide gap before the donut, because `.ts-chart` below has
+       its own `max-width:540px` cap - the *column* kept growing to fill the
+       row's remaining width regardless, and the (narrower, left-aligned)
+       chart just sat in the left part of that oversized box. The column
+       has to stop growing at its content's width too, or capping the chart
+       alone can't close the gap. */
     :is(div[data-testid="stVerticalBlockBorderWrapper"],div[data-testid="stVerticalBlock"][data-test-scroll-behavior]):has(.ts-landscape)
       div[data-testid="stHorizontalBlock"] > div[data-testid="stColumn"]:first-child {{
-      flex:1 1 auto !important; min-width:0; }}
+      flex:0 1 auto !important; min-width:0; }}
     :is(div[data-testid="stVerticalBlockBorderWrapper"],div[data-testid="stVerticalBlock"][data-test-scroll-behavior]):has(.ts-landscape)
       div[data-testid="stHorizontalBlock"] > div[data-testid="stColumn"]:last-child {{
       /* `width:auto` alone collapsed this column to ~10px in the running
@@ -880,7 +917,27 @@ def dashboard_css(dark: bool, accent_theme: str = "orange") -> str:
         div[data-testid="stColumn"] + div[data-testid="stColumn"] {{
         border-left:none; padding-left:0; margin-left:0;
         border-top:1px solid var(--ts-line); padding-top:.6rem; margin-top:.6rem; }}
+      .ts-landing-tagline {{ font-size:.74rem; padding:0 .8rem; }}
     }}
+    /* A row of slot cards (Key Comparisons beside Competitive Landscape,
+       Problem beside its row-mates, ...) used to stretch every card in the
+       row to match the tallest one - Streamlit's `stHorizontalBlock` is a
+       flex row with the browser default `align-items:stretch`, and nothing
+       here had overridden it for the general case (only the landscape
+       card's own internal row was scoped). A short card next to a long one
+       then carried a slab of blank space at its own bottom instead of
+       ending where its content ends. Scoped with `:has()` to rows whose
+       columns are slot cards specifically (`.ts-card-inner` is every slot
+       card's own title wrapper), so this doesn't touch narrower internal
+       `st.columns()` uses (KPI grids, table cells, the landscape card's own
+       donut+chart pairing above) that legitimately want equal-height cells.
+       True masonry (a shorter card's row-mate below it rising to fill the
+       gap) isn't possible without a JS packing library - CSS grid/flexbox
+       can't reflow content across rows - so this is the honest stopping
+       point: no forced stretch, no reserved dead space, cards simply end
+       where their content ends. */
+    div[data-testid="stHorizontalBlock"]:has(> div[data-testid="stColumn"] .ts-card-inner) {{
+      align-items:flex-start; }}
     .ts-metric-snapshot {{ display:grid; gap:.35rem; }}
     .ts-metric-snapshot > b {{ font-size:.76rem; color:var(--ts-muted); }}
     .ts-metric-snapshot-row {{ display:flex; align-items:baseline; justify-content:space-between;

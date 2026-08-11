@@ -25,6 +25,13 @@ MetricShape = Literal["kpi", "bar", "line", "comparison"]
 
 _YEAR_RE = re.compile(r"(20\d{2}|\d{2})")
 _QUARTER_RE = re.compile(r"([1-4])\s*(?:Q|분기)", re.I)
+# Named distinctly from the unrelated `_HALF_RE` below (line ~341, used by
+# `resolve_relative_period`) - both matched module scope under the same
+# name would silently let whichever is defined later in the file win, and
+# that one's group(1) captures the whole word ("상반기"), not the "상"/"하"
+# single-character split `period_sort_key` needs. Live-verified 2026-08-11:
+# exactly this collision made every half-year period sort as quarter 4.
+_HALF_YEAR_RE = re.compile(r"(상|하)반기")
 _TIMELINE_DATE_RE = re.compile(r"(20\d{2}\s*년(?:\s*\d{1,2}\s*월)?|[1-4]\s*분기|\d{1,2}\s*월\s*\d{1,2}\s*일)")
 
 
@@ -869,15 +876,33 @@ def period_sort_key(period: str) -> tuple:
     A period with a year but no quarter ("2025년") sorts by its year, at
     quarter 0. Real evidence mixes annual and quarterly figures freely, and
     treating the annual one as unparseable pushed it behind every quarterly
-    period regardless of year - so "2026년 1분기" landed before "2025년"."""
+    period regardless of year - so "2026년 1분기" landed before "2025년".
+
+    "상반기"/"하반기" (half-year) periods used to fall through to the same
+    quarter-0 bucket as a bare year, tying every half-year period in a given
+    year to an identical sort key - live-verified 2026-08-11: with the tie
+    broken by arbitrary set-iteration order (`period_sort_key` is used to
+    sort a `set` of period strings), "2023년 하반기" landed to the left of
+    "2023년 상반기" on a trend chart's x-axis, and the line connecting them
+    zigzagged backward before continuing forward. Mapped onto the same
+    quarter scale as an actual quarter number (상반기→2, 하반기→4) so a
+    half-year period sorts consistently relative to both other half-years
+    and any quarter-labeled periods mixed into the same series."""
     year_m = _YEAR_RE.search(period or "")
     quarter_m = _QUARTER_RE.search(period or "")
+    half_m = _HALF_YEAR_RE.search(period or "") if not quarter_m else None
     if not year_m:
         return (1, period or "")
     year = int(year_m.group(1))
     if year < 100:
         year += 2000
-    return (0, year, int(quarter_m.group(1)) if quarter_m else 0)
+    if quarter_m:
+        quarter = int(quarter_m.group(1))
+    elif half_m:
+        quarter = 2 if half_m.group(1) == "상" else 4
+    else:
+        quarter = 0
+    return (0, year, quarter)
 
 # Words that signal a *prescriptive* ask ("how do I improve/increase this")
 # layered on top of what might otherwise read as a pure status question -
