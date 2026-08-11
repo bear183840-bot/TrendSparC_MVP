@@ -2030,6 +2030,14 @@ def render_kpi_row(
                 else escape(value_unit)
             )
         )
+        # A source-stated `subject` is normally a different axis from
+        # `label` ("SK브로드밴드" vs "가입자 수"), but a malformed extraction
+        # can leave the two identical - live-verified: a label of "정책지원
+        # 등에 힘입어" with matching subject repeated the same phrase twice
+        # on one card (once as the label, once as the caption's subject).
+        # Treat a subject that just echoes the label as no subject at all,
+        # rather than printing the same text twice.
+        subject = latest.subject if latest.subject and latest.subject.strip() != label.strip() else None
         if is_chronological and len(observed) >= 2:
             delta = latest.value - observed[0].value
             sign = "+" if delta >= 0 else ""
@@ -2040,8 +2048,8 @@ def render_kpi_row(
             )
         elif len(points) >= 2:
             caption_text = f"{escape(latest.period)} 기준 · {len(points)}개 대상 비교"
-        elif latest.subject:
-            caption_text = f"{escape(latest.subject)} · {escape(latest.period)} 기준"
+        elif subject:
+            caption_text = f"{escape(subject)} · {escape(latest.period)} 기준"
         else:
             caption_text = f"{escape(latest.period)} 기준"
         spark = _sparkline_svg(observed) if is_chronological and len(observed) >= 3 else ""

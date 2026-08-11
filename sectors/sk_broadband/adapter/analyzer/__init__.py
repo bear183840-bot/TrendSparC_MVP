@@ -962,6 +962,24 @@ def _grounded_unit(unit: str, text: str) -> str | None:
     return unit if any(candidate in normalized_text for candidate in candidates) else None
 
 
+# The schema (see `label`'s description above) tells the model to name the
+# metric itself, not the reason it moved - but a live run still returned a
+# label of "정책지원 등에 힘입어" ("thanks to policy support") for a 2%
+# forecast figure: the causal clause that was *supposed* to stay in the
+# surrounding evidence sentence became the label instead. That reads as
+# meaningless (and, worse, positively-framed) content wherever the metric
+# lands - e.g. a "Problem" slot showing a policy-support tailwind. A prompt
+# instruction is a request, not a guarantee (same reasoning as
+# `_coerce_value_type` in web_search.py), so this is the deterministic
+# backstop: any label ending in a Korean causal connective names why a
+# number changed, never what the number is, and is dropped rather than
+# rendered as if it were a metric name.
+_CAUSAL_LABEL_SUFFIX_RE = re.compile(
+    r"(힘입어|덕분에|덕택에|영향으로|영향을\s*받아|때문에|으로\s*인해|인해서?|기인(?:해|하여)?|"
+    r"비롯(?:돼|되어)|계기로|따라서?)\s*$"
+)
+
+
 def _verified_metric_points(
     data: dict,
     analyzed_content: str,
@@ -979,6 +997,8 @@ def _verified_metric_points(
         for passage in (evidence_passages or [])
     }
     for point in data.get("metric_points", []):
+        if _CAUSAL_LABEL_SUFFIX_RE.search(str(point.get("label", "")).strip()):
+            continue
         value = point.get("value")
         if not isinstance(value, (int, float)) or not _number_is_in_content(float(value), analyzed_content):
             continue
