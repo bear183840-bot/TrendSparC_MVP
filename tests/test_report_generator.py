@@ -7,6 +7,7 @@ from common.contracts import (
 )
 from core.report_generator.generator import generate_report
 from core.report_planner.planner import plan_report
+from core.question_brief import build_fulfillment, build_rule_based_question_brief
 from core.synthesis.synthesizer import synthesize
 from core.report_generator import generator as generator_module
 
@@ -115,6 +116,28 @@ def test_report_generator_creates_distinct_issue_impact_action_sections(monkeypa
     assert report.generation_mode == "rule_based"
     assert report.unique_source_count == 1
     assert any("고유 출처" in limitation for limitation in report.limitations)
+
+
+def test_fallback_report_discloses_partial_question_brief_without_inventing_an_answer(monkeypatch):
+    monkeypatch.delenv("TRENDSPARC_REPORT_GENERATOR_API_KEY", raising=False)
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    synthesis = _synthesis()
+    plan = plan_report(synthesis, "executive", "issue_response")
+    brief = build_fulfillment(
+        build_rule_based_question_brief("req_report", "중앙그룹 회생 사태에 따른 IPTV사의 대응 방안"),
+        synthesis,
+    )
+
+    report = generate_report(
+        "중앙그룹 회생 사태에 따른 IPTV사의 대응 방안",
+        synthesis,
+        plan,
+        "executive",
+        question_brief=brief,
+    )
+
+    assert any("확인된 범위:" in limitation for limitation in report.limitations)
+    assert any("확인하지 못한 근거 형태:" in limitation for limitation in report.limitations)
 
 
 def test_fallback_report_carries_structured_fields_into_market_status_section():

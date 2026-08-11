@@ -167,6 +167,28 @@ def test_entity_runtime_prompt_is_compact_without_losing_search_guards():
     assert "both Korean and English forms" in _COMPACT_SYSTEM_PROMPT
 
 
+def test_question_brief_refinement_prompt_keeps_scope_and_evidence_guards():
+    """This prompt controls a contract, not free-form brainstorming.
+
+    Removing any one of these clauses reopens an observed failure mode: the
+    model answering early, dropping an explicit ask, emitting an untraceable
+    derived requirement, self-certifying coverage, or turning a reader-flow
+    label into a collection requirement.
+    """
+    from core.question_brief import _REFINEMENT_PROMPT
+
+    assert "Do not answer or assess fulfillment" in _REFINEMENT_PROMPT
+    assert "Every user-explicit requested answer in the draft must" in _REFINEMENT_PROMPT
+    assert "Preserve any user-stated selection criteria" in _REFINEMENT_PROMPT
+    assert "valid `for_answer_id`" in _REFINEMENT_PROMPT
+    assert "include a concise, concrete `rationale`" in _REFINEMENT_PROMPT
+    assert "Do not assign fulfilled,\npartial, or unmet" in _REFINEMENT_PROMPT
+    assert "Do not use audience labels, report-purpose labels, report" in _REFINEMENT_PROMPT
+    assert "do not merge them into a broader answer" in _REFINEMENT_PROMPT
+    assert "Do not copy, pool, or substitute requirements across distinct" in _REFINEMENT_PROMPT
+    assert "rankings need the same population, period, and measure" in _REFINEMENT_PROMPT
+
+
 def test_entity_routing_choices_do_not_send_downstream_analysis_dimensions():
     """Entity needs aliases/topics to route and search; report metrics and
     strategic dimensions belong downstream and used to be repeated unused."""
@@ -247,6 +269,15 @@ def test_report_writer_keeps_action_owner_distinct_from_source_organisations():
     assert "payload.target_company is the accountable actor" in text
     assert "third-party " in text
     assert "plans only as evidence or benchmarks" in text
+
+
+def test_report_writer_discloses_question_brief_gaps_without_generic_advice():
+    text = (_ROOT / "core" / "report_generator" / "generator.py").read_text(
+        encoding="utf-8"
+    )
+    assert "partial or unmet answer, add one short Korean disclosure" in text
+    assert "without proposing a remedy" in text
+    assert "full supplied TrendSynthesis" in text
 
 
 def test_all_report_purposes_share_question_first_planning_without_fixed_issue_rows():

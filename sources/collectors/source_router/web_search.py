@@ -127,6 +127,19 @@ def _coerce_value(raw) -> float | None:
         return None
 
 
+def _coerce_value_type(raw) -> str | None:
+    """Keep malformed model labels from invalidating an entire search round.
+
+    ``reported`` describes provenance, not a projection state, so it maps to
+    the contract's evidence-stated ``actual`` value. Unknown labels are
+    omitted rather than guessed.
+    """
+    normalized = str(raw or "").strip().casefold()
+    if normalized == "reported":
+        return "actual"
+    return normalized if normalized in {"actual", "estimate", "forecast", "target", "guidance"} else None
+
+
 def _parse_results(text: str, grounded: set[str]) -> list[WebSearchResult]:
     match = re.search(r"\[.*\]", text, re.DOTALL)
     if not match:
@@ -151,7 +164,7 @@ def _parse_results(text: str, grounded: set[str]) -> list[WebSearchResult]:
                 value=_coerce_value(fact.get("value")),
                 unit=fact.get("unit") or None,
                 time=fact.get("time") or None,
-                value_type=fact.get("value_type") or None,
+                value_type=_coerce_value_type(fact.get("value_type")),
             )
             for fact in item.get("key_facts", []) or []
             if isinstance(fact, dict) and str(fact.get("text", "")).strip()

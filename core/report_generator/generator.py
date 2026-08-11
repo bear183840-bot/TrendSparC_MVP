@@ -23,6 +23,7 @@ from common.contracts import (
     GeneratedReport,
     GeneratedReportSection,
     MetricPoint,
+    QuestionBrief,
     ReportPlan,
     TrendSynthesis,
 )
@@ -733,6 +734,43 @@ def _diversity_limitations(synthesis: TrendSynthesis) -> list[str]:
     return []
 
 
+def _fulfillment_disclosures(question_brief: QuestionBrief | None) -> list[str]:
+    """Turn post-synthesis gaps into short, factual report disclosures.
+
+    These statements describe only the evidence contract, never an answer or
+    a suggested remedy.  They make the rule-based fallback as honest as the
+    AI writer, whose prompt receives the same fulfillment payload.
+    """
+    if not question_brief:
+        return []
+    answers = {item.answer_id: item for item in question_brief.requested_answers}
+    requirements = {item.requirement_id: item for item in question_brief.evidence_requirements}
+    disclosures: list[str] = []
+    for fulfillment in question_brief.fulfillment:
+        if fulfillment.status == "fulfilled":
+            continue
+        answer = answers.get(fulfillment.for_answer_id)
+        if not answer:
+            continue
+        supported = [
+            requirements[item_id].semantic_target
+            for item_id in fulfillment.supported_requirement_ids
+            if item_id in requirements
+        ]
+        missing = [
+            requirements[item_id].semantic_target
+            for item_id in fulfillment.missing_requirement_ids
+            if item_id in requirements
+        ]
+        confirmed_text = ", ".join(dict.fromkeys(supported)) if supported else "확인된 근거 없음"
+        missing_text = ", ".join(dict.fromkeys(missing)) if missing else "추가 확인 필요"
+        disclosures.append(
+            f"‘{answer.subject}’ 요청은 확인된 범위: {confirmed_text}. "
+            f"확인하지 못한 근거 형태: {missing_text}."
+        )
+    return disclosures
+
+
 def _repair_section(
     section: GeneratedReportSection,
     fallback: GeneratedReportSection,
@@ -784,6 +822,7 @@ def _fallback_report(
     audience_id: str,
     limitation: str | None = None,
     missing_information_needs: list[str] | None = None,
+    question_brief: QuestionBrief | None = None,
 ) -> GeneratedReport:
     profile = load_audience_profile(audience_id)
     limit = {"highlight_only": 2, "condensed": 3, "summary": 4}.get(profile.detail_level, 6)
@@ -973,6 +1012,7 @@ def _fallback_report(
     if synthesis.source_count == 0:
         limitations.append("분석에 사용할 수집 문서가 없어 결론을 확정할 수 없습니다.")
     limitations.extend(_missing_needs_limitation(missing_information_needs))
+    limitations.extend(_fulfillment_disclosures(question_brief))
     if limitation:
         limitations.append(limitation)
     purpose_id = report_plan.report_purpose.purpose_id if report_plan.report_purpose else report_plan.primary_intent
@@ -1088,6 +1128,45 @@ def _fit_payload(payload: dict, report_plan: Any, budget: int) -> dict:
     problem rather than a size one.
     """
     synthesis = payload.get("synthesis") or {}
+    refs_by_section = getattr(report_plan, "section_evidence_map", {}) or {}
+    referenced_claims = {
+        claim_id for refs in refs_by_section.values() for claim_id in (refs.claim_ids or [])
+    }
+    referenced_metrics = {
+        metric_id for refs in refs_by_section.values() for metric_id in (refs.metric_ids or [])
+    }
+    referenced_comparisons = {
+        comparison_id for refs in refs_by_section.values() for comparison_id in (refs.comparison_ids or [])
+    }
+    # The writer needs the evidence routed to actual report sections, not the
+    # complete synthesis archive. Preserve the archive in PipelineResult;
+    # this is only a transport projection for the LLM request.
+    if referenced_claims:
+        synthesis["grounded_claims"] = [
+            claim for claim in synthesis.get("grounded_claims", [])
+            if claim.get("synthesis_claim_id") in referenced_claims
+        ]
+    if referenced_metrics:
+        synthesis["metric_series"] = [
+            point for point in synthesis.get("metric_series", [])
+            if point.get("metric_id") in referenced_metrics
+        ]
+    if referenced_comparisons:
+        synthesis["comparison_points"] = [
+            point for point in synthesis.get("comparison_points", [])
+            if point.get("comparison_id") in referenced_comparisons
+        ]
+    for archive_only_field in (
+        "doc_source_map", "doc_url_map", "sources", "corroborated_points",
+        "uncorroborated_points", "contradictions", "analysis_validation_status_by_doc_id",
+    ):
+        synthesis.pop(archive_only_field, None)
+    # These are synthesis-level restatements. The selected grounded claims
+    # and structured points above remain the writer's source of truth.
+    if referenced_claims:
+        synthesis["synthesis_text"] = None
+        for repeated_field in ("highlights", "key_points", "business_impacts", "risks", "opportunities"):
+            synthesis[repeated_field] = []
     claims = synthesis.get("grounded_claims") or []
     if claims:
         synthesis["grounded_claims"] = [_claim_for_writer(claim) for claim in claims]
@@ -1140,11 +1219,16 @@ def generate_report(
     canonical_entities: list[str] | None = None,
     missing_information_needs: list[str] | None = None,
     target_company: str | None = None,
+    question_brief: QuestionBrief | None = None,
 ) -> GeneratedReport:
     """Use structured output when configured; otherwise create an evidence-safe report."""
     api_key = os.getenv("TRENDSPARC_REPORT_GENERATOR_API_KEY") or os.getenv("OPENAI_API_KEY")
     if not api_key or synthesis.source_count == 0:
-        return _fallback_report(synthesis, report_plan, audience_id, missing_information_needs=missing_information_needs)
+        return _fallback_report(
+            synthesis, report_plan, audience_id,
+            missing_information_needs=missing_information_needs,
+            question_brief=question_brief,
+        )
 
     try:
         from openai import OpenAI
@@ -1158,6 +1242,10 @@ def generate_report(
             "canonical_entities": list(dict.fromkeys(canonical_entities or [])),
             "target_company": target_company,
             "sector_id": synthesis.sector_id,
+            # QuestionBrief says what the user asked and which answers are
+            # evidence-backed. It is not a replacement for the purpose/audience
+            # profiles, which still decide reader flow and expression.
+            "question_brief": question_brief.model_dump() if question_brief else None,
             "purpose": {
                 "id": purpose_id,
                 "question_answer_type": (
@@ -1191,6 +1279,16 @@ def generate_report(
                     "content": (
                         "You are TrendSparC's final report writer. Write distinct, complete content for every "
                         "requested section, calibrated to the audience and purpose. Use only the supplied synthesis. "
+                        "When payload.question_brief is present, address every requested_answers item directly "
+                        "or disclose its fulfillment status. Do not convert an unmet or partial answer into "
+                        "generic advice; distinguish confirmed content from what remains unverified. For every "
+                        "partial or unmet answer, add one short Korean disclosure where that answer is discussed: "
+                        "state the confirmed requirement targets and the missing requirement targets from its "
+                        "fulfillment record, without proposing a remedy. Before writing, use the full supplied TrendSynthesis: "
+                        "select all relevant verified grounded_claims, metric_series, comparison_points, "
+                        "risks, opportunities, and source-stated recommended_actions rather than relying on a single "
+                        "headline or synthesis_text. The brief "
+                        "sets what must be answered, while purpose and audience set how it is ordered and written. "
                         "payload.audience.description and payload.purpose.instructions are not background color to "
                         "skim - they are the authoritative style/structure rules for this exact report. "
                         "audience.description lays out, in numbered sections, that audience's required information "
@@ -1333,7 +1431,7 @@ def generate_report(
         extracted_metrics = verified_metrics
         extracted_comparisons = _apply_comparison_multi_entity_filter(comparison_pass)
         action_impacts = _dedupe_action_impacts(verified_impacts)
-        fallback = _fallback_report(synthesis, report_plan, audience_id)
+        fallback = _fallback_report(synthesis, report_plan, audience_id, question_brief=question_brief)
         fallback_by_id = {section.section_id: section for section in fallback.sections}
         returned_by_id = {
             section["section_id"]: GeneratedReportSection.model_validate(section)
@@ -1352,6 +1450,7 @@ def generate_report(
                     *parsed["limitations"],
                     *_diversity_limitations(synthesis),
                     *_missing_needs_limitation(missing_information_needs),
+                    *_fulfillment_disclosures(question_brief),
                 ]
             )
         )
@@ -1385,4 +1484,5 @@ def generate_report(
                 f"{type(exc).__name__}: {str(exc)[:240]}"
             ),
             missing_information_needs=missing_information_needs,
+            question_brief=question_brief,
         )
