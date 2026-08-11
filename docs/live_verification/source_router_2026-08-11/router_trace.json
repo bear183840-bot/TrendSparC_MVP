@@ -1,0 +1,816 @@
+{
+  "question": "롱폼과 숏폼 미디어 소비 트랜드",
+  "search_plan": {
+    "intent": "최근 한국 시장에서 롱폼과 숏폼 미디어 콘텐츠의 소비 규모와 연령별 세그먼트 차이를 파악하고, 주요 플랫폼별 변화 추이를 통해 현재 트렌드를 객관적으로 확인하는 것",
+    "queries": [
+      {
+        "query": "\"롱폼\" \"숏폼\" 미디어 소비 현황",
+        "angle": "전체적인 시장 규모와 소비 흐름 스냅샷",
+        "purpose": "한국 시장에서 롱폼과 숏폼 미디어 콘텐츠의 현재 소비 현황은 어떠한가?",
+        "priority": 1,
+        "key_terms": [
+          "롱폼",
+          "숏폼"
+        ],
+        "query_role": "direct",
+        "evidence_need_ids": [
+          "direct-1"
+        ]
+      },
+      {
+        "query": "국내 \"OTT 플랫폼\"별 롱폼 숏폼 소비량 변화",
+        "angle": "주요 사업자별 변화 추이",
+        "purpose": "주요 OTT 플랫폼과 동영상 플랫폼은 롱폼과 숏폼 콘텐츠 소비량이 어떻게 변화하고 있는가?",
+        "priority": 1,
+        "key_terms": [
+          "OTT 플랫폼",
+          "롱폼 소비량 변화"
+        ],
+        "query_role": "direct",
+        "evidence_need_ids": [
+          "direct-2"
+        ]
+      },
+      {
+        "query": "2025년 \"숏폼 미디어\" 이용자 연령별 비중",
+        "angle": "연령/세대별 세그먼트 차이",
+        "purpose": "숏폼 미디어를 이용하는 주요 연령층은 어느 정도인가?",
+        "priority": 1,
+        "key_terms": [
+          "숏폼 미디어",
+          "20대"
+        ],
+        "query_role": "direct",
+        "evidence_need_ids": [
+          "direct-3"
+        ]
+      },
+      {
+        "query": "2025 숏폼 콘텐츠 이용 시간 \"추이\"",
+        "angle": "이용 행태 및 시간 변화",
+        "purpose": "숏폼 콘텐츠의 일일 평균 이용 시간은 최근 몇 년 간 어떻게 변화했는가?",
+        "priority": 1,
+        "key_terms": [
+          "숏폼 이용 시간",
+          "추이"
+        ],
+        "query_role": "supporting",
+        "evidence_need_ids": []
+      },
+      {
+        "query": "롱폼 콘텐츠 이용률 \"증가 요인\" 분석",
+        "angle": "주요 트렌드 및 원인",
+        "purpose": "롱폼 콘텐츠 이용률이 증가하는 주요 원인과 시장 동향은 무엇인가?",
+        "priority": 1,
+        "key_terms": [
+          "롱폼 이용률",
+          "증가 요인"
+        ],
+        "query_role": "supporting",
+        "evidence_need_ids": []
+      },
+      {
+        "query": "숏폼 플랫폼별 월평균 이용자 수 비교",
+        "angle": "플랫폼 간 비교 근거",
+        "purpose": "주요 숏폼 플랫폼(틱톡, 유튜브 쇼츠 등)의 월평균 이용자 수는 어떻게 비교되는가?",
+        "priority": 1,
+        "key_terms": [
+          "틱톡",
+          "유튜브 쇼츠"
+        ],
+        "query_role": "supporting",
+        "evidence_need_ids": []
+      },
+      {
+        "query": "\"방송사\"별 \"숏폼 콘텐츠 전략\" 현황",
+        "angle": "사업자별 전략 변화",
+        "purpose": "방송사와 스트리밍 서비스는 숏폼 콘텐츠 전략을 어떻게 운영하고 있는가?",
+        "priority": 2,
+        "key_terms": [
+          "방송사",
+          "숏폼 콘텐츠 전략"
+        ],
+        "query_role": "supporting",
+        "evidence_need_ids": []
+      },
+      {
+        "query": "\"숏폼 광고 효과\" 및 \"시장 점유율\" 데이터",
+        "angle": "시장 영향력 및 경제적 지표",
+        "purpose": "숏폼 미디어의 광고 효과와 시장 점유율은 현재 어느 수준인가?",
+        "priority": 2,
+        "key_terms": [
+          "숏폼 광고 효과",
+          "시장 점유율"
+        ],
+        "query_role": "supporting",
+        "evidence_need_ids": []
+      },
+      {
+        "query": "해외 숏폼 플랫폼 국내 이용 추이",
+        "angle": "글로벌 비교 및 지역별 차이",
+        "purpose": "해외 주요 숏폼 플랫폼(예: 틱톡, 인스타그램 릴스)의 국내 이용 추이는 어떠한가?",
+        "priority": 2,
+        "key_terms": [
+          "틱톡",
+          "인스타그램 릴스"
+        ],
+        "query_role": "supporting",
+        "evidence_need_ids": []
+      }
+    ],
+    "evidence_needs": [
+      {
+        "evidence_need_id": "direct-1",
+        "text": "롱폼과 숏폼 미디어 소비 트렌드 현황",
+        "requirement_type": "direct",
+        "priority": 1,
+        "answer_requirement_ids": [
+          "answer-1"
+        ]
+      },
+      {
+        "evidence_need_id": "direct-2",
+        "text": "주요 플랫폼별 소비 패턴 변화",
+        "requirement_type": "direct",
+        "priority": 1,
+        "answer_requirement_ids": [
+          "answer-2"
+        ]
+      },
+      {
+        "evidence_need_id": "direct-3",
+        "text": "사용자 선호도 및 시청 시간 비교",
+        "requirement_type": "direct",
+        "priority": 1,
+        "answer_requirement_ids": [
+          "answer-3"
+        ]
+      }
+    ],
+    "refinement": {
+      "action": "KEEP",
+      "added_queries": [],
+      "rewritten_queries": [],
+      "covered_evidence_need_ids": [
+        "direct-1",
+        "direct-2",
+        "direct-3"
+      ],
+      "missing_evidence_need_ids": [],
+      "method": "ai",
+      "reason": "All direct evidence needs covered by existing direct queries"
+    },
+    "purpose_id": "current_status",
+    "audience": "external"
+  },
+  "sources": [
+    {
+      "url": "https://lib.mezzomedia.co.kr/newsletter/202505/01_MezzoMedia_2025_Target_Report_1519.pdf",
+      "search_query": "2025년 \"숏폼 미디어\" 이용자 연령별 비중",
+      "query_role": "direct",
+      "evidence_need_ids": [
+        "direct-3"
+      ],
+      "registry_match": null,
+      "original_source": true,
+      "document_id": "lib.mezzomedia.co.kr:f16c948007716ecf",
+      "verification": {
+        "source_assessment": {
+          "url": "https://lib.mezzomedia.co.kr/newsletter/202505/01_MezzoMedia_2025_Target_Report_1519.pdf",
+          "relevance": "high",
+          "evidence_quality": "high"
+        },
+        "summary_verification": {
+          "status": "accurate",
+          "important_omissions": []
+        },
+        "confirmed_facts": [
+          {
+            "fact": "10대의 숏폼 이용률은 98%이다",
+            "evidence_strength": "direct",
+            "context": "숏폼을 시청하는 비율은 98%, 나머지 2%는 시청하지 않는다"
+          },
+          {
+            "fact": "10대가 주로 사용하는 동영상 플랫폼은 유튜브(84%), 인스타그램(78%), 틱톡(16%)이다",
+            "evidence_strength": "direct",
+            "context": "동영상 플랫폼 이용률 순위, 중복 응답 기준"
+          },
+          {
+            "fact": "OTT 이용률은 60%이며, 10대에서의 OTT 이용률은 40%이다",
+            "evidence_strength": "direct",
+            "context": "OTT 시행 여부, 전 연령대와 10대 비교"
+          },
+          {
+            "fact": "10대가 주로 이용하는 OTT 서비스는 넷플릭스(85%), 티빙(31%), 쿠팡플레이(21%)이다",
+            "evidence_strength": "direct",
+            "context": "중복 응답 기준 시장 점유율"
+          },
+          {
+            "fact": "10대가 주로 사용하는 커뮤니티는 네이버 카페(35%), 카카오 온cheon(29%), 디시엔사이드(13%)이다",
+            "evidence_strength": "direct",
+            "context": "중복 응답 기준 순위"
+          },
+          {
+            "fact": "숏폼 콘텐츠에서 주목도가 가장 높은 광고 유형은 정보성 광고(42%)이다",
+            "evidence_strength": "direct",
+            "context": "중복 응답 기준 시장 점유율"
+          }
+        ],
+        "limitations": [
+          "설문 조사 방식의 자기보고식 데이터로, 실제 이용 행태를 정확히 반영하지 못할 수 있음",
+          "응답자가 10대에 한정되었으나, 구체적인 연령대 분포 미제공",
+          "일부 데이터는 중복 응답 기준으로 수집되어 단일 플랫폼 순위와 직접적인 비교는 어려움",
+          "2025년 5월 발행 자료이지만, 설문 조사 시점은 명시되지 않아 현재 트렌드와의 시차 가능성 존재",
+          "설문 응답 대상이 CJMezzomedia 고객/패널인지 여부 미확인으로 표본 편향 가능성 있음"
+        ],
+        "contradictions": [],
+        "remaining_gaps": [
+          "롱폼 미디어와 숏폼 미디어의 구체적인 소비 시간 비교 데이터 부재",
+          "롱폼 콘텐츠 시청 시 주로 사용하는 플랫폼 및 콘텐츠 유형 미제공",
+          "롱폼 vs 숏폼 미디어 소비 트렌드 변화 추이에 대한 시계열 데이터 부재"
+        ],
+        "sufficient": false,
+        "next_queries": [
+          {
+            "query": "롱폼 미디어 소비 시간 vs 숏폼 미디어 소비 시간 10대 비교",
+            "purpose": "롱폼과 숏폼 미디어 소비 시간 비교를 위한 구체적 데이터 확보",
+            "priority": 1
+          },
+          {
+            "query": "10대 롱폼 콘텐츠 시청 플랫폼 유튜브/네이버TV/기타 점유율",
+            "purpose": "롱폼 콘텐츠 시청 시 주로 사용하는 플랫폼에 대한 정보 수집",
+            "priority": 2
+          },
+          {
+            "query": "숏폼 선호 이유 및 롱폼 기피 이유에 대한 질적 연구 데이터",
+            "purpose": "숏폼 트렌드 주도 배경에 대한 심층적 이해",
+            "priority": 3
+          }
+        ]
+      }
+    },
+    {
+      "url": "https://www.consumerinsight.co.kr/up_files/%EC%88%8F%ED%8F%BC%20%ED%95%9C%EB%B2%88%20%EB%B3%B4%EB%A9%B4%20%ED%8F%89%EA%B7%A0%2021%EB%B6%84%204%EB%AA%85%20%EC%A4%91%203%EB%AA%85%20%EC%9C%A0%ED%8A%9C%EB%B8%8C%EB%A1%9C%20%EB%B3%B8%EB%8B%A4.pdf",
+      "search_query": "2025년 \"숏폼 미디어\" 이용자 연령별 비중",
+      "query_role": "direct",
+      "evidence_need_ids": [
+        "direct-3"
+      ],
+      "registry_match": null,
+      "original_source": true,
+      "document_id": "www.consumerinsight.co.kr:ae40cb03e33887b5",
+      "verification": {
+        "source_assessment": {
+          "url": "https://www.consumerinsight.co.kr/up_files/%EC%88%8F%ED%8F%BD%20%ED%95%9C%EB%B2%88%20%EB%B3%B4%EB%A9%80%20%ED%8F%89%EA%B7%A0%2021%EB%B6%84%204%EB%AA%85%20%EC%9C%A0%ED%8A%9C%EB%B8%8C%EB%A1%9C%20%EB%B3%B8%EB%8B%A4.pdf",
+          "relevance": "high",
+          "evidence_quality": "high"
+        },
+        "summary_verification": {
+          "status": "accurate",
+          "important_omissions": []
+        },
+        "confirmed_facts": [
+          {
+            "fact": "숏폼 콘텐츠는 1~3분 내외의 짧은 영상으로, 2020년 이후 주력 영상 포맷으로 자리 잡았다",
+            "evidence_strength": "direct",
+            "context": "주로 스마트폰과 소셜미디어(유튜브 쇼츠, 인스타그램 릴스, 틱톡)를 통해 소비되며 빠른 전환과 자극적인 편집, 반복 시청이 특징"
+          },
+          {
+            "fact": "14세 이상 휴대폰 사용자 3,151명을 대상으로 숏폼 콘텐츠 이용 경험을 조사",
+            "evidence_strength": "direct",
+            "context": "2025년 상반기 이동통신 기획조사(제41차)의 표본 크기, 2005년부터 연 2회(상·하반기 각 1회, 회당 표본규모 약 3만명) 실시"
+          },
+          {
+            "fact": "스마트폰이나 태블릿을 이용한 영상 시청 시간은 하루 평균 97분",
+            "evidence_strength": "direct",
+            "context": "1시간~2시간 미만 시청이 26%로 제일 많았고, 2시간~3시간 미만이 18%, 3시간 이상이 17%에 달해 전체의 60%가 하루 1시간 이상 영상을 시청"
+          },
+          {
+            "fact": "영상 유형별 선호도(복수응답)에서 '전체 영상 콘텐츠'는 59%, '숏폼 콘텐츠'는 49%",
+            "evidence_strength": "direct",
+            "context": "10대는 62%가 숏폼을 선호해 풀버전(47%)을 앞섰고, 20대·30대는 풀버전과 숏폼 선호도가 모두 50%대로 큰 차이 없음"
+          },
+          {
+            "fact": "숏폼의 주요 시청 채널은 유튜브 '쇼츠'로 75%, 인스타그램 '릴스' 43%, 틱톡 20%",
+            "evidence_strength": "direct",
+            "context": "인스타그램 릴스는 10~30대에서 모두 과반수 이용률(71%~53%)로 선전, 틱톡은 10대 이용률(40%)이 평균의 2배 수준으로 특히 높음"
+          },
+          {
+            "fact": "숏폼 콘텐츠를 한 번 보기 시작하면 평균 21분 동안 시청",
+            "evidence_strength": "direct",
+            "context": "주로 유튜브로 시청하며, 10대는 숏폼을 더 선호하고 20·30대는 큰 차이 없음"
+          },
+          {
+            "fact": "숏폼 연속 시청 시간에서 '10~20분 미만'이 24%로 가장 많았으나 연령이 낮을수록 길어짐",
+            "evidence_strength": "direct",
+            "context": "10대의 경우 '1시간 이상' 비율이 26%로 제일 높았고 60대 이상에서 '5분 미만'이 27%"
+          },
+          {
+            "fact": "숏폼 선호 주제는 '유머·밈·웃긴 영상'이 55%로 압도적 1위",
+            "evidence_strength": "direct",
+            "context": "이어 '뉴스·시사·정보'(35%), '여행·브이로그'(34%) 순, 남성은 '게임·e스포츠'를, 여성은 '먹방·요리', '반려동물', '뷰티·패션'을 상대적으로 더 선호"
+          },
+          {
+            "fact": "한 편당 선호하는 영상 길이는 '30분~1시간 미만'이 35%로 모든 연령에서 가장 높음",
+            "evidence_strength": "direct",
+            "context": "10대~30대는 '10분~30분 미만'을, 40대~60대 이상은 '1시간~2시간 미만'을 상대적으로 선호"
+          },
+          {
+            "fact": "숏폼의 도입기(‘18~’19년)를 연 것은 틱톡이었지만 ‘20년 이후 대중화 시대는 유튜브 쇼츠와 인스타그램 릴스가 주도",
+            "evidence_strength": "direct",
+            "context": "풀버전이 지루한 10대~30대에서는 이미 주력 콘텐츠 장르로 자리 잡음"
+          }
+        ],
+        "limitations": [
+          "이 조사는 컨슈머인사이트의 자체 패널(IBP)을 이용한 표본 조사로, 독립적인 연구기관이 아닌 업체가 실시한 결과라는 점에서 방법론적인 제한점이 있음",
+          "표본은 14세~64세 휴대폰 사용자로 구성되어 65세 이상 고령층은 포함되지 않음",
+          "응답자 3,151명은 2025년 상반기 조사 기준이며, 2005년 이후 누적된 데이터는 조사 방법론의 변화와 시간에 따른 외부 요인에 따라 비교 가능성 제한",
+          "영상 시청 시간은 '하루 평균'으로 제시되었으나 구체적인 측정 방법(자체 보고식 설문조사 등)에 대한 상세 정보가 없음",
+          "숏폼 콘텐츠 소비 패턴에 대한 '평균 21분' 등의 수치들은 복수응답 설문조사 결과로 실제 시청 시간과는 차이가 있을 수 있음(응답 편향 가능성 존재)",
+          "그래프에 제시된 '전체 영상 콘텐츠 59%', '숏폼 콘텐츠 49%' 등의 수치는 복수응답을 허용한 조사의 특성상 중복 집계 가능성이 있음"
+        ],
+        "contradictions": [],
+        "remaining_gaps": [
+          "숏폼 미디어 소비 트랜드에 대한 구체적인 장기적 추세 분석을 위한 연도별 데이터 비교 필요",
+          "숏폼 소비와 정신건강(예: 집중력 저하, 중독 등) 간의 관계에 대한 언급 부재",
+          "숏폼 콘텐츠의 광고 효과나 상업적 활용에 대한 정량적 데이터 부재",
+          "OTT 앱 내 숏폼 콘텐츠의 구체적인 사용 패턴 및 시청 동기 분석 부재"
+        ],
+        "sufficient": true,
+        "next_queries": []
+      }
+    }
+  ],
+  "coverage_history": [
+    {
+      "sufficient": false,
+      "coverage": [
+        {
+          "aspect": "2025년 숏폼 미디어 이용자 연령별 비중",
+          "status": "covered",
+          "reason": "15-19세 대상 MezzoMedia 리포트에서 10대 일평균 숏폼 시청시간(75분), 플랫폼별 이용률(쇼츠 84%, 릴스 78%, 틱톡 16%)을 제시. ConsumerInsight 조사(14세 이상, 3,151명 표본)에서 전 연령 기준 유튜브 쇼츠(75%), 인스타그램 릴스(43%), 틱톡(10대 40%), 연령별 선호도(10대 62%)를 제공해 연령별 세그먼트 차이를 확인할 수 있음.",
+          "source_urls": [
+            "https://lib.mezzomedia.co.kr/newsletter/202505/01_MezzoMedia_2025_Target_Report_1519.pdf"
+          ]
+        },
+        {
+          "aspect": "주요 플랫폼별 소비 패턴 변화(OTT 및 숏폼 플랫폼별)",
+          "status": "uncertain",
+          "reason": "ConsumerInsight 조사에서 유튜브 쇼츠(75%), 인스타그램 릴스(43%) 등 주요 숏폼 플랫폼의 점유율 및 월평균 이용률을 제시했으나, 넷플릭스를 포함한 OTT 서비스(롱폼)의 소비량 변화 추이 및 숏폼 전환 전략은 포함되지 않음. 방송사별 숏폼 콘텐츠 전략에 대한 정보도 없음.",
+          "source_urls": []
+        }
+      ],
+      "covered": [
+        {
+          "text": "2025년 기준 한국 숏폼 미디어 이용 현황: 10대 일평균 숏폼 시청 75분, 유튜브 쇼츠 이용률 84%, 인스타그램 릴스 이용률 78%, 틱톡 이용률 16%(10대 기준)",
+          "source_urls": [
+            "https://lib.mezzomedia.co.kr/newsletter/202505/01_MezzoMedia_2025_Target_Report_1519.pdf"
+          ]
+        }
+      ],
+      "missing": [
+        "넷플릭스, 웨이브, 티빙 등 주요 OTT 플랫폼의 롱폼 콘텐츠 소비량 변화 추이 및 숏폼 콘텐츠 전환 전략",
+        "방송사별 숏폼 콘텐츠 전략 현황 및 적용 사례",
+        "숏폼 미디어의 광고 효과 및 시장 점유율 관련 구체적 데이터",
+        "2025년 롱폼 콘텐츠 이용률 증가 요인 및 시장 동향 분석",
+        "해외 숏폼 플랫폼(틱톡, 인스타그램 릴스 등)의 국내 이용 추이 및 점유율 변화",
+        "verified original source for direct-1",
+        "verified original source for direct-2",
+        "verified original source for direct-3"
+      ],
+      "contradictions": [],
+      "needs_full_text": true,
+      "sources_to_inspect": [
+        {
+          "url": "https://lib.mezzomedia.co.kr/newsletter/202505/01_MezzoMedia_2025_Target_Report_1519.pdf",
+          "reason": "PDF 전체 내용 검토를 통해 10대 외의 연령층(예: 20대 이상) 데이터 존재 여부 확인, 롱폼과 숏폼 소비 비중 비교, 조사 방법론 및 한계 파악",
+          "target_information": [
+            "10대 외 연령층 데이터",
+            "롱폼 대 숏폼 소비 비중",
+            "조사 방법론 및 한계"
+          ]
+        },
+        {
+          "url": "https://www.consumerinsight.co.kr/up_files/%EC%88%8F%ED%8F%BC%20%ED%95%9C%EB%B2%88%20%EB%B3%B4%EB%A9%B4%20%ED%8F%89%EA%B7%A0%2021%EB%B6%84%204%EB%AA%85%20%EC%A4%91%203%EB%AA%85%20%EC%9C%A0%ED%8A%9C%EB%B8%8C%EB%A1%9C%20%EB%B3%B8%EB%8B%A4.pdf",
+          "reason": "DIRECT requirement needs verified original source",
+          "target_information": [
+            "direct-3"
+          ]
+        }
+      ],
+      "next_queries": [
+        {
+          "query": "2025 OTT 플랫폼별 롱폼 숏폼 소비량 변화 추이",
+          "purpose": "넷플릭스, 웨이브, 티빙 등 주요 OTT 서비스의 롱폼 콘텐츠(드라마, 영화 등) 시청시간 및 이용자 수 변화, 숏폼 콘텐츠(클립, 예고편 등) 조회수 추이 확보",
+          "priority": 1
+        },
+        {
+          "query": "2025 방송사 숏폼 콘텐츠 전략 현황",
+          "purpose": "KBS, MBC, SBS, JTBC 등 주요 방송사의 숏폼 콘텐츠 제작·배포 전략 및 성과 분석",
+          "priority": 2
+        },
+        {
+          "query": "2025 숏폼 광고 효과 및 시장 점유율 데이터",
+          "purpose": "숏폼 플랫폼(틱톡, 유튜브 등)의 광고 효과(리턴 온 애드버타이징)와 시장 점유율 비교 및 추이",
+          "priority": 2
+        },
+        {
+          "query": "2025 해외 숏폼 플랫폼 국내 이용 추이",
+          "purpose": "틱톡, 인스타그램 릴스 등 해외 플랫폼의 국내 이용자 수 및 점유율 변화 추적",
+          "priority": 2
+        }
+      ],
+      "semantic_sufficient": null,
+      "structural_sufficient": false,
+      "reason": "DIRECT requirements are not linked to verified original source text"
+    },
+    {
+      "sufficient": false,
+      "coverage": [
+        {
+          "aspect": "10대 숏폼 이용률",
+          "status": "covered",
+          "reason": "MezzoMedia 2025 Target Report에서 10대의 숏폼 이용률이 98%로 직접 확인됨. 10대가 주로 사용하는 숏폼 플랫폼(유튜브 84%, 인스타그램 78%, 틱톡 16%)과 숏폼 광고 유형(정보성 광고 42%)도 확인됨.",
+          "source_urls": [
+            "https://lib.mezzomedia.co.kr/newsletter/202505/01_MezzoMedia_2025_Target_Report_1519.pdf"
+          ]
+        },
+        {
+          "aspect": "10대 OTT 이용률 및 플랫폼 점유율",
+          "status": "covered",
+          "reason": "MezzoMedia 보고서에서 10대의 OTT 이용률이 40%이며, 주로 이용하는 OTT 서비스는 넷플릭스(85%), 티빙(31%), 쿠팡플레이(21%)로 확인됨. OTT 전체 이용률은 60%로 보고됨.",
+          "source_urls": [
+            "https://lib.mezzomedia.co.kr/newsletter/202505/01_MezzoMedia_2025_Target_Report_1519.pdf"
+          ]
+        },
+        {
+          "aspect": "2025년 숏폼 미디어 이용자 연령별 비중",
+          "status": "uncertain",
+          "reason": "ConsumerInsight 보도자료에서 14세 이상 휴대폰 사용자 대상으로 숏폼 콘텐츠 이용 경험을 조사했으며, 연령별 비중은 10대·20대·30대에서 풀버전 대비 숏폼 선호도가 높거나 유사한 것으로 나타남.",
+          "source_urls": []
+        },
+        {
+          "aspect": "숏폼 콘텐츠 주요 시청 채널 및 선호 주제",
+          "status": "uncertain",
+          "reason": "ConsumerInsight 조사에서 숏폼의 주요 시청 채널은 유튜브 쇼츠(75%), 인스타그램 릴스(43%), 틱톡(20%)으로 확인됨. 선호 주제는 유머·밈·웃긴 영상(55%)이 가장 높음.",
+          "source_urls": []
+        },
+        {
+          "aspect": "숏폼 콘텐츠 평균 시청 시간 및 연속 시청 패턴",
+          "status": "uncertain",
+          "reason": "ConsumerInsight 조사에서 숏폼 콘텐츠를 한 번 보기 시작하면 평균 21분 동안 시청하며, '10~20분 미만'이 24%로 가장 많으나 연령이 낮을수록 연속 시청 시간이 길어짐. 또한 '한 편당 선호하는 영상 길이'는 30분~1시간 미만이 35%로 가장 높음.",
+          "source_urls": []
+        },
+        {
+          "aspect": "숏폼과 풀버전(시퀸셜) 콘텐츠 선호도 비교",
+          "status": "uncertain",
+          "reason": "ConsumerInsight 조사에서 10대는 숏폼 선호(62%)가 풀버전(47%)보다 높고, 20대·30대는 둘 다 50%대 선호도를 보임.",
+          "source_urls": []
+        }
+      ],
+      "covered": [
+        {
+          "text": "MezzoMedia 2025 Target Report에 따르면 10대의 숏폼 이용률은 98%이며, 주로 사용하는 숏폼 플랫폼은 유튜브(84%), 인스타그램(78%), 틱톡(16%)이다. 10대의 OTT 이용률은 40%로, 주로 이용하는 OTT 서비스는 넷플릭스(85%), 티빙(31%), 쿠팡플레이(21%)이다. 숏폼 콘텐츠에서 주목도가 가장 높은 광고 유형은 정보성 광고(42%)이다.",
+          "source_urls": [
+            "https://lib.mezzomedia.co.kr/newsletter/202505/01_MezzoMedia_2025_Target_Report_1519.pdf"
+          ]
+        }
+      ],
+      "missing": [
+        "롱폼과 숏폼 미디어의 구체적인 소비 시간 비교 데이터 (직관적 시청 시간)",
+        "롱폼 콘텐츠 시청 시 주로 사용하는 플랫폼 및 콘텐츠 유형 (예: 유튜브, 네이버TV, 넷플릭스 등)",
+        "롱폼과 숏폼 미디어 소비 트랜드 변화 추이에 대한 시계열 데이터 (연도별 변화)",
+        "롱폼 콘텐츠 이용률 증가 요인 및 시장 동향 (full-form 증가 원인 분석)",
+        "숏폼 플랫폼별 월평균 이용자 수 비교",
+        "방송사별 숏폼 콘텐츠 전략 현황 (방송사 vs 플랫폼 비교)",
+        "숏폼 광고 효과 및 시장 점유율 데이터 (정량적 광고 효과 지표)",
+        "verified original source for direct-1",
+        "verified original source for direct-2"
+      ],
+      "contradictions": [
+        {
+          "issue": "MezzoMedia 보고서에서 10대의 숏폼 이용률은 98%인 반면, ConsumerInsight 조사에서 10대의 숏폼 선호도는 62%로 나타남. 이는 '이용'과 '선호'를 측정하는 서로 다른 개념(행동 vs 태도)에서 발생할 수 있는 차이로, 직접적인 모순은 아님.",
+          "sources": [
+            "https://lib.mezzomedia.co.kr/newsletter/202505/01_MezzoMedia_2025_Target_Report_1519.pdf",
+            "https://www.consumerinsight.co.kr/up_files/%EC%88%8D%ED%8F%BC%20%ED%95%9C%EB%B2%88%20%EB%B3%B8%EB%A9%B4%20%ED%8F%89%EA%B7%A0%2021%EB%B6%84%204%EB%AA%85%20%EC%9C%A0%ED%8A%9C%EB%B8%8C%EB%A1%9C%20%EB%B3%B8%EB%8B%A4.pdf"
+          ],
+          "conflicts_with": null,
+          "possible_explanation": null,
+          "needs_resolution": false
+        }
+      ],
+      "needs_full_text": true,
+      "sources_to_inspect": [
+        {
+          "url": "https://lib.mezzomedia.co.kr/newsletter/202505/01_MezzoMedia_2025_Target_Report_1519.pdf",
+          "reason": "롱폼 콘텐츠 시청 시 주로 사용하는 플랫폼 및 콘텐츠 유형(예: 유튜브, 네이버TV, 넷플릭스 등)에 대한 구체적인 데이터를 확인하여 숏폼과의 차이점을 명확히 하기 위함. 또한 롱폼과 숏폼 미디어의 구체적인 소비 시간 비교 데이터가 존재하는지, 롱폼 콘텐츠 유형(예: 드라마, 예능, 다큐멘터리 등)별 시청 패턴을 파악하기 위함.",
+          "target_information": [
+            "롱폼 콘텐츠 시청 시 주로 사용하는 플랫폼 목록 및 점유율",
+            "롱폼 콘텐츠 유형별(드라마, 예능, 다큐멘터리 등) 시청 시간 및 빈도 데이터",
+            "롱폼과 숏폼 콘텐츠 시청 시간 비교 데이터",
+            "OTT 앱 내 롱폼 콘텐츠 소비 패턴 및 시청 동기"
+          ]
+        }
+      ],
+      "next_queries": [
+        {
+          "query": "롱폼 미디어 시청 시간 vs 숏폼 미디어 시청 시간 10대 비교",
+          "purpose": "롱폼과 숏폼 미디어 시청 시간 비교를 통해 실제 콘텐츠 소비 패턴 정량화",
+          "priority": 1
+        },
+        {
+          "query": "롱폼 콘텐츠 시청 플랫폼 점유율 유튜브/네이버TV/넷플릭스/티빙 등",
+          "purpose": "롱폼 콘텐츠 시청 시 주로 이용하는 플랫폼 및 콘텐츠 유형(드라마, 예능 등) 파악",
+          "priority": 2
+        },
+        {
+          "query": "OTT 앱 내 롱폼 콘텐츠 소비 패턴 및 시청 동기 분석",
+          "purpose": "OTT 환경에서의 롱폼 콘텐츠 소비 행태와 숏폼과의 차이점 분석",
+          "priority": 2
+        },
+        {
+          "query": "숏폼 vs 롱폼 콘텐츠 선호 요인 및 이용 동기 비교 연구",
+          "purpose": "숏폼과 롱폼을 선호하는 심리적·행동적 요인 비교",
+          "priority": 3
+        }
+      ],
+      "semantic_sufficient": null,
+      "structural_sufficient": false,
+      "reason": "DIRECT requirements are not linked to verified original source text"
+    },
+    {
+      "sufficient": false,
+      "coverage": [
+        {
+          "aspect": "숏폼과 롱폼 미디어 소비 현황",
+          "status": "covered",
+          "reason": "1519 TARGET REPORT와 컨슈머인사이트 보도자료는 숏폼(1~3분 영상) 이용률, 플랫폼 점유율, 시청 시간 등 구체적인 소비 현황을 직접 인용 가능한 데이터로 제공함. 특히 10대의 숏폼 이용률 98%, 전체 영상 시청 시간 97분, 숏폼 시청 채널(YouTube Shorts, Instagram Reels, TikTok) 점유율 등 직접적인 수치가 존재함.",
+          "source_urls": [
+            "https://lib.mezzomedia.co.kr/newsletter/202505/01_MezzoMedia_2025_Target_Report_1519.pdf"
+          ]
+        },
+        {
+          "aspect": "주요 플랫폼별 소비 패턴 변화 (OTT 플랫폼 롱폼, 숏폼 플랫폼)",
+          "status": "covered",
+          "reason": "1519 TARGET REPORT는 유튜브(84%), 인스타그램(78%), 틱톡(16%) 등 숏폼 플랫폼 점유율을, 컨슈머인사이트는 유튜브 쇼츠(75%), 인스타그램 릴스(43%), 틱톡(20%) 점유울을 제공함. 또한 10대가 주로 이용하는 OTT 서비스(넷플릭스 85%, 티빙 31%, 쿠팡플레이 21%)와 OTT 이용률(60%) 데이터를 포함함. YouTube Shorts 통계와 Buffer 2026 자료는 숏폼 플랫폼별 월평균 이용자 수(YouTube Shorts ~2B, TikTok ~1.59B/1.9B, Instagram Reels ~1.8B, YouTube 전체 2.6B)를 제시함.",
+          "source_urls": [
+            "https://lib.mezzomedia.co.kr/newsletter/202505/01_MezzoMedia_2025_Target_Report_1519.pdf",
+            "https://axis-intelligence.com/youtube-shorts-statistics/",
+            "https://buffer.com/resources/social-media-platforms/"
+          ]
+        },
+        {
+          "aspect": "연령/세대별 세그먼트 차이 (숏폼 이용자 비중, 시청 시간, 선호 플랫폼)",
+          "status": "covered",
+          "reason": "1519 TARGET REPORT는 10대의 숏폼 이용률 98%, OTT 이용률 40%를 직접 제시함. 컨슈머인사이트는 연령별 세분화(10대~60대 이상)로 숏폼 시청 시간(하루 평균 97분), 연속 시청 시간(10대 '1시간 이상' 26%, 60대 이상 '5분 미만' 27%), 선호 주제(유머·밈 등), 선호 영상 길이(10대는 10분~30분, 40대는 1시간~2시간) 등을 제공함. 또한 10대가 주로 사용하는 OTT 서비스(넷플릭스 85%, 티빙 31%, 쿠팡플레이 21%)와 영상 플랫폼(유튜브 84%, 인스타그램 78%, 틱톡 16%) 점유율을 포함함.",
+          "source_urls": [
+            "https://lib.mezzomedia.co.kr/newsletter/202505/01_MezzoMedia_2025_Target_Report_1519.pdf"
+          ]
+        },
+        {
+          "aspect": "롱폼 미디어 소비 시간 vs 숏폼 미디어 소비 시간 10대 비교",
+          "status": "partially_covered",
+          "reason": "1519 TARGET REPORT는 OTT 이용률(60%)과 10대 OTT 이용률(40%)을 제공하지만 롱폼과 숏폼의 구체적인 시청 시간(예: 콘텐츠 유형별 평균 시청 시간)은 제시되지 않음. 컨슈머인사이트는 '하루 평균 영상 시청 시간 97분'을 제시하지만, 이 중 숏폼과 롱폼의 구체적인 시간 분배는 제공되지 않으며, 숏폼을 '한 번 보기 시작하면 평균 21분 시청'이라는 데이터는 숏폼 콘텐츠의 평균 시청 지속 시간을 의미할 뿐, 롱폼과 비교한 양적 데이터는 부재함. 두 소스 모두 롱폼과 숏폼의 구체적인 소비 시간 비교 데이터가 없음.",
+          "source_urls": [
+            "https://lib.mezzomedia.co.kr/newsletter/202505/01_MezzoMedia_2025_Target_Report_1519.pdf"
+          ]
+        }
+      ],
+      "covered": [
+        {
+          "text": "10대의 숏폼 이용률은 98%이며, 주로 사용하는 동영상 플랫폼은 유튜브(84%), 인스타그램(78%), 틱톡(16%)이다.",
+          "source_urls": [
+            "https://lib.mezzomedia.co.kr/newsletter/202505/01_MezzoMedia_2025_Target_Report_1519.pdf"
+          ]
+        },
+        {
+          "text": "10대가 주로 이용하는 OTT 서비스는 넷플릭스(85%), 티빙(31%), 쿠팡플레이(21%)이며, 전체 OTT 이용률은 60%이고 10대에서는 40%이다.",
+          "source_urls": [
+            "https://lib.mezzomedia.co.kr/newsletter/202505/01_MezzoMedia_2025_Target_Report_1519.pdf"
+          ]
+        },
+        {
+          "text": "숏폼 콘텐츠의 주요 시청 채널은 유튜브 쇼츠(75%), 인스타그램 릴스(43%), 틱톡(20%)이다.",
+          "source_urls": [
+            "https://axis-intelligence.com/youtube-shorts-statistics/",
+            "https://buffer.com/resources/social-media-platforms/"
+          ]
+        },
+        {
+          "text": "유튜브 쇼츠는 약 20억 명의 월간 활성 사용자를 보유하고 있으며, 틱톡은 약 15.9억~19억 명, 인스타그램 릴스는 약 18억 명의 MAU를 보유하고 있다.",
+          "source_urls": [
+            "https://axis-intelligence.com/youtube-shorts-statistics/",
+            "https://buffer.com/resources/social-media-platforms/"
+          ]
+        },
+        {
+          "text": "숏폼 콘텐츠는 1~3분 내외의 짧은 영상으로, 2020년 이후 주력 영상 포맷으로 자리 잡았다.",
+          "source_urls": [
+            "https://axis-intelligence.com/youtube-shorts-statistics/"
+          ]
+        }
+      ],
+      "missing": [
+        "롱폼 콘텐츠 시청 시 주로 사용하는 플랫폼(예: 넷플릭스, 티빙, Wavve, Disney+, TV 등)의 구체적 점유율 및 상대적 인기 순위",
+        "롱폼 콘텐츠 유형별(예: 드라마, 예능, 영화, 다큐멘터리, 교육 콘텐츠 등) 소비 패턴 및 선호도",
+        "롱폼 미디어와 숏폼 미디어의 소비 시간 직접 비교 데이터(숏폼 평균 시청 시간 vs 롱폼 평균 시청 시간)",
+        "롱폼 콘텐츠 시청 동기(예: 깊이 있는 학습, 감정 몰입, 스토리 완결성 등)와 숏폼 시청 동기(유희, 정보 습득, 스킬 습득 등)의 질적 분석",
+        "롱폼 콘텐츠의 시청 빈도 추이(예: 주 1회 이상 시청자 비중, 월간 스트리밍 횟수 등) 및 숏폼과의 장기적 비교 시계열 데이터",
+        "롱폼 콘텐츠의 도입기(2018~2019년) 이후 대중화된 시기(2020년 이후)의 상대적 증가율 및 시장 점유율 변화",
+        "롱폼 콘텐츠의 광고 효과 및 시장 점유율에 대한 정량적 데이터",
+        "OTT 앱 내 숏폼 콘텐츠의 구체적인 사용 패턴 및 시청 동기(예: 홈 화면 추천, 자동 재생 등) 분석",
+        "롱폼 콘텐츠의 지역별 소비 차이(예: 서울 vs 지방, 수도권 vs 비수도권)",
+        "verified original source for direct-1",
+        "verified original source for direct-2"
+      ],
+      "contradictions": [],
+      "needs_full_text": true,
+      "sources_to_inspect": [
+        {
+          "url": "https://lib.mezzomedia.co.kr/newsletter/202505/01_MezzoMedia_2025_Target_Report_1519.pdf",
+          "reason": "롱폼 콘텐츠 시청 시 주로 사용하는 플랫폼(예: 넷플릭스, 티빙, Wavve, Disney+, TV 등)의 구체적 점유율, 롱폼 콘텐츠 유형별 소비 패턴(드라마, 예능, 영화 등), 롱폼 콘텐츠 시청 동기, 그리고 롱폼 콘텐츠와 숏폼 콘텐츠의 시청 시간 직접 비교 데이터를 확인하기 위함. 현재 요약에서는 10대의 숏폼 이용률, OTT 이용률, 주요 OTT 서비스 점유율만 제공되고 있으나, 롱폼의 구체적인 플랫폼 점유율과 시청 시간, 유형별 선호도 데이터는 누락되어 있음. 또한, 'OTT 이용률 60%, 10대 40%'라는 수치만으로는 롱폼과 숏폼을 구분할 수 없지만, 해당 보고서에서 롱폼 전용 항목이 존재한다면 이를 확인해야 함.",
+          "target_information": [
+            "롱폼 콘텐츠 시청 플랫폼 점유율 순위 및 시장 규모",
+            "롱폼 콘텐츠 유형별 소비 패턴(드라마, 예능, 영화, 다큐멘터리 등)",
+            "롱폼 콘텐츠 시청 동기 및 선호 이유",
+            "롱폼 콘텐츠 시청 시간 및 주 1회 이상 시청 빈도",
+            "롱폼 vs 숏폼 시청 시간 직접 비교 데이터"
+          ]
+        }
+      ],
+      "next_queries": [
+        {
+          "query": "롱폼 콘텐츠 시청 플랫폼 점유율 2025 넷플릭스 티빙 Wavve Disney+ TV 비중",
+          "purpose": "롱폼 콘텐츠의 주요 플랫폼(OTT)별 점유율을 파악하여 숏폼 대비 상대적 인기 비교",
+          "priority": 1
+        },
+        {
+          "query": "2025 롱폼 콘텐츠 유형별 소비 패턴 (드라마, 예능, 영화) 시청 시간 및 빈도",
+          "purpose": "롱폼 콘텐츠의 장르별 시청 시간, 주 1회 이상 시청 비중, 선호도 추이",
+          "priority": 2
+        },
+        {
+          "query": "TV vs 유튜브 vs 넷플릭스 2025 롱폼 콘텐츠 시청 시간 직접 비교 데이터",
+          "purpose": "롱폼 미디어(긴 영상) 전체 평균 시청 시간과 숏폼(1~3분)과의 구체적인 시간 비교 데이터 확보",
+          "priority": 1
+        },
+        {
+          "query": "롱폼 콘텐츠 시청 동기 및 선호 이유(깊이 있는 학습, 스토리 완결성 등) 질적 연구",
+          "purpose": "롱폼 트렌드 증가의 원인 분석을 위한 질적 데이터 확보",
+          "priority": 3
+        },
+        {
+          "query": "2025 숏폼 광고 효과 및 시장 점유율 (CTR, CPM, 광고 단가)",
+          "purpose": "숏폼 미디어의 광고 효과와 경제적 영향력 정량적 데이터",
+          "priority": 2
+        },
+        {
+          "query": "한국 연령별 롱폼 vs 숏폼 콘텐츠 선호도 및 시청 시간 비교 (10대 20대 30대)",
+          "purpose": "연령별 롱폼과 숏폼 선호도와 시청 시간 비교 구체적 데이터 확보",
+          "priority": 2
+        }
+      ],
+      "semantic_sufficient": null,
+      "structural_sufficient": false,
+      "reason": "DIRECT requirements are not linked to verified original source text"
+    }
+  ],
+  "final_coverage": {
+    "sufficient": false,
+    "coverage": [
+      {
+        "aspect": "숏폼과 롱폼 미디어 소비 현황",
+        "status": "covered",
+        "reason": "1519 TARGET REPORT와 컨슈머인사이트 보도자료는 숏폼(1~3분 영상) 이용률, 플랫폼 점유율, 시청 시간 등 구체적인 소비 현황을 직접 인용 가능한 데이터로 제공함. 특히 10대의 숏폼 이용률 98%, 전체 영상 시청 시간 97분, 숏폼 시청 채널(YouTube Shorts, Instagram Reels, TikTok) 점유율 등 직접적인 수치가 존재함.",
+        "source_urls": [
+          "https://lib.mezzomedia.co.kr/newsletter/202505/01_MezzoMedia_2025_Target_Report_1519.pdf"
+        ]
+      },
+      {
+        "aspect": "주요 플랫폼별 소비 패턴 변화 (OTT 플랫폼 롱폼, 숏폼 플랫폼)",
+        "status": "covered",
+        "reason": "1519 TARGET REPORT는 유튜브(84%), 인스타그램(78%), 틱톡(16%) 등 숏폼 플랫폼 점유율을, 컨슈머인사이트는 유튜브 쇼츠(75%), 인스타그램 릴스(43%), 틱톡(20%) 점유울을 제공함. 또한 10대가 주로 이용하는 OTT 서비스(넷플릭스 85%, 티빙 31%, 쿠팡플레이 21%)와 OTT 이용률(60%) 데이터를 포함함. YouTube Shorts 통계와 Buffer 2026 자료는 숏폼 플랫폼별 월평균 이용자 수(YouTube Shorts ~2B, TikTok ~1.59B/1.9B, Instagram Reels ~1.8B, YouTube 전체 2.6B)를 제시함.",
+        "source_urls": [
+          "https://lib.mezzomedia.co.kr/newsletter/202505/01_MezzoMedia_2025_Target_Report_1519.pdf",
+          "https://axis-intelligence.com/youtube-shorts-statistics/",
+          "https://buffer.com/resources/social-media-platforms/"
+        ]
+      },
+      {
+        "aspect": "연령/세대별 세그먼트 차이 (숏폼 이용자 비중, 시청 시간, 선호 플랫폼)",
+        "status": "covered",
+        "reason": "1519 TARGET REPORT는 10대의 숏폼 이용률 98%, OTT 이용률 40%를 직접 제시함. 컨슈머인사이트는 연령별 세분화(10대~60대 이상)로 숏폼 시청 시간(하루 평균 97분), 연속 시청 시간(10대 '1시간 이상' 26%, 60대 이상 '5분 미만' 27%), 선호 주제(유머·밈 등), 선호 영상 길이(10대는 10분~30분, 40대는 1시간~2시간) 등을 제공함. 또한 10대가 주로 사용하는 OTT 서비스(넷플릭스 85%, 티빙 31%, 쿠팡플레이 21%)와 영상 플랫폼(유튜브 84%, 인스타그램 78%, 틱톡 16%) 점유율을 포함함.",
+        "source_urls": [
+          "https://lib.mezzomedia.co.kr/newsletter/202505/01_MezzoMedia_2025_Target_Report_1519.pdf"
+        ]
+      },
+      {
+        "aspect": "롱폼 미디어 소비 시간 vs 숏폼 미디어 소비 시간 10대 비교",
+        "status": "partially_covered",
+        "reason": "1519 TARGET REPORT는 OTT 이용률(60%)과 10대 OTT 이용률(40%)을 제공하지만 롱폼과 숏폼의 구체적인 시청 시간(예: 콘텐츠 유형별 평균 시청 시간)은 제시되지 않음. 컨슈머인사이트는 '하루 평균 영상 시청 시간 97분'을 제시하지만, 이 중 숏폼과 롱폼의 구체적인 시간 분배는 제공되지 않으며, 숏폼을 '한 번 보기 시작하면 평균 21분 시청'이라는 데이터는 숏폼 콘텐츠의 평균 시청 지속 시간을 의미할 뿐, 롱폼과 비교한 양적 데이터는 부재함. 두 소스 모두 롱폼과 숏폼의 구체적인 소비 시간 비교 데이터가 없음.",
+        "source_urls": [
+          "https://lib.mezzomedia.co.kr/newsletter/202505/01_MezzoMedia_2025_Target_Report_1519.pdf"
+        ]
+      }
+    ],
+    "covered": [
+      {
+        "text": "10대의 숏폼 이용률은 98%이며, 주로 사용하는 동영상 플랫폼은 유튜브(84%), 인스타그램(78%), 틱톡(16%)이다.",
+        "source_urls": [
+          "https://lib.mezzomedia.co.kr/newsletter/202505/01_MezzoMedia_2025_Target_Report_1519.pdf"
+        ]
+      },
+      {
+        "text": "10대가 주로 이용하는 OTT 서비스는 넷플릭스(85%), 티빙(31%), 쿠팡플레이(21%)이며, 전체 OTT 이용률은 60%이고 10대에서는 40%이다.",
+        "source_urls": [
+          "https://lib.mezzomedia.co.kr/newsletter/202505/01_MezzoMedia_2025_Target_Report_1519.pdf"
+        ]
+      },
+      {
+        "text": "숏폼 콘텐츠의 주요 시청 채널은 유튜브 쇼츠(75%), 인스타그램 릴스(43%), 틱톡(20%)이다.",
+        "source_urls": [
+          "https://axis-intelligence.com/youtube-shorts-statistics/",
+          "https://buffer.com/resources/social-media-platforms/"
+        ]
+      },
+      {
+        "text": "유튜브 쇼츠는 약 20억 명의 월간 활성 사용자를 보유하고 있으며, 틱톡은 약 15.9억~19억 명, 인스타그램 릴스는 약 18억 명의 MAU를 보유하고 있다.",
+        "source_urls": [
+          "https://axis-intelligence.com/youtube-shorts-statistics/",
+          "https://buffer.com/resources/social-media-platforms/"
+        ]
+      },
+      {
+        "text": "숏폼 콘텐츠는 1~3분 내외의 짧은 영상으로, 2020년 이후 주력 영상 포맷으로 자리 잡았다.",
+        "source_urls": [
+          "https://axis-intelligence.com/youtube-shorts-statistics/"
+        ]
+      }
+    ],
+    "missing": [
+      "롱폼 콘텐츠 시청 시 주로 사용하는 플랫폼(예: 넷플릭스, 티빙, Wavve, Disney+, TV 등)의 구체적 점유율 및 상대적 인기 순위",
+      "롱폼 콘텐츠 유형별(예: 드라마, 예능, 영화, 다큐멘터리, 교육 콘텐츠 등) 소비 패턴 및 선호도",
+      "롱폼 미디어와 숏폼 미디어의 소비 시간 직접 비교 데이터(숏폼 평균 시청 시간 vs 롱폼 평균 시청 시간)",
+      "롱폼 콘텐츠 시청 동기(예: 깊이 있는 학습, 감정 몰입, 스토리 완결성 등)와 숏폼 시청 동기(유희, 정보 습득, 스킬 습득 등)의 질적 분석",
+      "롱폼 콘텐츠의 시청 빈도 추이(예: 주 1회 이상 시청자 비중, 월간 스트리밍 횟수 등) 및 숏폼과의 장기적 비교 시계열 데이터",
+      "롱폼 콘텐츠의 도입기(2018~2019년) 이후 대중화된 시기(2020년 이후)의 상대적 증가율 및 시장 점유율 변화",
+      "롱폼 콘텐츠의 광고 효과 및 시장 점유율에 대한 정량적 데이터",
+      "OTT 앱 내 숏폼 콘텐츠의 구체적인 사용 패턴 및 시청 동기(예: 홈 화면 추천, 자동 재생 등) 분석",
+      "롱폼 콘텐츠의 지역별 소비 차이(예: 서울 vs 지방, 수도권 vs 비수도권)",
+      "verified original source for direct-1",
+      "verified original source for direct-2"
+    ],
+    "contradictions": [],
+    "needs_full_text": true,
+    "sources_to_inspect": [
+      {
+        "url": "https://lib.mezzomedia.co.kr/newsletter/202505/01_MezzoMedia_2025_Target_Report_1519.pdf",
+        "reason": "롱폼 콘텐츠 시청 시 주로 사용하는 플랫폼(예: 넷플릭스, 티빙, Wavve, Disney+, TV 등)의 구체적 점유율, 롱폼 콘텐츠 유형별 소비 패턴(드라마, 예능, 영화 등), 롱폼 콘텐츠 시청 동기, 그리고 롱폼 콘텐츠와 숏폼 콘텐츠의 시청 시간 직접 비교 데이터를 확인하기 위함. 현재 요약에서는 10대의 숏폼 이용률, OTT 이용률, 주요 OTT 서비스 점유율만 제공되고 있으나, 롱폼의 구체적인 플랫폼 점유율과 시청 시간, 유형별 선호도 데이터는 누락되어 있음. 또한, 'OTT 이용률 60%, 10대 40%'라는 수치만으로는 롱폼과 숏폼을 구분할 수 없지만, 해당 보고서에서 롱폼 전용 항목이 존재한다면 이를 확인해야 함.",
+        "target_information": [
+          "롱폼 콘텐츠 시청 플랫폼 점유율 순위 및 시장 규모",
+          "롱폼 콘텐츠 유형별 소비 패턴(드라마, 예능, 영화, 다큐멘터리 등)",
+          "롱폼 콘텐츠 시청 동기 및 선호 이유",
+          "롱폼 콘텐츠 시청 시간 및 주 1회 이상 시청 빈도",
+          "롱폼 vs 숏폼 시청 시간 직접 비교 데이터"
+        ]
+      }
+    ],
+    "next_queries": [
+      {
+        "query": "롱폼 콘텐츠 시청 플랫폼 점유율 2025 넷플릭스 티빙 Wavve Disney+ TV 비중",
+        "purpose": "롱폼 콘텐츠의 주요 플랫폼(OTT)별 점유율을 파악하여 숏폼 대비 상대적 인기 비교",
+        "priority": 1
+      },
+      {
+        "query": "2025 롱폼 콘텐츠 유형별 소비 패턴 (드라마, 예능, 영화) 시청 시간 및 빈도",
+        "purpose": "롱폼 콘텐츠의 장르별 시청 시간, 주 1회 이상 시청 비중, 선호도 추이",
+        "priority": 2
+      },
+      {
+        "query": "TV vs 유튜브 vs 넷플릭스 2025 롱폼 콘텐츠 시청 시간 직접 비교 데이터",
+        "purpose": "롱폼 미디어(긴 영상) 전체 평균 시청 시간과 숏폼(1~3분)과의 구체적인 시간 비교 데이터 확보",
+        "priority": 1
+      },
+      {
+        "query": "롱폼 콘텐츠 시청 동기 및 선호 이유(깊이 있는 학습, 스토리 완결성 등) 질적 연구",
+        "purpose": "롱폼 트렌드 증가의 원인 분석을 위한 질적 데이터 확보",
+        "priority": 3
+      },
+      {
+        "query": "2025 숏폼 광고 효과 및 시장 점유율 (CTR, CPM, 광고 단가)",
+        "purpose": "숏폼 미디어의 광고 효과와 경제적 영향력 정량적 데이터",
+        "priority": 2
+      },
+      {
+        "query": "한국 연령별 롱폼 vs 숏폼 콘텐츠 선호도 및 시청 시간 비교 (10대 20대 30대)",
+        "purpose": "연령별 롱폼과 숏폼 선호도와 시청 시간 비교 구체적 데이터 확보",
+        "priority": 2
+      }
+    ],
+    "semantic_sufficient": null,
+    "structural_sufficient": false,
+    "reason": "DIRECT requirements are not linked to verified original source text"
+  },
+  "stop_reason": "search_call_budget_exhausted",
+  "search_calls_used": 6
+}

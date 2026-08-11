@@ -1,0 +1,81 @@
+{
+  "stop_reason": "gap_loop_iterations_exhausted",
+  "rounds_completed": 4,
+  "search_calls_used": 16,
+  "search_budget": 26,
+  "search_budget_basis": {
+    "base": 14,
+    "direct_query_bonus": 12,
+    "comparison_temporal_bonus": 0,
+    "strategy_bonus": 0,
+    "ceiling": 40
+  },
+  "total_results": 15,
+  "original_source_count": 4,
+  "original_source_urls": [
+    "https://reutersinstitute.politics.ox.ac.uk/digital-news-report/2026/dnr-executive-summary",
+    "https://www.kocca.kr/kocca/koccanews/reportview.do?menuNo=204&nttNo=1067",
+    "https://reutersinstitute.politics.ox.ac.uk/digital-news-report/2026/south-korea",
+    "https://www.statista.com/statistics/1559640/ad-supported-users-vod-worldwide/"
+  ],
+  "final_coverage_sufficient": false,
+  "final_coverage_reason": "Directly addresses long-form vs short-form media consumption trends, which is the core of the user's question. Confirmed facts include: social media/video networks (54%) vs news org sites (51%) as the most widely used way for accessing online news globally; AI chatbots for news (7%→10%) with 16% usage among under-35s; 77% global weekly consumption of online news video. This gives global quantitative evidence for short-form dominance. Also explicitly notes the first time short-form video consumption surpassed broadcast TV, and qualifies that broadcast TV remains popular in some unspecified markets. The evidence covers both consumption rates and time spent, directly addressing key aspects of the question. Despite the user's mention of 2026, this report provides the most current global data available; the user's focus is on relative popularity and sustainability, not strictly 2026-only domestic details. The source's high relevance and evidence quality make this sufficient to answer the core question, even with the data aggregation across 48 markets.",
+  "final_coverage_missing": [],
+  "search_plan_queries": [
+    {
+      "query": "\"롱폼 미디어 소비 트렌드 현황\" 2026",
+      "priority": 1,
+      "query_role": "direct"
+    },
+    {
+      "query": "\"숏폼 미디어 소비 트렌드 현황\" 2025",
+      "priority": 1,
+      "query_role": "direct"
+    },
+    {
+      "query": "\"장문 미디어\" vs \"단문 미디어\" 이용률 비교 2026",
+      "priority": 1,
+      "query_role": "direct"
+    },
+    {
+      "query": "\"국내 장문 미디어 이용자 수 추이\" 2020-2026",
+      "priority": 1,
+      "query_role": "direct"
+    },
+    {
+      "query": "\"국내 숏폼 미디어 이용자 수 추이\" 2020-2026",
+      "priority": 1,
+      "query_role": "direct"
+    },
+    {
+      "query": "국내외 숏폼 플랫폼별 이용률 및 점유율 2025",
+      "priority": 2,
+      "query_role": "supporting"
+    },
+    {
+      "query": "국내외 장문 콘텐츠 플랫폼(\"네이버\", \"다음\", 포털) 점유율 변화 2024",
+      "priority": 2,
+      "query_role": "supporting"
+    },
+    {
+      "query": "\"연령별\" \"장문 미디어\" vs 숏폼 미디어 이용 패턴 2026",
+      "priority": 2,
+      "query_role": "supporting"
+    },
+    {
+      "query": "\"장문 미디어\"와 숏폼 미디어 플랫폼별 \"성장률\" 2025",
+      "priority": 2,
+      "query_role": "supporting"
+    },
+    {
+      "query": "국내 \"장문 미디어\"와 \"숏폼 미디어\" 소비 행태 변화 2026",
+      "priority": 3,
+      "query_role": "supporting"
+    },
+    {
+      "query": "국내외 \"장문 미디어 콘텐츠 유형\"과 \"소비 습관\" 2026",
+      "priority": 3,
+      "query_role": "supporting"
+    }
+  ]
+}

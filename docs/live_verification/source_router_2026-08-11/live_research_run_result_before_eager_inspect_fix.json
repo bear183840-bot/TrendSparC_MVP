@@ -1,0 +1,71 @@
+{
+  "stop_reason": "sufficient",
+  "rounds_completed": 3,
+  "search_calls_used": 16,
+  "search_budget": 38,
+  "search_budget_basis": {
+    "base": 14,
+    "direct_query_bonus": 12,
+    "comparison_temporal_bonus": 12,
+    "strategy_bonus": 0,
+    "ceiling": 40
+  },
+  "total_results": 15,
+  "original_source_count": 0,
+  "original_source_urls": [],
+  "final_coverage_sufficient": true,
+  "final_coverage_reason": "",
+  "final_coverage_missing": [],
+  "search_plan_queries": [
+    {
+      "query": "\"OTT 서비스 국내 시장 규모\" 변화 추이 2019 2024",
+      "priority": 1,
+      "query_role": "direct"
+    },
+    {
+      "query": "\"OTT 서비스 글로벌 시장 규모\" 변화 추이 2019 2024",
+      "priority": 1,
+      "query_role": "direct"
+    },
+    {
+      "query": "\"국내 OTT 플랫폼별 점유율\" 변화 2019 2024",
+      "priority": 1,
+      "query_role": "direct"
+    },
+    {
+      "query": "\"글로벌 OTT 플랫폼별 시장점유율\" 변화 2020 2024",
+      "priority": 1,
+      "query_role": "direct"
+    },
+    {
+      "query": "\"OTT 서비스 국내 이용자 연령대별 이용 현황\" 2019 2024",
+      "priority": 1,
+      "query_role": "direct"
+    },
+    {
+      "query": "\"OTT 서비스 글로벌 이용자 연령대별 이용 현황\" 2020 2024",
+      "priority": 1,
+      "query_role": "direct"
+    },
+    {
+      "query": "국내 OTT 생태계 주요 규제 및 정책 변화 2019 2024",
+      "priority": 2,
+      "query_role": "supporting"
+    },
+    {
+      "query": "\"글로벌 OTT 규제\" 및 정책 동향 2020 2024",
+      "priority": 2,
+      "query_role": "supporting"
+    },
+    {
+      "query": "OTT 서비스 기술 혁신 및 콘텐츠 트렌드 2019 2024",
+      "priority": 2,
+      "query_role": "supporting"
+    },
+    {
+      "query": "국내 OTT 서비스 글로벌 경쟁 동향 2019 2024",
+      "priority": 2,
+      "query_role": "supporting"
+    }
+  ]
+}
