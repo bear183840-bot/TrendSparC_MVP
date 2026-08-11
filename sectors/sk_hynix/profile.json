@@ -3,11 +3,6 @@
   "display_name": "SK하이닉스 (SK hynix)",
   "canonical_name": "SK하이닉스",
   "status": "active",
-  "min_validated_documents": 2,
-  "max_validation_recollection_attempts": 1,
-  "min_analyzed_documents": 3,
-  "target_analyzed_documents": 5,
-  "max_analysis_recollection_attempts": 1,
   "aliases": ["SK hynix", "SK하이닉스", "하이닉스", "에스케이하이닉스", "000660"],
   "keywords": [
     "HBM", "HBM3E", "HBM4", "DRAM", "D램", "디램", "NAND", "낸드", "낸드플래시",
