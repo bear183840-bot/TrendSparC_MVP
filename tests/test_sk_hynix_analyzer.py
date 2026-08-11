@@ -1,195 +1,78 @@
 import json
 import types
 
-import pytest
-
 from common.contracts import SourceDocument
-from common.errors import PipelineStageError
 from sectors.sk_hynix.adapter import analyzer as analyzer_module
-from sectors.sk_hynix.adapter.analyzer import analyze
 
 
-def _document() -> SourceDocument:
-    return SourceDocument(
-        doc_id="doc_1",
-        source_id="SK하이닉스 뉴스룸",
-        title="테스트 기사",
-        url="https://example.com/article",
-        content="테스트 기사 본문입니다.",
-    )
+def _document(content="HBM demand reached 100 units in 2026."):
+    return SourceDocument(doc_id="doc-1", source_id="hynix", title="Memory update", url="https://example.com/a", content=content)
 
 
-def _make_response(
-    summary,
-    key_points,
-    sentiment,
-    relevant_to_question,
-    refusal=None,
-    business_impact="",
-    risk="",
-    opportunity="",
-    strength="",
-    weakness="",
-    metric_points=None,
-    comparison_points=None,
-    recommended_actions=None,
-    monitoring_indicators=None,
-    evidence=None,
-    action_level="insufficient_data",
-    analysis_confidence="low",
-):
-    # Mirrors the real OpenAI Structured Outputs contract: _ANALYSIS_SCHEMA
-    # marks all 16 fields "required" with strict=True, so a real response
-    # always includes them — the test fixture must too, or _analyze_document's
-    # data["field"] indexing raises KeyError before the test's actual
-    # assertion is even reached.
-    message = types.SimpleNamespace(
-        content=json.dumps(
-            {
-                "summary": summary,
-                "key_points": key_points,
-                "sentiment": sentiment,
-                "relevant_to_question": relevant_to_question,
-                "business_impact": business_impact,
-                "risk": risk,
-                "opportunity": opportunity,
-                "strength": strength,
-                "weakness": weakness,
-                "metric_points": metric_points or [],
-                "comparison_points": comparison_points or [],
-                "recommended_actions": recommended_actions or [],
-                "monitoring_indicators": monitoring_indicators or [],
-                "evidence": evidence or [],
-                "action_level": action_level,
-                "analysis_confidence": analysis_confidence,
-            }
-        ),
-        refusal=refusal,
-    )
-    choice = types.SimpleNamespace(message=message)
-    return types.SimpleNamespace(choices=[choice])
+def _analysis_response(claims, *, metrics=None, comparisons=None):
+    payload = {"summary": "summary", "relevance_level": "direct", "grounded_claims": claims, "metric_points": metrics or [], "comparison_points": comparisons or [], "analysis_confidence": "high"}
+    return types.SimpleNamespace(choices=[types.SimpleNamespace(message=types.SimpleNamespace(content=json.dumps(payload), refusal=None))])
 
 
-class _FakeCompletions:
-    def __init__(self, response):
-        self._response = response
-        self.last_kwargs = None
-
-    def create(self, **kwargs):
-        self.last_kwargs = kwargs
-        return self._response
-
-
-class _FakeChat:
-    def __init__(self, response):
-        self.completions = _FakeCompletions(response)
+def _repair_response(repairs):
+    return types.SimpleNamespace(choices=[types.SimpleNamespace(message=types.SimpleNamespace(content=json.dumps({"repairs": repairs}), refusal=None))])
 
 
 class _FakeOpenAI:
-    def __init__(self, response):
-        self.chat = _FakeChat(response)
+    def __init__(self, responses):
+        self.responses = iter(responses)
+        self.chat = types.SimpleNamespace(completions=self)
 
-
-class _ErroringCompletions:
     def create(self, **kwargs):
-        raise RuntimeError("simulated API failure")
+        return next(self.responses)
 
 
-class _ErroringChat:
-    def __init__(self):
-        self.completions = _ErroringCompletions()
+def _claim(quote, claim_id="c1", claim_type="key_point"):
+    return {"claim_id": claim_id, "claim_type": claim_type, "claim": "grounded claim", "evidence_passage_id": None, "evidence_quote": quote, "evidence_location": None, "as_of_date": None, "confidence": "high"}
 
 
-class _ErroringOpenAI:
-    def __init__(self, api_key):
-        # analyze()'s `client = OpenAI(api_key=api_key)` isn't wrapped in a
-        # try/except (only the .create() call inside _analyze_document is),
-        # matching the real openai.OpenAI class — constructing it never makes
-        # a network call, only an actual request can fail.
-        self.chat = _ErroringChat()
-
-
-def test_question_text_is_included_in_the_prompt_sent_to_the_model(monkeypatch):
+def _wire(monkeypatch, responses):
     monkeypatch.setenv("TRENDSPARC_SK_HYNIX_ANALYZER_API_KEY", "test-key")
-    response = _make_response("요약", ["포인트"], "neutral", True)
-    fake_openai = _FakeOpenAI(response)
-    monkeypatch.setattr(analyzer_module, "OpenAI", lambda api_key: fake_openai)
-    monkeypatch.setattr(analyzer_module, "_load_system_prompt", lambda: "system prompt")
-
-    analyze([_document()], "SK하이닉스 HBM 시장 전망은?")
-
-    sent_messages = fake_openai.chat.completions.last_kwargs["messages"]
-    user_message = next(m["content"] for m in sent_messages if m["role"] == "user")
-    assert "SK하이닉스 HBM 시장 전망은?" in user_message
+    monkeypatch.setattr(analyzer_module, "OpenAI", lambda **_: _FakeOpenAI(responses))
+    monkeypatch.setattr(analyzer_module, "_load_system_prompt", lambda: "prompt")
+    monkeypatch.setattr(analyzer_module, "call_with_truncation_retry", lambda call, _: (call(4500), False))
 
 
-def test_analyzer_passes_base_url_to_the_client_only_when_the_env_var_is_set(monkeypatch):
-    # Every sector analyzer wires this the same way (see common/ai_client.py) -
-    # sk_hynix stands in for all six here rather than repeating this in each
-    # sector's own test file.
-    monkeypatch.setenv("TRENDSPARC_SK_HYNIX_ANALYZER_API_KEY", "test-key")
-    response = _make_response("요약", ["포인트"], "neutral", True)
-    captured = {}
+def test_analyzer_keeps_first_pass_verbatim_quote(monkeypatch):
+    quote = "HBM demand reached 100 units in 2026."
+    _wire(monkeypatch, [_analysis_response([_claim(quote)])])
 
-    def fake_openai_ctor(**kwargs):
-        captured.update(kwargs)
-        return _FakeOpenAI(response)
+    result = analyzer_module.analyze([_document(quote)], "HBM demand?")[0]
 
-    monkeypatch.setattr(analyzer_module, "OpenAI", fake_openai_ctor)
-    monkeypatch.setattr(analyzer_module, "_load_system_prompt", lambda: "system prompt")
-
-    monkeypatch.delenv("TRENDSPARC_SK_HYNIX_ANALYZER_BASE_URL", raising=False)
-    analyze([_document()], "SK하이닉스 HBM 시장 전망은?")
-    assert "base_url" not in captured
-
-    monkeypatch.setenv("TRENDSPARC_SK_HYNIX_ANALYZER_BASE_URL", "https://api.upstage.ai/v1")
-    analyze([_document()], "SK하이닉스 HBM 시장 전망은?")
-    assert captured["base_url"] == "https://api.upstage.ai/v1"
-    assert captured["api_key"] == "test-key"
+    assert [claim.evidence_quote for claim in result.grounded_claims] == [quote]
+    assert result.analysis_validation_status == "verified"
 
 
-def test_relevant_document_is_parsed_correctly(monkeypatch):
-    monkeypatch.setenv("TRENDSPARC_SK_HYNIX_ANALYZER_API_KEY", "test-key")
-    response = _make_response("요약", ["포인트 1", "포인트 2"], "positive", True)
-    monkeypatch.setattr(analyzer_module, "OpenAI", lambda api_key: _FakeOpenAI(response))
-    monkeypatch.setattr(analyzer_module, "_load_system_prompt", lambda: "system prompt")
+def test_analyzer_repairs_one_failed_quote(monkeypatch):
+    quote = "HBM demand reached 100 units in 2026."
+    _wire(monkeypatch, [_analysis_response([_claim("incorrect quote")]), _repair_response([{"claim_id": "c1", "evidence_passage_id": "P001", "evidence_quote": quote}])])
 
-    result = analyze([_document()], "SK하이닉스 HBM 시장 전망은?")
+    result = analyzer_module.analyze([_document(quote)], "HBM demand?")[0]
 
-    assert len(result) == 1
-    assert result[0].relevant_to_question is True
-    assert result[0].summary == "요약"
-    assert result[0].key_points == ["포인트 1", "포인트 2"]
+    assert result.grounded_claims[0].evidence_quote == quote
 
 
-def test_irrelevant_document_is_still_returned_with_flag_set_false(monkeypatch):
-    # analyze() itself doesn't drop anything — filtering happens centrally in
-    # core/request_pipeline/pipeline.py, so the flag must survive intact here.
-    monkeypatch.setenv("TRENDSPARC_SK_HYNIX_ANALYZER_API_KEY", "test-key")
-    response = _make_response("무관한 기사", [], "neutral", False)
-    monkeypatch.setattr(analyzer_module, "OpenAI", lambda api_key: _FakeOpenAI(response))
-    monkeypatch.setattr(analyzer_module, "_load_system_prompt", lambda: "system prompt")
+def test_analyzer_drops_quote_when_repair_is_not_grounded(monkeypatch):
+    _wire(monkeypatch, [_analysis_response([_claim("incorrect quote")]), _repair_response([{"claim_id": "c1", "evidence_passage_id": None, "evidence_quote": None}])])
 
-    result = analyze([_document()], "SK하이닉스 HBM 시장 전망은?")
+    result = analyzer_module.analyze([_document()], "HBM demand?")[0]
 
-    assert len(result) == 1
-    assert result[0].relevant_to_question is False
+    assert result.grounded_claims == []
+    assert result.usable_for_synthesis is False
 
 
-def test_api_failure_still_raises_pipeline_stage_error(monkeypatch):
-    monkeypatch.setenv("TRENDSPARC_SK_HYNIX_ANALYZER_API_KEY", "test-key")
-    monkeypatch.setattr(analyzer_module, "OpenAI", _ErroringOpenAI)
-    monkeypatch.setattr(analyzer_module, "_load_system_prompt", lambda: "system prompt")
+def test_analyzer_chunks_and_merges_long_document(monkeypatch):
+    first = "HBM demand reached 100 units in 2026."
+    second = "Capacity investment reached 200 units in 2026."
+    content = first + "x" * 12_100 + "\n\n" + second
+    _wire(monkeypatch, [_analysis_response([_claim(first, "first")]), _analysis_response([_claim(second, "second", "metric")], metrics=[{"label": "capacity", "period": "2026", "value": 200, "unit": "units", "subject": None, "is_relative": False, "comparison_period": None, "evidence_claim_id": "second"}])])
 
-    with pytest.raises(PipelineStageError):
-        analyze([_document()], "SK하이닉스 HBM 시장 전망은?")
+    result = analyzer_module.analyze([_document(content)], "HBM capacity?")[0]
 
-
-def test_refusal_still_raises_pipeline_stage_error(monkeypatch):
-    monkeypatch.setenv("TRENDSPARC_SK_HYNIX_ANALYZER_API_KEY", "test-key")
-    response = _make_response("요약", [], "neutral", True, refusal="cannot help with that")
-    monkeypatch.setattr(analyzer_module, "OpenAI", lambda api_key: _FakeOpenAI(response))
-    monkeypatch.setattr(analyzer_module, "_load_system_prompt", lambda: "system prompt")
-
-    with pytest.raises(PipelineStageError):
-        analyze([_document()], "SK하이닉스 HBM 시장 전망은?")
+    assert len(result.grounded_claims) == 2
+    assert result.metric_points[0].evidence_claim_id == "second"

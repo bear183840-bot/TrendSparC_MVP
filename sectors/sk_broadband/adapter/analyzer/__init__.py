@@ -6,7 +6,6 @@ import json
 import os
 import re
 import sys
-import unicodedata
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -14,6 +13,7 @@ from openai import OpenAI
 
 from common.ai_usage import emit_ai_usage
 from common.ai_client import openai_client_kwargs
+from common.analyzer_quality import normalize_quote
 from common.content_quality_validator import (
     COMPARISON_COMPLETENESS_INSTRUCTION,
     SWOT_COMPLETENESS_INSTRUCTION,
@@ -523,12 +523,7 @@ def _selected_pdf_chunks(
 
 def _normalized_text(value: str) -> str:
     """Normalize extraction artifacts without weakening factual matching."""
-    value = unicodedata.normalize("NFKC", value)
-    value = value.replace("\u00a0", " ").replace("\u00ad", "")
-    value = re.sub(r"[\u200b-\u200d\u2060\ufeff]", "", value)
-    # PDF extraction often inserts a line break and hyphen inside one word.
-    value = re.sub(r"(?<=\w)-\s*\r?\n\s*(?=\w)", "", value)
-    return " ".join(value.split())
+    return normalize_quote(value)
 
 
 def _split_evidence_passages(content: str) -> list[dict[str, str]]:
