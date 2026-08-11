@@ -8,6 +8,7 @@ from __future__ import annotations
 import base64
 import io
 import json
+import os
 import re
 import sys
 import textwrap
@@ -27,6 +28,19 @@ if str(PROJECT_ROOT) not in sys.path:
 from dotenv import load_dotenv
 
 load_dotenv()
+
+# Streamlit Community Cloud has no `.env` file - secrets are entered in its
+# own dashboard and only reach the app as `st.secrets`. Every stage below
+# reads its key via `os.environ.get(...)` (the shared `.env.example`
+# convention), so this bridge is the one place that makes a cloud deploy see
+# the same values a local `.env` would - never overwriting a real local var
+# a `.env` file already set (`setdefault`, not assignment). A no-op locally
+# and anywhere `st.secrets` is empty/unavailable.
+try:
+    for _secret_key, _secret_value in st.secrets.items():
+        os.environ.setdefault(_secret_key, str(_secret_value))
+except Exception:
+    pass
 
 from audience.contracts import list_audience_ids
 from common.contracts import Attachment, UserRequest
@@ -84,6 +98,24 @@ AUDIENCE_LABELS = {
 }
 
 st.set_page_config(page_title="TrendSparC", page_icon="◼", layout="wide", initial_sidebar_state="expanded")
+
+# Gate is opt-in via env/secret: unset locally (no `TRENDSPARC_APP_PASSWORD`
+# in `.env`), so local development never sees a login screen. Set the same
+# key as a Streamlit Cloud secret to lock a public deploy - Community
+# Cloud's free tier has no per-viewer access list, so this is the minimum
+# bar against a stranger finding the URL and triggering real, paid API
+# calls (see `--no-dry-run` runs below).
+_APP_PASSWORD = os.environ.get("TRENDSPARC_APP_PASSWORD", "").strip()
+if _APP_PASSWORD and not st.session_state.get("_authenticated"):
+    st.title("TrendSparC")
+    _entered = st.text_input("비밀번호", type="password")
+    if _entered:
+        if _entered == _APP_PASSWORD:
+            st.session_state["_authenticated"] = True
+            st.rerun()
+        else:
+            st.error("비밀번호가 올바르지 않습니다.")
+    st.stop()
 
 APP_STATE_VERSION = 9  # 9: compact sidebar navigation and artifact center
 if st.session_state.get("app_state_version") != APP_STATE_VERSION:
