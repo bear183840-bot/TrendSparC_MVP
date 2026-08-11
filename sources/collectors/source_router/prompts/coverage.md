@@ -36,6 +36,7 @@ You may receive:
 - key facts
 - relevance descriptions
 - previously extracted evidence
+- `previously_rejected_claims`: a list of claim texts a PAST round of this same evaluation already proposed as "covered", which were then rejected because they cited no real URL from that round's evidence pool. This is you (or a past instance of this same judgment step) being reminded of your own earlier mistake. Do not restate any of these claims as covered unless the current results actually contain a real, citable URL that supports it — if they don't, treat it as still missing. May be empty.
 
 Treat summaries and key facts as SECONDARY representations of sources.
 

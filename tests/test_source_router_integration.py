@@ -10,7 +10,6 @@ from common.errors import PipelineStageError
 from core.request_pipeline import pipeline as pipeline_module
 from sources.collectors.source_router import coverage as coverage_module
 from sources.collectors.source_router import planner as planner_module
-from sources.collectors.source_router import refiner as refiner_module
 from sources.collectors.source_router import router as router_module
 from sources.collectors.source_router import web_search as web_search_module
 from sources.collectors.source_router.adapter import (
@@ -22,7 +21,6 @@ from sources.collectors.source_router.config import SourceRouterConfig
 from sources.collectors.source_router.contracts import (
     ConfirmedFact,
     CoverageDecision,
-    EvidenceNeed,
     EvidenceVerification,
     NextQuery,
     SearchPlan,
@@ -37,114 +35,6 @@ def _plan(*queries: str) -> SearchPlan:
         intent="IPTV status",
         queries=[SearchPlanQuery(query=query, priority=1) for query in queries],
     )
-
-
-def test_iptv_evidence_needs_keep_direct_before_time_series_and_comparison():
-    needs = refiner_module.build_evidence_needs(
-        "IPTV 가입자 수 현황은?",
-        ["현재 IPTV 가입자 현황"],
-        ["동일 metric의 여러 실제 시점 데이터", "주요 사업자의 동일 시점·동일 기준 비교"],
-        purpose_id="current_status",
-    )
-
-    assert [need.requirement_type for need in needs] == ["direct", "supporting", "supporting"]
-    assert "현재 IPTV 가입자" in needs[0].text
-    assert "시점" in needs[1].text
-    assert "사업자" in needs[2].text
-
-
-def test_issue_response_evidence_needs_prioritize_issue_and_response():
-    needs = refiner_module.build_evidence_needs(
-        "중앙그룹 회생 사태에 IPTV사는 어떻게 대응해야 하나?",
-        ["중앙그룹 회생 사태와 IPTV사의 대응"],
-        ["실제 영향 규모", "비교 가능한 대응 사례"],
-        purpose_id="issue_response",
-    )
-
-    assert needs[0].requirement_type == "direct"
-    assert "대응" in needs[0].text
-    assert all(need.priority <= 2 for need in needs)
-
-
-def test_refiner_keeps_plan_when_existing_query_covers_need(monkeypatch):
-    monkeypatch.setattr(refiner_module._solar, "call_json", lambda *args, **kwargs: None)
-    plan = _plan("IPTV 가입자 수 현재 현황")
-
-    refined = refiner_module.refine_search_plan(
-        "IPTV 가입자 수 현황은?",
-        plan,
-        ["IPTV 가입자 수 현재 현황"],
-        [],
-    )
-
-    assert refined.refinement.action == "KEEP"
-    assert refined.refinement.added_queries == []
-    assert [query.query for query in refined.queries] == ["IPTV 가입자 수 현재 현황"]
-
-
-def test_refiner_never_rewrites_direct_query_and_respects_total_budget(monkeypatch):
-    monkeypatch.setattr(
-        refiner_module._solar,
-        "call_json",
-        lambda *args, **kwargs: {
-            "action": "REWRITE",
-            "rewrites": [{"replace_query": "직접 질의", "query": "삭제된 직접 질의"}],
-            "add_queries": [
-                {"query": "지원 질의 1", "evidence_need_ids": ["support-1"]},
-                {"query": "지원 질의 2", "evidence_need_ids": ["support-1"]},
-            ],
-        },
-    )
-    refined = refiner_module.refine_search_plan(
-        "질문",
-        _plan("직접 질의", "두 번째 계획 질의"),
-        ["직접 답변"],
-        ["지원 근거"],
-        max_total_queries=2,
-    )
-
-    assert refined.queries[0].query == "직접 질의"
-    assert refined.queries[0].query_role == "direct"
-    assert len(refined.queries) <= 2
-    assert all(query.query != "삭제된 직접 질의" for query in refined.queries)
-
-
-def test_router_requires_original_source_before_direct_sufficiency(monkeypatch):
-    monkeypatch.setattr(planner_module, "plan_searches", lambda *args, **kwargs: _plan("직접 질의"))
-    monkeypatch.setattr(refiner_module._solar, "call_json", lambda *args, **kwargs: None)
-    monkeypatch.setattr(
-        web_search_module,
-        "execute_web_search",
-        lambda *args, **kwargs: [WebSearchResult(url="https://example.com/a", summary="snippet")],
-    )
-    coverage_calls = {"count": 0}
-
-    def _coverage(*args, **kwargs):
-        coverage_calls["count"] += 1
-        return CoverageDecision(sufficient=True, reason="summary looked sufficient")
-
-    monkeypatch.setattr(coverage_module, "check_coverage", _coverage)
-    monkeypatch.setattr(
-        router_module,
-        "_inspect_source",
-        lambda question, source, config: source.model_copy(update={
-            "evidence_depth": "original_source",
-            "original_content": "원문에서 직접 확인된 IPTV 가입자 수",
-            "verification": EvidenceVerification(
-                confirmed_facts=[ConfirmedFact(fact="IPTV 가입자 수", evidence_strength="direct")]
-            ),
-        }),
-    )
-
-    result = router_module.research(
-        "IPTV 가입자 수 현황은?",
-        SourceRouterConfig(max_gap_loop_iterations=2),
-        answer_requirements=["현재 IPTV 가입자 현황"],
-    )
-
-    assert result.stop_reason == "sufficient"
-    assert coverage_calls["count"] == 2
-    assert result.results[0].original_content.startswith("원문")
 
 
 def test_short_source_with_direct_verified_fact_is_not_rejected(monkeypatch):
@@ -302,102 +192,11 @@ def test_coverage_check_never_resends_original_source_text(monkeypatch):
     assert captured["payload"]["results"][0]["evidence_depth"] == "original_source"
 
 
-# --- audit: what counts as a satisfied DIRECT requirement ----------------
-
-
-def _direct_plan() -> SearchPlan:
-    return SearchPlan(
-        intent="IPTV status",
-        queries=[SearchPlanQuery(query="직접 질의", priority=1, query_role="direct",
-                                 evidence_need_ids=["direct-1"])],
-        evidence_needs=[
-            EvidenceNeed(evidence_need_id="direct-1", text="현재 IPTV 가입자 수",
-                         requirement_type="direct", priority=1)
-        ],
-    )
-
-
-def _direct_result(**overrides) -> WebSearchResult:
-    base = {
-        "url": "https://example.com/a",
-        "summary": "요약",
-        "evidence_depth": "original_source",
-        "original_content": "원문 텍스트",
-        "query_role": "direct",
-        "evidence_need_ids": ["direct-1"],
-    }
-    base.update(overrides)
-    return WebSearchResult(**base)
-
-
-def test_original_text_without_verification_does_not_satisfy_a_direct_need():
-    decision = router_module._enforce_direct_original_sources(
-        CoverageDecision(sufficient=True, reason="looked fine"),
-        _direct_plan(),
-        [_direct_result(verification=None)],
-        set(),
-    )
-
-    assert decision.sufficient is False
-    assert any("direct-1" in item for item in decision.missing)
-
-
-def test_a_verified_original_source_satisfies_a_direct_need_at_any_strength():
-    """The gate asks whether the original document was fetched and verified,
-    not how the verifier graded what it found.
-
-    This used to require `evidence_strength == "direct"` as a fourth AND
-    condition, which made a judgement about relevance into a pass/fail on
-    collection: a run could hold the source text it needed and still fail.
-    Live-verified 2026-08-10 (storage/requests/req_cli_8452ace0) - coverage
-    returned "DIRECT requirements are not linked to verified original source
-    text" and forced `sufficient=False` on every gap round until the search
-    budget ran out. The strength classification is still produced and still
-    recorded; it is just no longer a gate.
-    """
-    decision = router_module._enforce_direct_original_sources(
-        CoverageDecision(sufficient=True, reason="looked fine"),
-        _direct_plan(),
-        [
-            _direct_result(
-                verification=EvidenceVerification(
-                    confirmed_facts=[
-                        ConfirmedFact(fact="IPTV 시장 언급", evidence_strength="contextual")
-                    ]
-                )
-            )
-        ],
-        set(),
-    )
-
-    assert decision.sufficient is True
-
-
-def test_direct_confirmed_fact_leaves_the_coverage_decision_untouched():
-    original = CoverageDecision(sufficient=True, reason="verified")
-    decision = router_module._enforce_direct_original_sources(
-        original,
-        _direct_plan(),
-        [
-            _direct_result(
-                verification=EvidenceVerification(
-                    confirmed_facts=[
-                        ConfirmedFact(fact="가입자 946만 명", evidence_strength="direct")
-                    ]
-                )
-            )
-        ],
-        set(),
-    )
-
-    assert decision is original
-
-
-# --- audit: one budget covers planner, refiner and follow-up -------------
+# --- audit: one budget covers the planner batch and gap-loop follow-up ---
 
 
 def test_every_search_call_shares_one_run_budget(monkeypatch):
-    """Initial, refined and gap-loop queries draw on the same allowance.
+    """Initial and gap-loop queries draw on the same allowance.
 
     The prototype capped each tier separately, so a run could spend 15 + 15.
     Coverage here always reports a gap and always asks for more queries, so
@@ -413,7 +212,6 @@ def test_every_search_call_shares_one_run_budget(monkeypatch):
         ],
     )
     monkeypatch.setattr(planner_module, "plan_searches", lambda *args, **kwargs: plan)
-    monkeypatch.setattr(refiner_module._solar, "call_json", lambda *args, **kwargs: None)
     monkeypatch.setattr(
         coverage_module,
         "check_coverage",

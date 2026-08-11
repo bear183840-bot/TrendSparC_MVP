@@ -13,11 +13,12 @@ syndicated copies across outlets) carrying the same headline.
 
 from __future__ import annotations
 
-import re
 from datetime import datetime, timedelta, timezone
 from urllib.parse import urlparse
 
 from common.contracts import SourceDocument, WebSearchContext
+from common.recency import max_age_days as _shared_max_age_days
+from common.recency import requires_verified_published_at as _shared_requires_verified_published_at
 
 _MIN_CONTENT_LENGTH = 250
 _MAX_DOCUMENT_AGE_DAYS = 730
@@ -47,31 +48,16 @@ def _is_structurally_valid(document: SourceDocument) -> bool:
 
 
 def _max_age_days(search_context: WebSearchContext | None) -> int | None:
+    # Delegates to common.recency (shared with source_router's query
+    # planner, which needs the same question-sensitive judgment upstream of
+    # collection, not just here as a post-hoc document filter) — see that
+    # module's docstring for the extraction history. Behavior-preserving:
+    # every branch/threshold is unchanged from before the extraction.
     if search_context is None:
         return _MAX_DOCUMENT_AGE_DAYS
-    question = search_context.question.lower()
-    ranged_years = re.search(r"(?:최근|지난)\s*(\d+)\s*년", question)
-    if ranged_years:
-        return max(365, int(ranged_years.group(1)) * 366)
-    ranged_months = re.search(r"(?:최근|지난)\s*(\d+)\s*개월", question)
-    if ranged_months:
-        return max(30, int(ranged_months.group(1)) * 31)
-    if any(term in question for term in ("역사", "과거", "도입 배경", "장기 추이")):
-        return None
-    if any(
-        term in question
-        for term in ("오늘", "금일", "실시간", "방금", "이번 주", "금주", "가장 최신", "가장 최근")
-    ):
-        return 30
-    if "최신" in question:
-        return 90
-    if any(term in question for term in ("최근", "현재", "지금", "요즘", "이번 달")):
-        return 180
-    if search_context.as_of_date and search_context.as_of_date[:4] in question:
-        return 365
-    if search_context.report_purpose_id == "current_status":
-        return 365
-    return _MAX_DOCUMENT_AGE_DAYS
+    return _shared_max_age_days(
+        search_context.question, search_context.as_of_date, search_context.report_purpose_id
+    )
 
 
 def _reference_time(search_context: WebSearchContext | None) -> datetime:
@@ -86,11 +72,7 @@ def _reference_time(search_context: WebSearchContext | None) -> datetime:
 def _requires_verified_published_at(search_context: WebSearchContext | None) -> bool:
     if search_context is None:
         return False
-    question = search_context.question.lower()
-    return any(
-        term in question
-        for term in ("오늘", "금일", "실시간", "방금", "이번 주", "금주", "가장 최신", "가장 최근")
-    )
+    return _shared_requires_verified_published_at(search_context.question)
 
 
 def _is_recent_enough(

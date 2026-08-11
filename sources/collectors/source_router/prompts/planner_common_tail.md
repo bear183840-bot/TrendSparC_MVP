@@ -22,7 +22,9 @@ STEP 2.5/2.6을 통과한 모든 관점, 질문유형(Troubleshooting/Navigating
 
 ## STEP 4 — 가장 가치가 높은 검색만 선택
 
-사용자의 질문에 답하기 충분한 근거를 제공할 가능성이 높은 최소한의 query 집합을 선택하십시오. 다만 습관적으로 너무 적게 생성해서도 안 됩니다. 질문이 실제로 그 정도의 복잡도를 요구하는 경우 시스템은 priority-1 query 최대 15개, priority-2 query 최대 15개까지 허용합니다. 이는 실제 복잡성을 위한 상한선이지, 숫자를 채우기 위한 목표가 아닙니다.
+사용자의 질문에 답하기 충분한 근거를 제공할 가능성이 높은 최소한의 query 집합을 선택하십시오. 다만 습관적으로 너무 적게 생성해서도 안 됩니다. 질문이 실제로 그 정도의 복잡도를 요구하는 경우 시스템은 priority-1 query 최대 **8개**, priority-2 query 최대 **6개**까지 허용합니다. 이는 실제 복잡성을 위한 상한선이지, 숫자를 채우기 위한 목표가 아닙니다.
+
+**이 두 숫자는 조언이 아니라 실행 시점의 하드 제한입니다.** 시스템은 priority-1 query를 앞에서부터 8개, priority-2 query를 앞에서부터 6개만 실제로 실행하고 나머지는 조용히 버립니다. 따라서 이 개수를 초과해 생성하면 초과분은 사라지며, 특히 가장 중요한 관점을 뒤쪽에 배치했다면 그 관점이 통째로 실행되지 않습니다. 각 priority 안에서 **가장 중요한 query를 먼저** 배치하십시오.
 
 기본 목표 — 아래 수치는 각 category에서의 **최소값**이며 단순 권장사항이 아닙니다. 질문의 실제 category가 요구하는 최소 개수보다 적게 생성하면 이 지시를 따르지 않은 것입니다.
 
@@ -119,7 +121,7 @@ Query는 간결하고 web search에 최적화되어야 합니다.
 
 **이 Korean-only rule은 `query`에만 적용되는 것이 아닙니다.** output의 모든 free-text field — `intent`, `angle`, `purpose`(STEP 2.7의 Research Question), 그리고 Final check 아래에서 `intent`에 작성하는 설명문 — 역시 동일한 예외를 제외하고 모두 한국어로 작성해야 합니다. Live-verified: 이 규칙을 명시하지 않았을 때 model이 모든 query는 한국어로 생성하면서 `intent` 전체는 영어로 작성하는 실패가 발생했습니다.
 
-freshness가 중요할 때만 current year 또는 date terms를 사용하십시오.
+freshness가 중요할 때만 date terms를 사용하십시오. 사용할 경우 반드시 위 Inputs의 `as_of_date`를 기준으로 한 연도/기간을 사용하십시오(`as_of_date`가 `"unknown"`이면 date term 자체를 넣지 마십시오) — 학습 데이터에 남아있는 임의의 과거 연도를 사용하지 마십시오.
 
 가치가 있을 경우 domain 또는 source hint를 사용할 수 있습니다. 예:
 
@@ -171,6 +173,7 @@ query를 반환하기 전에 내부적으로 다음을 확인하십시오.
 2. 이 질문에 regulatory, licensing, government-agency, contractual, official-proceeding dimension이 있는지 위 "Regulatory / institutional terminology queries" section 기준으로 확인하십시오. 있다면 final list에 specific regulator/agency reference와 precise legal 또는 industry term을 실제로 결합한 query가 최소 하나 있는지 확인하십시오. 없다면 지금 추가하십시오. 정확한 이름을 확신하지 못하면 추측한 이름 대신 일반적인 framing을 사용하십시오.
 3. `purpose_id`가 `"infer"`가 아니거나 `audience`가 `"unspecified"`이 아니라면, STEP 2.5와 STEP 2.6이 실제로 적용되었는지, 그리고 Research Question을 STEP 2.7에서 작성하기 전에 반드시 그 순서대로 적용되었는지 확인하십시오(purpose axis expansion → audience adjustment). input이 주어진 경우 두 step은 선택사항이 아닙니다. 질문유형에 해당하는 검색 전략이 함께 제공되었다면, 그 전략이 제시하는 evidence role(우선적으로 확보할 정보·역할 분리)도 최종 query set에 실제로 반영되었는지 함께 확인하십시오.
 4. STEP 2.5/2.6/2.7이 STEP 2의 candidate diversity를 좁힌 것이 아니라 추가했는지 확인하십시오. 최종 query set이 STEP 2의 candidate list만 사용했을 때보다 더 적은 distinct angle을 다루는 결과가 되어서는 안 됩니다.
+5. freshness가 중요해 query에 연도나 날짜 표현을 넣은 경우, 그 연도/기간이 위 Inputs의 `as_of_date`와 실제로 일치하는지 확인하십시오. `as_of_date`가 `"unknown"`이면 이 항목은 건너뛰십시오.
 
 ## Output
 

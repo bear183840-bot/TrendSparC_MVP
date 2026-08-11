@@ -8,11 +8,16 @@ Upstage Document Parse, PDF download) is faked or monkeypatched.
 from __future__ import annotations
 
 import json
+import sys
+import time
 import types
+
+import pytest
 
 from sources.collectors.source_router import _prompts as prompts_module
 from sources.collectors.source_router import _solar as solar_module
 from sources.collectors.source_router import coverage as coverage_module
+from sources.collectors.source_router import html_extractor
 from sources.collectors.source_router import pdf_parser
 from sources.collectors.source_router import planner as planner_module
 from sources.collectors.source_router import question_type_ai_based
@@ -25,7 +30,6 @@ from sources.collectors.source_router.contracts import (
     ConfirmedFact,
     DocumentChunk,
     DocumentSection,
-    EvidenceNeed,
     EvidenceVerification,
     NextQuery,
     SearchPlan,
@@ -344,6 +348,82 @@ def test_call_json_uses_cancellable_sdk_timeout_without_background_retry(monkeyp
     assert captured["max_retries"] == 0
 
 
+# --- raw control characters in the model's JSON (2026-08-11) ---------------
+# Live-verified: a real check_coverage() call died with `Invalid control
+# character at: line 1 column 5 (char 4)` and lost that round to
+# _fallback_decision(), which is not a coverage judgment at all.
+
+
+def _solar_returning(content: str, monkeypatch):
+    response = types.SimpleNamespace(
+        choices=[types.SimpleNamespace(message=types.SimpleNamespace(content=content))]
+    )
+
+    class _FakeOpenAI:
+        def __init__(self, **_):
+            self.chat = types.SimpleNamespace(
+                completions=types.SimpleNamespace(create=lambda **_: response)
+            )
+
+    monkeypatch.setenv(solar_module.API_KEY_ENV_VAR, "solar-test-key")
+    monkeypatch.setattr(solar_module, "OpenAI", _FakeOpenAI)
+
+
+def test_escape_control_characters_only_touches_the_inside_of_strings():
+    """Outside a string, control characters are legal JSON whitespace —
+    rewriting them there would corrupt well-formed input for no reason."""
+    raw = '{\n  "reason": "첫 줄\n둘째 줄"\n}'
+
+    repaired = solar_module._escape_control_characters_in_strings(raw)
+
+    assert json.loads(repaired) == {"reason": "첫 줄\n둘째 줄"}
+    # the two newlines used as formatting whitespace survive verbatim
+    assert repaired.startswith("{\n  ")
+    assert repaired.endswith("\n}")
+
+
+def test_escape_control_characters_respects_backslash_escapes():
+    """An already-escaped quote must not read as the end of the string."""
+    raw = '{"quote": "그는 \\"안녕\\"\t이라고 말했다"}'
+
+    assert json.loads(solar_module._escape_control_characters_in_strings(raw)) == {
+        "quote": '그는 "안녕"\t이라고 말했다'
+    }
+
+
+def test_escape_control_characters_uses_unicode_escape_for_exotic_ones():
+    repaired = solar_module._escape_control_characters_in_strings('{"a": "x\x01y"}')
+
+    assert "\\u0001" in repaired
+    assert json.loads(repaired) == {"a": "x\x01y"}
+
+
+def test_call_json_recovers_a_response_with_raw_control_characters(monkeypatch, capsys):
+    _solar_returning('{"sufficient": true, "reason": "근거\n두 줄"}', monkeypatch)
+
+    result = solar_module.call_json("sys", {"q": "x"}, caller="coverage")
+
+    assert result == {"sufficient": True, "reason": "근거\n두 줄"}
+    assert "recovered a JSON response containing raw control characters" in capsys.readouterr().err
+
+
+def test_call_json_still_falls_back_when_repair_cannot_help(monkeypatch, capsys):
+    """A genuinely broken response must behave exactly as before the repair
+    existed — None, one stderr line, never a raise."""
+    _solar_returning("not json at all", monkeypatch)
+
+    assert solar_module.call_json("sys", {"q": "x"}, caller="coverage") is None
+    assert "Solar call failed, falling back" in capsys.readouterr().err
+
+
+def test_call_json_does_not_rewrite_well_formed_json(monkeypatch, capsys):
+    """Strict parsing stays the fast path: no repair, no stderr noise."""
+    _solar_returning('{"ok": true}', monkeypatch)
+
+    assert solar_module.call_json("sys", {"q": "x"}, caller="coverage") == {"ok": True}
+    assert capsys.readouterr().err == ""
+
+
 # ---------------------------------------------------------------------------
 # planner.py
 # ---------------------------------------------------------------------------
@@ -485,6 +565,62 @@ def test_plan_searches_forwards_given_audience_and_purpose_id_in_payload(monkeyp
 
     assert captured["audience"] == "executive"
     assert captured["purpose_id"] == "issue_response"
+
+
+def test_plan_searches_sends_unknown_as_of_date_default_in_payload(monkeypatch):
+    """No as_of_date given: the payload must say "unknown" explicitly
+    (not just omit the key) so the prompt's `as_of_date`가 "unknown"이면
+    date term 자체를 넣지 마십시오 rule has something concrete to match on."""
+    captured = {}
+
+    def _fake_call_json(system_prompt, payload, *, caller, model_override=None, timeout_seconds=30):
+        captured.update(payload)
+        return None
+
+    monkeypatch.setattr(solar_module, "call_json", _fake_call_json)
+
+    planner_module.plan_searches("질문")
+
+    assert captured["as_of_date"] == "unknown"
+    # No recency-implying phrase in "질문" and no purpose_id given -> falls
+    # through to common.recency's default 730-day window, not "unbounded".
+    assert captured["recency_hint"] == "최근 730일 이내"
+
+
+def test_plan_searches_forwards_as_of_date_and_recency_hint_in_payload(monkeypatch):
+    """Regression guard for the "2024" bug (storage/requests/req_cli_8452ace0
+    live run, 2026-08-11): plan_searches() must actually surface today's
+    date and a derived recency window to the model, not just accept the
+    parameter."""
+    captured = {}
+
+    def _fake_call_json(system_prompt, payload, *, caller, model_override=None, timeout_seconds=30):
+        captured.update(payload)
+        return None
+
+    monkeypatch.setattr(solar_module, "call_json", _fake_call_json)
+
+    planner_module.plan_searches("최신 동향이 궁금해", as_of_date="2026-08-11")
+
+    assert captured["as_of_date"] == "2026-08-11"
+    assert captured["recency_hint"] == "최근 90일 이내"
+
+
+def test_plan_searches_echoes_as_of_date_and_resolved_max_age_days_on_plan(monkeypatch):
+    _patch_solar(monkeypatch, [_plan_response()])
+
+    plan = planner_module.plan_searches("최근 3년간 시장 동향은?", as_of_date="2026-08-11")
+
+    assert plan.as_of_date == "2026-08-11"
+    assert plan.resolved_max_age_days == max(365, 3 * 366)
+
+
+def test_plan_searches_fallback_carries_as_of_date(monkeypatch):
+    monkeypatch.delenv(solar_module.API_KEY_ENV_VAR, raising=False)
+
+    plan = planner_module.plan_searches("HBM 시장 전망은?", as_of_date="2026-08-11")
+
+    assert plan.as_of_date == "2026-08-11"
 
 
 def test_plan_searches_confident_purpose_sends_only_that_branch_to_solar(monkeypatch):
@@ -922,8 +1058,6 @@ def test_check_coverage_accepts_valid_inspect_url(monkeypatch):
         [
             {
                 "sufficient": False,
-                "semantic_sufficient": True,
-                "structural_sufficient": False,
                 "needs_full_text": True,
                 "sources_to_inspect": [{"url": "https://a.example.com", "reason": "need numbers"}],
                 "next_queries": [],
@@ -936,7 +1070,6 @@ def test_check_coverage_accepts_valid_inspect_url(monkeypatch):
 
     assert decision.needs_full_text is True
     assert decision.sources_to_inspect[0].url == "https://a.example.com"
-    assert decision.structural_sufficient is False
 
 
 def test_check_coverage_parses_new_prompt_b_structure(monkeypatch):
@@ -1015,6 +1148,11 @@ def test_check_coverage_drops_covered_information_with_no_real_citation(monkeypa
 
     assert [item.text for item in decision.covered] == ["a properly grounded claim"]
     assert "UNGROUNDED CLAIM WARNING" in capsys.readouterr().err
+    # 2026-08-11: the two rejected claims are retained (not just discarded)
+    # so a later round can remind the model it already fabricated these.
+    assert decision.rejected_claims == [
+        "a claim with no real backing", "a claim with no citation at all"
+    ]
 
 
 def test_check_coverage_downgrades_ungrounded_covered_aspect_to_uncertain(monkeypatch, capsys):
@@ -1049,6 +1187,93 @@ def test_check_coverage_downgrades_ungrounded_covered_aspect_to_uncertain(monkey
     assert decision.coverage[0].status == "uncertain"  # downgraded, no real citation
     assert decision.coverage[1].status == "partially_covered"  # kept, real citation
     assert "UNGROUNDED CLAIM WARNING" in capsys.readouterr().err
+    assert decision.rejected_claims == ["unsupported claim"]
+
+
+# --- round-to-round feedback for rejected claims (2026-08-11) ---------------
+
+
+def test_check_coverage_forwards_previously_rejected_claims_in_payload(monkeypatch):
+    captured = {}
+
+    def _fake_call_json(system_prompt, payload, *, caller, model_override=None, timeout_seconds=30):
+        captured.update(payload)
+        return {"sufficient": False, "next_queries": []}
+
+    monkeypatch.setattr(solar_module, "call_json", _fake_call_json)
+    plan = SearchPlan(queries=[SearchPlanQuery(query="q", priority=1)])
+
+    coverage_module.check_coverage(
+        "질문", plan, [_result()],
+        previously_rejected_claims=["이미 거부된 주장1", "이미 거부된 주장2"],
+    )
+
+    assert captured["previously_rejected_claims"] == ["이미 거부된 주장1", "이미 거부된 주장2"]
+
+
+def test_check_coverage_dedupes_previously_rejected_claims_in_payload(monkeypatch):
+    captured = {}
+
+    def _fake_call_json(system_prompt, payload, *, caller, model_override=None, timeout_seconds=30):
+        captured.update(payload)
+        return {"sufficient": False, "next_queries": []}
+
+    monkeypatch.setattr(solar_module, "call_json", _fake_call_json)
+    plan = SearchPlan(queries=[SearchPlanQuery(query="q", priority=1)])
+
+    coverage_module.check_coverage(
+        "질문", plan, [_result()],
+        previously_rejected_claims=["중복 주장", "중복 주장", "고유 주장"],
+    )
+
+    assert captured["previously_rejected_claims"] == ["중복 주장", "고유 주장"]
+
+
+def test_check_coverage_sends_empty_previously_rejected_claims_by_default(monkeypatch):
+    captured = {}
+
+    def _fake_call_json(system_prompt, payload, *, caller, model_override=None, timeout_seconds=30):
+        captured.update(payload)
+        return {"sufficient": False, "next_queries": []}
+
+    monkeypatch.setattr(solar_module, "call_json", _fake_call_json)
+    plan = SearchPlan(queries=[SearchPlanQuery(query="q", priority=1)])
+
+    coverage_module.check_coverage("질문", plan, [_result()])
+
+    assert captured["previously_rejected_claims"] == []
+
+
+def test_research_feeds_rejected_claims_from_one_round_into_the_next(monkeypatch):
+    """router.py accumulates CoverageDecision.rejected_claims across rounds
+    and forwards them to the next check_coverage() call, so the model has
+    some memory of what it already fabricated (payload otherwise carries no
+    history between calls)."""
+    plan = _plan(("q1", 1))
+    monkeypatch.setattr(planner_module, "plan_searches", lambda question, **_: plan)
+    monkeypatch.setattr(web_search_module, "execute_web_search", lambda query, **_: [_result("https://a.example.com")])
+
+    captured_calls: list[list[str]] = []
+    decisions = [
+        CoverageDecision(
+            sufficient=False,
+            rejected_claims=["1라운드에서 거부된 주장"],
+            next_queries=[NextQuery(query="추가 질의")],
+            reason="gap",
+        ),
+        CoverageDecision(sufficient=True, reason="enough"),
+    ]
+
+    def _fake_check_coverage(question, search_plan, results, *, previously_rejected_claims=(), **kwargs):
+        captured_calls.append(list(previously_rejected_claims))
+        return decisions.pop(0)
+
+    monkeypatch.setattr(coverage_module, "check_coverage", _fake_check_coverage)
+
+    router_module.research("질문", SourceRouterConfig(max_auto_inspect_direct_results=0))
+
+    assert captured_calls[0] == []  # first round: nothing rejected yet
+    assert captured_calls[1] == ["1라운드에서 거부된 주장"]  # second round: fed back
 
 
 def test_check_coverage_clamps_unrecognized_enum_values(monkeypatch):
@@ -1069,6 +1294,143 @@ def test_check_coverage_clamps_unrecognized_enum_values(monkeypatch):
     decision = coverage_module.check_coverage("질문", plan, [_result()])
 
     assert decision.coverage[0].status == "uncertain"  # unrecognized value clamped to a safe default
+
+
+# --- sufficiency self-contradiction guard (2026-08-11) ----------------------
+# Live-verified: a real coverage response had missing_information: [] and a
+# reason arguing the evidence was adequate, yet sufficient: false - directly
+# contradicting coverage.md's own STEP 7 rule. check_coverage() now
+# cross-checks `sufficient` against the same response's missing_information/
+# contradictions, mirroring the grounding checks already applied to
+# covered/covered_information above.
+
+
+def test_check_coverage_corrects_sufficient_false_with_empty_missing_and_no_contradictions(monkeypatch, capsys):
+    _patch_solar(
+        monkeypatch,
+        [
+            {
+                "sufficient": False,
+                "covered_information": [
+                    {"text": "grounded claim", "source_urls": ["https://a.example.com"]}
+                ],
+                "missing_information": [],
+                "contradictions": [],
+                "needs_full_text": False,
+                "sources_to_inspect": [],
+                "next_queries": ["더 찾아볼 것"],
+            }
+        ],
+    )
+    plan = SearchPlan(queries=[SearchPlanQuery(query="q", priority=1)])
+
+    decision = coverage_module.check_coverage("질문", plan, [_result()])
+
+    assert decision.sufficient is True
+    assert "SUFFICIENCY SELF-CONTRADICTION" in capsys.readouterr().err
+
+
+def test_check_coverage_keeps_sufficient_false_when_missing_information_present(monkeypatch, capsys):
+    """The normal case: real gaps listed, sufficient=false is not touched."""
+    _patch_solar(
+        monkeypatch,
+        [
+            {
+                "sufficient": False,
+                "missing_information": ["아직 못 찾은 근거"],
+                "contradictions": [],
+                "next_queries": [],
+            }
+        ],
+    )
+    plan = SearchPlan(queries=[SearchPlanQuery(query="q", priority=1)])
+
+    decision = coverage_module.check_coverage("질문", plan, [_result()])
+
+    assert decision.sufficient is False
+    assert "SUFFICIENCY SELF-CONTRADICTION" not in capsys.readouterr().err
+
+
+def test_check_coverage_keeps_sufficient_false_when_covered_is_empty(monkeypatch, capsys):
+    """Live-verified 2026-08-11 (OTT ecosystem question): every proposed
+    covered_information claim that round was ungrounded and dropped, so
+    `covered` ended up empty - yet missing_information was *also* empty and
+    there was no contradiction. The two-condition version of this guard
+    corrected sufficient=false -> true anyway, ending the gap-loop with
+    zero original-source documents ever secured. "Nothing missing and
+    nothing covered" must not be corrected - it's an empty round, not
+    sufficiency."""
+    _patch_solar(
+        monkeypatch,
+        [
+            {
+                "sufficient": False,
+                "coverage": [],
+                "covered_information": [
+                    # Cited a URL that isn't in this round's results - dropped
+                    # by _parse_covered_items, leaving `covered` empty.
+                    {"text": "ungrounded claim", "source_urls": ["https://not-in-results.example.com"]},
+                ],
+                "missing_information": [],
+                "contradictions": [],
+                "next_queries": [],
+            }
+        ],
+    )
+    plan = SearchPlan(queries=[SearchPlanQuery(query="q", priority=1)])
+
+    decision = coverage_module.check_coverage("질문", plan, [_result()])
+
+    assert decision.covered == []
+    assert decision.sufficient is False
+    assert "SUFFICIENCY SELF-CONTRADICTION" not in capsys.readouterr().err
+
+
+def test_check_coverage_keeps_sufficient_false_with_unresolved_contradiction(monkeypatch, capsys):
+    """Empty missing_information alone isn't enough to correct sufficient -
+    an unresolved contradiction is also a real, STEP-7-relevant reason to
+    stay insufficient even with nothing else missing."""
+    _patch_solar(
+        monkeypatch,
+        [
+            {
+                "sufficient": False,
+                "missing_information": [],
+                "contradictions": [
+                    {"issue": "충돌하는 수치", "sources": ["https://a.example.com"], "needs_resolution": True}
+                ],
+                "next_queries": [],
+            }
+        ],
+    )
+    plan = SearchPlan(queries=[SearchPlanQuery(query="q", priority=1)])
+
+    decision = coverage_module.check_coverage("질문", plan, [_result()])
+
+    assert decision.sufficient is False
+    assert "SUFFICIENCY SELF-CONTRADICTION" not in capsys.readouterr().err
+
+
+def test_check_coverage_never_corrects_a_true_sufficient_value(monkeypatch, capsys):
+    """Only False -> True is ever corrected - a model-reported true is not
+    second-guessed against missing_information (STEP 7 allows immaterial
+    missing items to coexist with sufficient=true)."""
+    _patch_solar(
+        monkeypatch,
+        [
+            {
+                "sufficient": True,
+                "missing_information": ["minor immaterial detail"],
+                "next_queries": [],
+            }
+        ],
+    )
+    plan = SearchPlan(queries=[SearchPlanQuery(query="q", priority=1)])
+
+    decision = coverage_module.check_coverage("질문", plan, [_result()])
+
+    assert decision.sufficient is True
+    assert "SUFFICIENCY SELF-CONTRADICTION" not in capsys.readouterr().err
 
 
 def test_verify_evidence_empty_without_api_key(monkeypatch):
@@ -1613,11 +1975,16 @@ def test_research_forwards_audience_and_purpose_id_to_plan_searches(monkeypatch)
     )
 
     router_module.research(
-        "질문", SourceRouterConfig(), purpose_id="issue_response", audience="executive"
+        "질문",
+        SourceRouterConfig(),
+        purpose_id="issue_response",
+        audience="executive",
+        as_of_date="2026-08-11",
     )
 
     assert captured["audience"] == "executive"
     assert captured["purpose_id"] == "issue_response"
+    assert captured["as_of_date"] == "2026-08-11"
 
 
 def test_research_forwards_purpose_confidence_to_plan_searches(monkeypatch):
@@ -1670,7 +2037,11 @@ def test_research_stops_when_sufficient_after_priority1(monkeypatch):
 
     assert result.stop_reason == "sufficient"
     assert result.rounds_completed == 1
-    assert len(result.results) == 1
+    # _plan() doesn't set query_role, so both queries keep the
+    # SearchPlanQuery default ("direct") and both run in the initial batch -
+    # nothing throttles this to 1 anymore now that entity-derived
+    # evidence-need counting no longer participates (2026-08-11).
+    assert len(result.results) == 2
 
 
 def test_research_runs_priority2_after_insufficient_then_stops(monkeypatch):
@@ -1737,13 +2108,86 @@ def test_research_inspects_source_when_needs_full_text(monkeypatch):
         ),
     )
 
-    result = router_module.research("질문", SourceRouterConfig())
+    # Eager direct-batch inspection (2026-08-11) would otherwise already
+    # inspect this URL before the round loop's own needs_full_text branch
+    # gets a chance to - disabled here so this test keeps exercising that
+    # reactive mechanism specifically (eager inspection has its own test,
+    # test_research_eagerly_inspects_direct_batch_before_first_coverage_check).
+    result = router_module.research("질문", SourceRouterConfig(max_auto_inspect_direct_results=0))
 
     assert result.stop_reason == "sufficient"
     inspected = next(r for r in result.results if r.url == "https://a.example.com")
     assert inspected.evidence_depth == "original_source"
     assert inspected.key_facts[0].text == "확인된 사실"
     assert inspected.verification.confirmed_facts[0].fact == "확인된 사실"
+
+
+def test_research_eagerly_inspects_direct_batch_before_first_coverage_check(monkeypatch):
+    """2026-08-11: coverage.py's own needs_full_text request only fires when
+    the model recognizes its own uncertainty - live-verified that a
+    confidently wrong model never asks for it. Direct-priority results now
+    get their real text fetched unconditionally, before coverage.py ever
+    runs, so check_coverage() judges grounded original-source evidence
+    instead of a thin search summary from round 1 onward."""
+    plan = _plan(("q1", 1))
+    monkeypatch.setattr(planner_module, "plan_searches", lambda question, **_: plan)
+    monkeypatch.setattr(
+        web_search_module, "execute_web_search", lambda query, **_: [_result("https://a.example.com")]
+    )
+    monkeypatch.setattr(router_module.html_extractor, "extract_html", lambda url, **_: "실제 원문 내용 " * 30)
+    monkeypatch.setattr(
+        coverage_module,
+        "verify_evidence",
+        lambda *a, **k: EvidenceVerification(
+            confirmed_facts=[ConfirmedFact(fact="확인된 사실", evidence_strength="direct")]
+        ),
+    )
+    captured_results = {}
+
+    def _fake_check_coverage(question, search_plan, results, **kwargs):
+        captured_results["results"] = results
+        return CoverageDecision(sufficient=True, reason="already has original text")
+
+    monkeypatch.setattr(coverage_module, "check_coverage", _fake_check_coverage)
+
+    result = router_module.research("질문", SourceRouterConfig())
+
+    assert result.stop_reason == "sufficient"
+    inspected = next(r for r in result.results if r.url == "https://a.example.com")
+    assert inspected.evidence_depth == "original_source"
+    assert inspected.key_facts[0].text == "확인된 사실"
+    # The very first check_coverage() call already saw the inspected text,
+    # not a search_summary placeholder.
+    first_call_results = captured_results["results"]
+    assert first_call_results[0].evidence_depth == "original_source"
+
+
+def test_research_respects_max_auto_inspect_direct_results_cap(monkeypatch):
+    """The eager-inspection cap exists specifically to stay under Firecrawl's
+    rate limit (see SourceRouterConfig.max_auto_inspect_direct_results) -
+    only the first N direct candidates get eagerly inspected, not the whole
+    batch."""
+    plan = _plan(("q1", 1))
+    monkeypatch.setattr(planner_module, "plan_searches", lambda question, **_: plan)
+    urls = [f"https://a.example.com/{i}" for i in range(5)]
+    monkeypatch.setattr(
+        web_search_module, "execute_web_search", lambda query, **_: [_result(url) for url in urls]
+    )
+    inspected_calls: list[str] = []
+
+    def _fake_extract_html(url, **_):
+        inspected_calls.append(url)
+        return "실제 원문 내용 " * 30
+
+    monkeypatch.setattr(router_module.html_extractor, "extract_html", _fake_extract_html)
+    monkeypatch.setattr(coverage_module, "verify_evidence", lambda *a, **k: EvidenceVerification())
+    monkeypatch.setattr(
+        coverage_module, "check_coverage", lambda *a, **k: CoverageDecision(sufficient=True, reason="enough")
+    )
+
+    router_module.research("질문", SourceRouterConfig(max_auto_inspect_direct_results=2))
+
+    assert len(inspected_calls) == 2
 
 
 def test_research_inspects_every_flagged_source_not_just_first_three(monkeypatch):
@@ -1778,6 +2222,54 @@ def test_research_inspects_every_flagged_source_not_just_first_three(monkeypatch
 
     inspected_urls = {r.url for r in result.results if r.evidence_depth == "original_source"}
     assert inspected_urls == set(urls)  # all 5 inspected, not just the first 3
+
+
+def test_already_inspected_sources_do_not_consume_the_inspection_cap(monkeypatch):
+    """max_sources_to_inspect must cap NEW sources, not list positions.
+
+    The eager direct batch pre-fills inspected_urls, and coverage tends to
+    list the most relevant sources first — i.e. exactly those. Slicing before
+    that skip (the pre-2026-08-11 order) let the cap be spent entirely on
+    entries that produce no scrape at all.
+    """
+    plan = _plan(("q1", 1))
+    monkeypatch.setattr(planner_module, "plan_searches", lambda question, **_: plan)
+    urls = [f"https://a.example.com/{i}" for i in range(5)]
+    monkeypatch.setattr(
+        web_search_module,
+        "execute_web_search",
+        lambda query, **_: [_result(url) for url in urls],
+    )
+
+    decisions = [
+        CoverageDecision(
+            sufficient=False,
+            needs_full_text=True,
+            # the 3 eagerly-inspected URLs listed first, then the 2 new ones
+            sources_to_inspect=[SourceToInspect(url=url, reason="need numbers") for url in urls],
+            reason="gap",
+        ),
+        CoverageDecision(sufficient=True, reason="now enough"),
+    ]
+    monkeypatch.setattr(coverage_module, "check_coverage", lambda *a, **k: decisions.pop(0))
+    scraped: list[str] = []
+
+    def _fake_extract_html(url, **_):
+        scraped.append(url)
+        return "실제 원문 내용 " * 30
+
+    monkeypatch.setattr(router_module.html_extractor, "extract_html", _fake_extract_html)
+    monkeypatch.setattr(coverage_module, "verify_evidence", lambda *a, **k: EvidenceVerification())
+
+    router_module.research(
+        "질문",
+        SourceRouterConfig(max_auto_inspect_direct_results=3, max_sources_to_inspect=2),
+    )
+
+    assert scraped[:3] == urls[:3]  # the eager direct batch
+    # ...and the gap round still reaches the 2 genuinely-new sources, rather
+    # than spending both cap slots on urls[0]/urls[1] and scraping nothing
+    assert scraped[3:] == urls[3:]
 
 
 def test_research_stops_no_new_information_when_next_queries_yield_nothing(monkeypatch):
@@ -1856,7 +2348,12 @@ def test_research_reassesses_coverage_after_last_round_inspects_sources(monkeypa
     decisions = [stale_decision, fresh_decision]
     monkeypatch.setattr(coverage_module, "check_coverage", lambda *a, **k: decisions.pop(0))
 
-    config = SourceRouterConfig(max_gap_loop_iterations=1)
+    # Eager direct-batch inspection (2026-08-11) would otherwise already
+    # inspect this URL before the round loop's own needs_full_text branch
+    # gets a chance to - disabled here so this test keeps exercising that
+    # reactive mechanism specifically (eager inspection has its own test,
+    # test_research_eagerly_inspects_direct_batch_before_first_coverage_check).
+    config = SourceRouterConfig(max_gap_loop_iterations=1, max_auto_inspect_direct_results=0)
     result = router_module.research("질문", config)
 
     assert result.stop_reason == "gap_loop_iterations_exhausted"
@@ -2131,24 +2628,25 @@ def test_search_budget_terms_explain_the_derived_number():
     """config.max_web_search_calls is a ceiling, not the run's budget.
 
     "IPTV 가입자 수 현황은?" names no comparison/trend/strategy token, so it
-    derives 14 + 12 = 26 (raised +10 per term, 2026-08-11 stopgap - see
-    _search_budget_terms's docstring), clipped to a ceiling of 12 here.
+    derives 8 + 6 = 14 (raised +10 per term as a 2026-08-11 stopgap, then
+    lowered -6 per term the same day once eager direct-batch inspection
+    reduced how much follow-up search budget the gap loop actually needed -
+    see _search_budget_terms's docstring), clipped to a ceiling of 12 here.
     Recording only `search_calls_used` made stopping at the ceiling read as
     a premature abort.
     """
     plan = SearchPlan(
         intent="i",
-        queries=[SearchPlanQuery(query="q", angle="a", purpose="p", priority=1)],
-        evidence_needs=[
-            EvidenceNeed(evidence_need_id="direct-1", text="t1", requirement_type="direct"),
-            EvidenceNeed(evidence_need_id="direct-2", text="t2", requirement_type="direct"),
+        queries=[
+            SearchPlanQuery(query="q1", angle="a", purpose="p", priority=1, query_role="direct"),
+            SearchPlanQuery(query="q2", angle="a", purpose="p", priority=1, query_role="direct"),
         ],
     )
     terms = router_module._search_budget_terms("IPTV 가입자 수 현황은?", plan, 12)
 
     assert terms == {
-        "base": 14,
-        "evidence_needs_bonus": 12,
+        "base": 8,
+        "direct_query_bonus": 6,
         "comparison_temporal_bonus": 0,
         "strategy_bonus": 0,
         "ceiling": 12,
@@ -2160,15 +2658,14 @@ def test_search_budget_terms_stay_consistent_with_the_budget():
     """The basis is the same arithmetic, not a second implementation."""
     plan = SearchPlan(
         intent="i",
-        queries=[SearchPlanQuery(query="q", angle="a", purpose="p", priority=1)],
-        evidence_needs=[
-            EvidenceNeed(evidence_need_id="d1", text="t", requirement_type="direct"),
-            EvidenceNeed(evidence_need_id="d2", text="t", requirement_type="direct"),
+        queries=[
+            SearchPlanQuery(query="q1", angle="a", purpose="p", priority=1, query_role="direct"),
+            SearchPlanQuery(query="q2", angle="a", purpose="p", priority=1, query_role="direct"),
         ],
     )
     for question in ("IPTV 가입자 수 현황은?", "경쟁사 대비 추이는?", "원인과 대응 전략은?"):
         terms = router_module._search_budget_terms(question, plan, 12)
-        expected = min(12, terms["base"] + terms["evidence_needs_bonus"]
+        expected = min(12, terms["base"] + terms["direct_query_bonus"]
                        + terms["comparison_temporal_bonus"] + terms["strategy_bonus"])
         assert router_module._search_budget(question, plan, 12) == expected
 
@@ -2176,10 +2673,9 @@ def test_search_budget_terms_stay_consistent_with_the_budget():
 def test_ceiling_still_caps_a_complex_question():
     plan = SearchPlan(
         intent="i",
-        queries=[SearchPlanQuery(query="q", angle="a", purpose="p", priority=1)],
-        evidence_needs=[
-            EvidenceNeed(evidence_need_id="d1", text="t", requirement_type="direct"),
-            EvidenceNeed(evidence_need_id="d2", text="t", requirement_type="direct"),
+        queries=[
+            SearchPlanQuery(query="q1", angle="a", purpose="p", priority=1, query_role="direct"),
+            SearchPlanQuery(query="q2", angle="a", purpose="p", priority=1, query_role="direct"),
         ],
     )
     question = "경쟁사 대비 추이와 대응 전략은?"
@@ -2199,9 +2695,9 @@ def test_result_carries_the_budget_it_actually_had(monkeypatch):
 
     result = router_module.research("IPTV 가입자 수 현황은?", SourceRouterConfig())
 
-    assert result.search_budget == 14
+    assert result.search_budget == 8
     assert result.search_budget_basis["ceiling"] == SourceRouterConfig().max_web_search_calls
-    assert result.search_budget_basis["base"] == 14
+    assert result.search_budget_basis["base"] == 8
 
 
 # --- timeout-only retry for direct queries (2026-08-11) ---------------------
@@ -2351,3 +2847,162 @@ def test_planner_prompt_still_teaches_the_benchmark_pattern():
 
     assert "Quantitative benchmark / ranking-index queries" in prompt
     assert "리서치기관" in prompt
+
+
+# ---------------------------------------------------------------------------
+# html_extractor.py — Firecrawl rate-limit pacing (2026-08-11)
+# ---------------------------------------------------------------------------
+# Live-verified: router.py's eager direct-batch inspection fired its scrapes
+# back to back and lost two sources to `Rate Limit Exceeded ... Consumed
+# (req/min): 20, Remaining (req/min): 0`.
+
+
+@pytest.fixture(autouse=True)
+def _clear_firecrawl_pacing_window():
+    """One test's recorded scrapes must not pace the next one — the sliding
+    window is module-level state."""
+    html_extractor._reset_pacing_state()
+    yield
+    html_extractor._reset_pacing_state()
+
+
+def _fake_firecrawl_module(scrape):
+    """Stands in for the lazily-imported `firecrawl` package so no test
+    needs the real client (or a network socket)."""
+    class _Client:
+        def __init__(self, **_):
+            pass
+
+        def scrape(self, url, **kwargs):
+            return scrape(url, **kwargs)
+
+    return types.SimpleNamespace(Firecrawl=_Client)
+
+
+def _install_fake_firecrawl(monkeypatch, scrape):
+    monkeypatch.setenv("FIRECRAWL_API_KEY", "fc-test-key")
+    monkeypatch.setitem(sys.modules, "firecrawl", _fake_firecrawl_module(scrape))
+
+
+def _capture_sleeps(monkeypatch, *, now=None) -> list[float]:
+    """Rebinds only html_extractor's own `time` name — patching attributes on
+    the real `time` module would mutate it process-wide for the test."""
+    slept: list[float] = []
+    monkeypatch.setattr(
+        html_extractor,
+        "time",
+        types.SimpleNamespace(sleep=slept.append, monotonic=now or time.monotonic),
+    )
+    return slept
+
+
+def test_a_burst_under_the_window_limit_never_sleeps(monkeypatch):
+    """Pacing must cost nothing until a burst would actually exceed the
+    limit — a run that scrapes a handful of URLs should be as fast as before
+    this existed."""
+    slept = _capture_sleeps(monkeypatch)
+    _install_fake_firecrawl(monkeypatch, lambda url, **_: {"markdown": "본문"})
+
+    for _ in range(html_extractor._MAX_SCRAPES_PER_WINDOW):
+        assert html_extractor.extract_html("https://example.com/a") == "본문"
+
+    assert slept == []
+
+
+def test_exceeding_the_window_waits_exactly_until_the_oldest_slot_ages_out(monkeypatch, capsys):
+    """Scrapes 3s apart, so the window fills without the wait hitting the
+    30s cap — the point here is that the wait is computed, not fixed."""
+    clock = iter(100.0 + 3.0 * step for step in range(html_extractor._MAX_SCRAPES_PER_WINDOW + 1))
+    slept = _capture_sleeps(monkeypatch, now=lambda: next(clock))
+    _install_fake_firecrawl(monkeypatch, lambda url, **_: {"markdown": "본문"})
+
+    for _ in range(html_extractor._MAX_SCRAPES_PER_WINDOW + 1):
+        html_extractor.extract_html("https://example.com/a")
+
+    assert len(slept) == 1
+    # oldest slot taken at t=100; the 16th call arrives at t=145, so it waits
+    # out the remaining 15s of that slot's 60s window
+    assert slept[0] == pytest.approx(15.0)
+    assert "pacing" in capsys.readouterr().err
+
+
+def test_pacing_sleep_is_capped(monkeypatch):
+    """A stuck pacer silently stalling a run is worse than one scrape racing
+    the limit and taking the retry path."""
+    html_extractor._recent_scrape_starts.extend(
+        [1_000.0] * html_extractor._MAX_SCRAPES_PER_WINDOW
+    )
+
+    wait = html_extractor._seconds_until_scrape_slot(0.0)
+
+    assert wait == html_extractor._MAX_PACING_SLEEP_SECONDS
+
+
+def test_rate_limited_scrape_is_retried_and_can_still_succeed(monkeypatch, capsys):
+    """The two sources lost in the live run were single-attempt failures."""
+    attempts: list[str] = []
+    slept = _capture_sleeps(monkeypatch)
+
+    def _scrape(url, **_):
+        attempts.append(url)
+        if len(attempts) == 1:
+            raise RuntimeError(
+                "Rate Limit Exceeded: Failed to scrape. Rate limit exceeded. "
+                "Consumed (req/min): 20, Remaining (req/min): 0 ... please retry after 3s"
+            )
+        return {"markdown": "본문"}
+
+    _install_fake_firecrawl(monkeypatch, _scrape)
+
+    assert html_extractor.extract_html("https://example.com/a") == "본문"
+    assert len(attempts) == 2
+    # Firecrawl states its own backoff in the error text — honor it, don't guess
+    assert slept == [3.0]
+    assert "rate limited" in capsys.readouterr().err
+
+
+def test_retry_after_falls_back_to_a_default_when_unstated():
+    assert html_extractor._retry_after_seconds("Rate limit exceeded") == (
+        html_extractor._DEFAULT_RATE_LIMIT_BACKOFF_SECONDS
+    )
+    assert html_extractor._retry_after_seconds("retry after 999s") == (
+        html_extractor._MAX_RATE_LIMIT_BACKOFF_SECONDS
+    )
+
+
+def test_a_non_rate_limit_error_is_not_retried(monkeypatch, capsys):
+    """Retrying a 404/timeout would just burn the rate limit we're pacing."""
+    attempts: list[str] = []
+
+    def _scrape(url, **_):
+        attempts.append(url)
+        raise RuntimeError("404 Not Found")
+
+    _install_fake_firecrawl(monkeypatch, _scrape)
+
+    assert html_extractor.extract_html("https://example.com/a") is None
+    assert len(attempts) == 1
+    assert "scrape failed" in capsys.readouterr().err
+
+
+def test_persistent_rate_limiting_gives_up_and_returns_none(monkeypatch):
+    attempts: list[str] = []
+    _capture_sleeps(monkeypatch)
+
+    def _scrape(url, **_):
+        attempts.append(url)
+        raise RuntimeError("Rate limit exceeded, please retry after 2s")
+
+    _install_fake_firecrawl(monkeypatch, _scrape)
+
+    assert html_extractor.extract_html("https://example.com/a") is None
+    assert len(attempts) == html_extractor._RATE_LIMIT_RETRY_ATTEMPTS + 1
+
+
+def test_missing_api_key_short_circuits_before_pacing(monkeypatch):
+    """No key means no call to pace — and no recorded slot to pace the next
+    caller with."""
+    monkeypatch.delenv("FIRECRAWL_API_KEY", raising=False)
+
+    assert html_extractor.extract_html("https://example.com/a") is None
+    assert not html_extractor._recent_scrape_starts

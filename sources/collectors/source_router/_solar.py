@@ -48,6 +48,79 @@ BASE_URL_ENV_VAR = "TRENDSPARC_SOURCE_ROUTER_PLANNER_BASE_URL"
 _DEFAULT_UPSTAGE_MODEL = "solar-pro3"
 _DEFAULT_OPENAI_MODEL = "gpt-4o-mini"
 
+# JSON forbids raw U+0000-U+001F inside a string literal; these five have a
+# short escape, everything else has to go out as \uXXXX.
+_SHORT_ESCAPES = {"\n": "\\n", "\r": "\\r", "\t": "\\t", "\b": "\\b", "\f": "\\f"}
+
+
+def _escape_control_characters_in_strings(content: str) -> str:
+    """Escape raw control characters that appear *inside* JSON string
+    literals, leaving everything else byte-identical.
+
+    Live-verified 2026-08-11: a real check_coverage() call came back with
+    `Invalid control character at: line 1 column 5 (char 4)` and the whole
+    round silently fell back to _fallback_decision() — which is not a
+    judgment at all, just "2+ results means sufficient" — so one malformed
+    character cost that round its actual coverage assessment. The model
+    emitting an unescaped newline/tab inside a quoted string is a known LLM
+    failure mode, and losing a paid call to it is strictly worse than
+    repairing the one character.
+
+    Only control characters *inside* strings are touched: outside a string
+    they are legal JSON whitespace, so rewriting them there would be
+    changing well-formed input for no reason. Backslash escapes are tracked
+    so an already-escaped `\\"` doesn't read as the end of the string.
+    """
+    out: list[str] = []
+    in_string = False
+    escaped = False
+    for char in content:
+        if not in_string:
+            out.append(char)
+            if char == '"':
+                in_string = True
+            continue
+        if escaped:
+            out.append(char)
+            escaped = False
+            continue
+        if char == "\\":
+            out.append(char)
+            escaped = True
+            continue
+        if char == '"':
+            out.append(char)
+            in_string = False
+            continue
+        if char < " ":
+            out.append(_SHORT_ESCAPES.get(char, f"\\u{ord(char):04x}"))
+            continue
+        out.append(char)
+    return "".join(out)
+
+
+def _loads_repairing_control_characters(content: str, *, caller: str) -> Any:
+    """`json.loads`, retried once on the control-character failure above.
+
+    Strict parsing stays the fast path — well-formed JSON never touches the
+    repair — and a second failure propagates to call_json's own except, so a
+    genuinely broken response still falls back exactly as before.
+    """
+    try:
+        return json.loads(content)
+    except json.JSONDecodeError:
+        repaired = _escape_control_characters_in_strings(content)
+        if repaired == content:
+            raise
+        data = json.loads(repaired)
+        print(
+            f"[source_router.{caller}] recovered a JSON response containing raw control "
+            "characters inside string literals (escaped them and re-parsed) — the model's "
+            "actual answer was kept instead of falling back.",
+            file=sys.stderr,
+        )
+        return data
+
 
 def api_key() -> str:
     return os.environ.get(API_KEY_ENV_VAR, "").strip()
@@ -102,7 +175,7 @@ def call_json(
             ],
         )
         content = response.choices[0].message.content or "{}"
-        data = json.loads(content)
+        data = _loads_repairing_control_characters(content, caller=caller)
         return data if isinstance(data, dict) else None
     except Exception as exc:  # noqa: BLE001
         print(f"[source_router.{caller}] Solar call failed, falling back: {exc}", file=sys.stderr)

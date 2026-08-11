@@ -1,0 +1,86 @@
+{
+  "stop_reason": "sufficient",
+  "rounds_completed": 1,
+  "search_calls_used": 4,
+  "search_budget": 26,
+  "search_budget_basis": {
+    "base": 14,
+    "direct_query_bonus": 12,
+    "comparison_temporal_bonus": 0,
+    "strategy_bonus": 0,
+    "ceiling": 40
+  },
+  "total_results": 8,
+  "original_source_count": 0,
+  "original_source_urls": [],
+  "final_coverage_sufficient": true,
+  "final_coverage_reason": "fallback: no planner API key configured or call failed",
+  "final_coverage_missing": [],
+  "search_plan_queries": [
+    {
+      "query": "\"롱폼 미디어 이용자 수\"와 \"이용률\" 최근 1년 추이",
+      "priority": 1,
+      "query_role": "direct"
+    },
+    {
+      "query": "\"숏폼 미디어 이용자 수\"와 \"이용률\" 최근 1년 추이",
+      "priority": 1,
+      "query_role": "direct"
+    },
+    {
+      "query": "국내 \"롱폼 미디어 시장 규모\" 및 \"점유율\" 현황",
+      "priority": 1,
+      "query_role": "direct"
+    },
+    {
+      "query": "국내 \"숏폼 미디어 시장 규모\" 및 \"점유율\" 현황",
+      "priority": 1,
+      "query_role": "direct"
+    },
+    {
+      "query": "\"20대\" \"30대\" 40대 연령층별 롱폼 미디어 이용 행태 변화",
+      "priority": 2,
+      "query_role": "supporting"
+    },
+    {
+      "query": "\"20대\" \"30대\" 40대 연령층별 숏폼 미디어 이용 행태 변화",
+      "priority": 2,
+      "query_role": "supporting"
+    },
+    {
+      "query": "\"네이버\" \"카카오\" 주요 플랫폼 롱폼 미디어 이용 현황",
+      "priority": 2,
+      "query_role": "supporting"
+    },
+    {
+      "query": "\"네이버\" \"카카오\" 주요 플랫폼 숏폼 미디어 이용 현황",
+      "priority": 2,
+      "query_role": "supporting"
+    },
+    {
+      "query": "\"해외\" 롱폼 숏폼 미디어 소비 트렌드 비교 분석",
+      "priority": 2,
+      "query_role": "supporting"
+    },
+    {
+      "query": "글로벌 플랫폼 \"유튜브\" \"틱톡\"의 롱폼 숏폼 콘텐츠 이용 현황",
+      "priority": 2,
+      "query_role": "supporting"
+    },
+    {
+      "query": "\"롱폼 미디어 소비 증가 원인\" 및 \"주요 요인\" 분석",
+      "priority": 2,
+      "query_role": "supporting"
+    },
+    {
+      "query": "\"숏폼 미디어 소비 증가 원인\" 및 \"주요 요인\" 분석",
+      "priority": 2,
+      "query_role": "supporting"
+    },
+    {
+      "query": "\"한국콘텐츠진흥원\" \"KCCA\" 롱폼 숏폼 미디어 이용 통계",
+      "priority": 2,
+      "query_role": "supporting"
+    }
+  ]
+}

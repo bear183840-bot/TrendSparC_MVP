@@ -107,14 +107,21 @@ def _grounded_urls(cited: list[str], known_urls: set[str]) -> list[str]:
     return [url for url in cited if url in known_urls]
 
 
-def _parse_coverage_aspects(raw: Any, known_urls: set[str]) -> list[CoverageAspect]:
+def _parse_coverage_aspects(
+    raw: Any, known_urls: set[str]
+) -> tuple[list[CoverageAspect], list[str]]:
     """Grounds "covered"/"partially_covered" verdicts against known_urls —
     same anti-fabrication pattern as sources_to_inspect's URL filter, added
     2026-08-09 after a live run produced a "covered" aspect whose reason
     cited a claim absent from every result it was given. A status without a
     real citation surviving the filter is downgraded to "uncertain" rather
-    than trusted at face value."""
+    than trusted at face value.
+
+    Also returns the rejected aspect texts (2026-08-11) so the caller can
+    feed them back to the model on a later round via
+    `previously_rejected_claims` — see CoverageDecision.rejected_claims."""
     aspects: list[CoverageAspect] = []
+    rejected: list[str] = []
     for item in raw or []:
         if not isinstance(item, dict):
             continue
@@ -131,6 +138,7 @@ def _parse_coverage_aspects(raw: Any, known_urls: set[str]) -> list[CoverageAspe
                 file=sys.stderr,
             )
             status = "uncertain"
+            rejected.append(aspect)
         aspects.append(
             CoverageAspect(
                 aspect=aspect,
@@ -139,15 +147,21 @@ def _parse_coverage_aspects(raw: Any, known_urls: set[str]) -> list[CoverageAspe
                 source_urls=grounded,
             )
         )
-    return aspects
+    return aspects, rejected
 
 
-def _parse_covered_items(raw: Any, known_urls: set[str]) -> list[CoveredItem]:
+def _parse_covered_items(
+    raw: Any, known_urls: set[str]
+) -> tuple[list[CoveredItem], list[str]]:
     """Same grounding as _parse_coverage_aspects, for the flat
     covered_information list — a claim with no real source_urls is dropped
     entirely rather than kept as an unverified string (there's no status to
-    downgrade to here, unlike CoverageAspect)."""
+    downgrade to here, unlike CoverageAspect).
+
+    Also returns the rejected claim texts (2026-08-11), same reason as
+    _parse_coverage_aspects above."""
     items: list[CoveredItem] = []
+    rejected: list[str] = []
     for entry in raw or []:
         if isinstance(entry, dict):
             text = str(entry.get("text", "")).strip()
@@ -167,9 +181,68 @@ def _parse_covered_items(raw: Any, known_urls: set[str]) -> list[CoveredItem]:
                 f"claim with no real source_urls in this round's evidence pool: {text[:200]!r}",
                 file=sys.stderr,
             )
+            rejected.append(text)
             continue
         items.append(CoveredItem(text=text, source_urls=grounded))
-    return items
+    return items, rejected
+
+
+def _validate_sufficiency(
+    sufficient: bool,
+    missing: list[str],
+    contradictions: list[Contradiction],
+    covered: list[CoveredItem],
+) -> bool:
+    """Cross-checks `sufficient` against the same response's own
+    `missing_information`/`contradictions`/`covered_information`, the same
+    anti-fabrication pattern `_parse_coverage_aspects`/`_parse_covered_items`
+    already apply to `covered`/`covered_information` individually — the
+    model's say-so on `sufficient` was previously trusted verbatim
+    (`bool(data.get("sufficient", False))`) with no check against fields in
+    the very same JSON blob.
+
+    Live-verified 2026-08-11: a real coverage response had
+    `missing_information: []` and a `reason` arguing the evidence was
+    adequate, yet `sufficient: false` — directly contradicting coverage.md's
+    own STEP 7 rule ("sufficient=true only when ... no missing information
+    would materially change the answer"). Only corrects False -> True
+    (never the reverse - a `sufficient: true` claim isn't second-guessed
+    here, since STEP 7 allows immaterial missing items to coexist with
+    true).
+
+    `covered` (already grounded-filtered by `_parse_covered_items` before
+    it reaches here) must also be non-empty. Live-verified same day, a
+    second run (OTT ecosystem question): every proposed covered_information
+    claim that round was ungrounded and dropped, so `covered` was empty,
+    yet `missing_information` was *also* empty and there was no
+    contradiction — the earlier (two-condition) version of this check
+    corrected sufficient=false -> true anyway, ending the gap-loop with
+    zero original-source documents ever secured. "Nothing missing and
+    nothing covered" is not sufficiency, it's an empty round; only correct
+    when there is real, grounded, positive evidence to point to.
+
+    Only three of STEP 7's four conditions are mechanically checkable from
+    other structured fields in the same response (missing_information being
+    empty, no unresolved contradiction, and now covered_information being
+    non-empty) - "critical claims have adequate evidence" still has no
+    separate structured field to check strength against, so this cannot
+    catch every self-contradiction, only these specific, verifiable ones."""
+    if sufficient:
+        return sufficient
+    if missing:
+        return sufficient
+    if not covered:
+        return sufficient
+    if any(contradiction.needs_resolution for contradiction in contradictions):
+        return sufficient
+    print(
+        "[source_router.coverage] SUFFICIENCY SELF-CONTRADICTION: model returned "
+        "sufficient=false with empty missing_information, non-empty grounded "
+        "covered_information, and no unresolved contradiction - correcting to "
+        "sufficient=true per coverage.md's own STEP 7 rule.",
+        file=sys.stderr,
+    )
+    return True
 
 
 def _parse_contradictions(raw: Any) -> list[Contradiction]:
@@ -208,7 +281,6 @@ def _fallback_decision(results: list[WebSearchResult], min_results: int) -> Cove
     sufficient = len([result for result in results if result.summary or result.key_facts]) >= min_results
     return CoverageDecision(
         sufficient=sufficient,
-        semantic_sufficient=sufficient,
         needs_full_text=False,
         reason="fallback: no planner API key configured or call failed",
     )
@@ -219,10 +291,19 @@ def check_coverage(
     search_plan: SearchPlan,
     results: list[WebSearchResult],
     *,
+    previously_rejected_claims: Iterable[str] = (),
     min_results_for_fallback_sufficiency: int = 2,
     model_override: str | None = None,
     timeout_seconds: int = 30,
 ) -> CoverageDecision:
+    """`previously_rejected_claims` (2026-08-11): claims dropped by an
+    earlier round's own _parse_coverage_aspects/_parse_covered_items for
+    citing no real source in that round's evidence pool - fed back in so
+    the model has some memory of what it already fabricated once, instead
+    of being able to repeat the same ungrounded claim indefinitely (the
+    payload otherwise carries no history between check_coverage() calls).
+    See coverage.md's Inputs section for how this is presented to the
+    model."""
     payload = {
         "question": question,
         "search_plan": search_plan.model_dump(),
@@ -230,6 +311,7 @@ def check_coverage(
         # the coverage model. Verification already contains the compact source
         # judgment and this avoids duplicating potentially large HTML/PDF text.
         "results": [result.model_dump(exclude={"original_content"}) for result in results],
+        "previously_rejected_claims": list(dict.fromkeys(previously_rejected_claims)),
     }
     data = _solar.call_json(
         _prompts.load(_COVERAGE_SYSTEM_PROMPT_NAME),
@@ -243,13 +325,16 @@ def check_coverage(
 
     known_urls = {result.url for result in results}
 
-    coverage_aspects = _parse_coverage_aspects(data.get("coverage"), known_urls)
+    coverage_aspects, rejected_aspects = _parse_coverage_aspects(data.get("coverage"), known_urls)
 
     # `covered`/`missing` predate this prompt revision; `covered_information`/
     # `missing_information` is what the current prompt actually names them —
     # accept either so an older fixture or a future prompt edit both work.
-    covered = _parse_covered_items(data.get("covered_information") or data.get("covered"), known_urls)
+    covered, rejected_covered = _parse_covered_items(
+        data.get("covered_information") or data.get("covered"), known_urls
+    )
     missing = _str_list(data.get("missing_information") or data.get("missing"))
+    rejected_claims = [*rejected_aspects, *rejected_covered]
 
     sources_to_inspect = [
         SourceToInspect(
@@ -260,18 +345,21 @@ def check_coverage(
         for item in data.get("sources_to_inspect", []) or []
         if isinstance(item, dict) and str(item.get("url", "")).strip() in known_urls
     ]
+    contradictions = _parse_contradictions(data.get("contradictions"))
+    sufficient = _validate_sufficiency(
+        bool(data.get("sufficient", False)), missing, contradictions, covered
+    )
 
     return CoverageDecision(
-        sufficient=bool(data.get("sufficient", False)),
+        sufficient=sufficient,
         coverage=coverage_aspects,
         covered=covered,
         missing=missing,
-        contradictions=_parse_contradictions(data.get("contradictions")),
+        contradictions=contradictions,
         needs_full_text=bool(data.get("needs_full_text", False)) and bool(sources_to_inspect),
         sources_to_inspect=sources_to_inspect,
         next_queries=_parse_next_queries(data.get("next_queries")),
-        semantic_sufficient=data.get("semantic_sufficient"),
-        structural_sufficient=data.get("structural_sufficient"),
+        rejected_claims=rejected_claims,
         reason=str(data.get("reason", "")).strip(),
     )
 

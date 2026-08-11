@@ -24,13 +24,18 @@ def collect(source_plan: SourcePlan) -> SourceCollectionResult:
         )
     emit_collection_event("Source Router", 1, 1, "started")
     try:
+        # entity's answer_requirements/evidence_requirements are deliberately
+        # not forwarded (2026-08-11) - research() judges its own gap
+        # coverage from question + accumulated results, not from entity
+        # output. as_of_date is not entity-derived (request.created_at) and
+        # is still forwarded so freshness-sensitive queries anchor on the
+        # real current date.
         router_result = research(
             context.question,
-            answer_requirements=list(source_plan.answer_requirements),
-            evidence_requirements=list(source_plan.evidence_requirements),
             purpose_id=context.report_purpose_id,
             purpose_confidence=context.purpose_confidence,
             audience=context.audience,
+            as_of_date=context.as_of_date,
             excluded_urls=list(context.excluded_urls),
             excluded_domains=list(context.excluded_domains),
         )

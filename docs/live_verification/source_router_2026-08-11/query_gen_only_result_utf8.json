@@ -1,0 +1,172 @@
+{
+  "intent": "현재 롱폼과 숏폼 미디어의 소비 현황, 최신 변화 추이, 규모 및 점유율, 세그먼트별 차이, 주요 트렌드 등을 객관적으로 파악하여 외부 보고서를 작성하기 위한 정보 수집.",
+  "queries": [
+    {
+      "query": "\"롱폼 미디어\" 이용자 수 및 성장률 2024",
+      "angle": "롱폼 미디어의 현재 이용자 규모와 연도별 성장 추이",
+      "purpose": "2024년 기준 롱폼 미디어 이용자 수와 최근 성장률을 확인하여 현재 규모를 파악하고 추이를 분석한다.",
+      "priority": 1,
+      "key_terms": [
+        "롱폼 미디어"
+      ],
+      "query_role": "direct",
+      "evidence_need_ids": [
+        "direct-1"
+      ]
+    },
+    {
+      "query": "\"숏폼 미디어\" 이용자 수 및 성장률 2024",
+      "angle": "숏폼 미디어의 현재 이용자 규모와 연도별 성장 추이",
+      "purpose": "2024년 기준 숏폼 미디어 이용자 수와 최근 성장률을 확인하여 현재 규모를 파악하고 추이를 분석한다.",
+      "priority": 1,
+      "key_terms": [
+        "숏폼 미디어"
+      ],
+      "query_role": "direct",
+      "evidence_need_ids": [
+        "direct-2"
+      ]
+    },
+    {
+      "query": "롱폼 vs \"숏폼 미디어\" 이용률 비교 2024",
+      "angle": "두 미디어 유형의 이용자 수 및 이용률 비교",
+      "purpose": "2024년 롱폼과 숏폼 미디어의 이용률 및 시장 점유율을 비교하여 현재 시장 구조를 파악한다.",
+      "priority": 2,
+      "key_terms": [
+        "롱폼 미디어",
+        "숏폼 미디어"
+      ],
+      "query_role": "supporting",
+      "evidence_need_ids": []
+    },
+    {
+      "query": "롱폼 미디어 \"소비 행태\" 주요 변화 2023-2024",
+      "angle": "최근 2년간 롱폼 미디어 소비 패턴의 변화",
+      "purpose": "2023년부터 2024년까지 롱폼 미디어 소비 행태의 주요 변화를 확인하여 트렌드 방향성을 도출한다.",
+      "priority": 2,
+      "key_terms": [
+        "소비 행태"
+      ],
+      "query_role": "supporting",
+      "evidence_need_ids": []
+    },
+    {
+      "query": "숏폼 미디어 \"소비 행태\" 주요 변화 2023-2024",
+      "angle": "최근 2년간 숏폼 미디어 소비 패턴의 변화",
+      "purpose": "2023년부터 2024년까지 숏폼 미디어 소비 행태의 주요 변화를 확인하여 트렌드 방향성을 도출한다.",
+      "priority": 2,
+      "key_terms": [
+        "소비 행태"
+      ],
+      "query_role": "supporting",
+      "evidence_need_ids": []
+    },
+    {
+      "query": "롱폼 미디어 \"연령대별\" 이용 비율 2024",
+      "angle": "연령대별 롱폼 미디어 이용 분포",
+      "purpose": "2024년 기준 연령대별 롱폼 미디어 이용 비율을 분석하여 주요 소비자 세그먼트를 파악한다.",
+      "priority": 2,
+      "key_terms": [
+        "연령대별"
+      ],
+      "query_role": "supporting",
+      "evidence_need_ids": []
+    },
+    {
+      "query": "숏폼 미디어 \"연령대별\" 이용 비율 2024",
+      "angle": "연령대별 숏폼 미디어 이용 분포",
+      "purpose": "2024년 기준 연령대별 숏폼 미디어 이용 비율을 분석하여 주요 소비자 세그먼트를 파악한다.",
+      "priority": 2,
+      "key_terms": [
+        "연령대별"
+      ],
+      "query_role": "supporting",
+      "evidence_need_ids": []
+    },
+    {
+      "query": "롱폼 미디어 플랫폼별 \"시장 점유율\" 2024",
+      "angle": "주요 플랫폼별 롱폼 미디어 점유율 현황",
+      "purpose": "2024년 주요 플랫폼(OTT, 방송, 신문 등)의 롱폼 미디어 시장 점유율을 파악하여 시장 구조를 분석한다.",
+      "priority": 2,
+      "key_terms": [
+        "시장 점유율"
+      ],
+      "query_role": "supporting",
+      "evidence_need_ids": []
+    },
+    {
+      "query": "숏폼 미디어 플랫폼별 \"시장 점유율\" 2024",
+      "angle": "주요 플랫폼별 숏폼 미디어 점유율 현황",
+      "purpose": "2024년 주요 플랫폼(유튜브, 틱톡, 인스타그램 등)의 숏폼 미디어 시장 점유율을 파악하여 시장 구조를 분석한다.",
+      "priority": 2,
+      "key_terms": [
+        "시장 점유율"
+      ],
+      "query_role": "supporting",
+      "evidence_need_ids": []
+    },
+    {
+      "query": "\"국내\" 롱폼 미디어 \"글로벌 비교\" 2024",
+      "angle": "국내 롱폼 미디어 소비 현황의 글로벌 비교",
+      "purpose": "국내 롱폼 미디어 소비 규모 및 점유율을 주요 글로벌 시장(미국, 일본, 유럽 등)과 비교하여 상대적 위치를 파악한다.",
+      "priority": 3,
+      "key_terms": [
+        "국내",
+        "글로벌 비교"
+      ],
+      "query_role": "supporting",
+      "evidence_need_ids": []
+    },
+    {
+      "query": "\"국내외\" 숏폼 미디어 이용 패턴 차이 2024",
+      "angle": "국내외 숏폼 미디어 이용 행태 차이",
+      "purpose": "국내와 해외(특히 미국, 중국, 동남아)의 숏폼 미디어 이용 패턴 차이를 비교하여 지역적 특성을 분석한다.",
+      "priority": 3,
+      "key_terms": [
+        "국내외"
+      ],
+      "query_role": "supporting",
+      "evidence_need_ids": []
+    }
+  ],
+  "evidence_needs": [
+    {
+      "evidence_need_id": "direct-1",
+      "text": "롱폼과 숏폼 미디어 소비 트렌드 현황",
+      "requirement_type": "direct",
+      "priority": 1,
+      "answer_requirement_ids": [
+        "answer-1"
+      ]
+    },
+    {
+      "evidence_need_id": "direct-2",
+      "text": "주요 플랫폼별 소비 패턴 변화",
+      "requirement_type": "direct",
+      "priority": 1,
+      "answer_requirement_ids": [
+        "answer-2"
+      ]
+    },
+    {
+      "evidence_need_id": "direct-3",
+      "text": "사용자 선호도 및 시청 시간 비교",
+      "requirement_type": "direct",
+      "priority": 1,
+      "answer_requirement_ids": [
+        "answer-3"
+      ]
+    }
+  ],
+  "refinement": {
+    "action": "KEEP",
+    "added_queries": [],
+    "rewritten_queries": [],
+    "covered_evidence_need_ids": [],
+    "missing_evidence_need_ids": [],
+    "method": "ai",
+    "reason": "기존 쿼리들이 직접 요구사항(트렌드 현황, 플랫폼별 소비 패턴 변화, 사용자 선호도 및 시청 시간 비교)을 모두 충족하고 있습니다. 추가 쿼리나 수정이 필요 없습니다."
+  },
+  "purpose_id": "current_status",
+  "audience": "external"
+}

@@ -1,0 +1,140 @@
+{
+  "entities": {
+    "request_id": "req_cli_8452ace0",
+    "primary_intent": "current_status",
+    "perspective": "market_landscape",
+    "organizations": [],
+    "technologies": [],
+    "keywords": [
+      "롱폼 미디어",
+      "숏폼 미디어",
+      "콘텐츠 소비 트렌드",
+      "시청 시간",
+      "플랫폼 선호도",
+      "사용자 행동",
+      "미디어 전략"
+    ],
+    "information_needs": [
+      "customer_market",
+      "product_technology",
+      "strategy_investment"
+    ],
+    "answer_requirements": [
+      "롱폼과 숏폼 미디어 소비 트렌드 현황",
+      "주요 플랫폼별 소비 패턴 변화",
+      "사용자 선호도 및 시청 시간 비교",
+      "트렌드 변화 원인 및 전망"
+    ],
+    "evidence_requirements": [
+      "최근 1년간 롱폼/숏폼 콘텐츠 소비 통계",
+      "플랫폼별 시청 시간 및 사용자 참여 지표",
+      "트렌드 변화 원인 분석 (기술, 문화, 경제)",
+      "향후 1~2년 소비 패턴 전망",
+      "현재 상태를 확인할 수 있는 핵심 사실과 수치"
+    ],
+    "response_mode": "report",
+    "direct_answer": null,
+    "sector_id": "sk_broadband",
+    "routing_confidence": "high",
+    "routing_reason": "sector selected from registered choices by AI-first intent analysis",
+    "needs_ai_routing": false,
+    "extraction_method": "ai",
+    "extraction_error": null
+  },
+  "source_plan_question_keywords": [
+    "미디어 플랫폼 시장",
+    "롱폼 미디어",
+    "유료방송 OTT 시장",
+    "IPTV 시장",
+    "FAST 시장",
+    "콘텐츠 유통 시장",
+    "브로드밴드 네트워크 인프라 시장",
+    "AI 미디어 시장",
+    "디지털 광고 시장",
+    "영화산업 결산",
+    "콘텐츠산업 동향",
+    "숏폼 미디어",
+    "콘텐츠 소비 트렌드",
+    "시청 시간",
+    "플랫폼 선호도",
+    "사용자 행동",
+    "미디어 전략"
+  ],
+  "source_plan_search_context": {
+    "question": "롱폼과 숏폼 미디어 소비 트랜드",
+    "company_name": "SK브로드밴드",
+    "perspective": "market_landscape",
+    "needs_generic_topic_round": true,
+    "report_purpose_id": "current_status",
+    "purpose_confidence": "high",
+    "audience": "external",
+    "information_needs": [
+      "customer_market",
+      "product_technology",
+      "strategy_investment"
+    ],
+    "answer_requirements": [
+      "롱폼과 숏폼 미디어 소비 트렌드 현황",
+      "주요 플랫폼별 소비 패턴 변화",
+      "사용자 선호도 및 시청 시간 비교",
+      "트렌드 변화 원인 및 전망"
+    ],
+    "evidence_requirements": [
+      "최근 1년간 롱폼/숏폼 콘텐츠 소비 통계",
+      "플랫폼별 시청 시간 및 사용자 참여 지표",
+      "트렌드 변화 원인 분석 (기술, 문화, 경제)",
+      "향후 1~2년 소비 패턴 전망",
+      "현재 상태를 확인할 수 있는 핵심 사실과 수치"
+    ],
+    "question_coverage": {
+      "minimum_distinct_periods": 0,
+      "comparison_anchors": [],
+      "forecast_required": false
+    },
+    "target_block_shapes": [],
+    "suggested_terms": [
+      "미디어 플랫폼 시장",
+      "롱폼 미디어",
+      "유료방송 OTT 시장",
+      "IPTV 시장",
+      "FAST 시장",
+      "콘텐츠 유통 시장",
+      "브로드밴드 네트워크 인프라 시장",
+      "AI 미디어 시장",
+      "디지털 광고 시장",
+      "영화산업 결산",
+      "콘텐츠산업 동향",
+      "숏폼 미디어",
+      "콘텐츠 소비 트렌드",
+      "시청 시간",
+      "플랫폼 선호도",
+      "사용자 행동",
+      "미디어 전략"
+    ],
+    "as_of_date": "2026-08-10",
+    "country_code": "KR",
+    "excluded_urls": [],
+    "excluded_domains": [
+      "skbroadband.com"
+    ],
+    "validation_feedback": []
+  },
+  "collection_events": [
+    {
+      "source_name": "Source Router",
+      "source_index": 1,
+      "source_total": 1,
+      "status": "started",
+      "document_count": 0,
+      "detail": null
+    },
+    {
+      "source_name": "Source Router",
+      "source_index": 1,
+      "source_total": 1,
+      "status": "completed",
+      "document_count": 2,
+      "detail": "search_calls=6, stop_reason=search_call_budget_exhausted"
+    }
+  ]
+}

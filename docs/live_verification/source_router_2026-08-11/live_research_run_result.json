@@ -1,0 +1,101 @@
+{
+  "stop_reason": "sufficient",
+  "rounds_completed": 3,
+  "search_calls_used": 16,
+  "search_budget": 38,
+  "search_budget_basis": {
+    "base": 14,
+    "direct_query_bonus": 12,
+    "comparison_temporal_bonus": 12,
+    "strategy_bonus": 0,
+    "ceiling": 40
+  },
+  "total_results": 15,
+  "original_source_count": 5,
+  "original_source_urls": [
+    "https://www.slideshare.net/slideshow/2024-06-ott-2024-industrial-reportott/266963375",
+    "https://www.statista.com/topics/7527/video-streaming-worldwide/",
+    "https://www.alliedmarketresearch.com/press-release/over-the-top-services-market.html",
+    "https://chn.kocca.kr/kocca/koccanews/reportview.do?menuNo=204767&nttNo=628",
+    "https://m.kisdi.re.kr/report/view.do?arrMasterId=5086678&artId=1818976&key=m2101113025891&masterId=5086678"
+  ],
+  "final_coverage_sufficient": true,
+  "final_coverage_reason": "fallback: no planner API key configured or call failed",
+  "final_coverage_missing": [],
+  "final_coverage_rejected_claims": [],
+  "final_coverage_covered_count": 0,
+  "coverage_history_rejected_claims_per_round": [
+    [],
+    [
+      "Gen Z 응답자는 평균 소비자보다 소셜 플랫폼 및 사용자 생성 콘텐츠(UGC) 시청에 54% 더 많은 시간(약 50분/일)을 보내고, TV 및 영화 시청에는 26% 더 적은 시간(약 44분/일)을 보낸다."
+    ],
+    []
+  ],
+  "search_plan_queries": [
+    {
+      "query": "지난 5년간 국내 \"OTT\" 시장 규모 변화",
+      "priority": 1,
+      "query_role": "direct"
+    },
+    {
+      "query": "지난 5년간 글로벌 \"OTT\" 시장 규모 변화",
+      "priority": 1,
+      "query_role": "direct"
+    },
+    {
+      "query": "국내 \"OTT\" 이용자 수 및 이용률 추이",
+      "priority": 1,
+      "query_role": "direct"
+    },
+    {
+      "query": "글로벌 \"OTT\" 이용자 수 및 이용률 추이",
+      "priority": 1,
+      "query_role": "direct"
+    },
+    {
+      "query": "국내 OTT 주요 사업자 점유율 변화",
+      "priority": 1,
+      "query_role": "direct"
+    },
+    {
+      "query": "글로벌 OTT 주요 사업자 점유율 변화",
+      "priority": 1,
+      "query_role": "direct"
+    },
+    {
+      "query": "국내 \"OTT\" 소비 행태 변화 (\"콘텐츠 유형\", 시청 시간)",
+      "priority": 2,
+      "query_role": "supporting"
+    },
+    {
+      "query": "글로벌 \"OTT\" 소비 행태 변화 (\"콘텐츠 유형\", 시청 시간)",
+      "priority": 2,
+      "query_role": "supporting"
+    },
+    {
+      "query": "국내 \"OTT\" 연령별·지역별 세그먼트 차이",
+      "priority": 2,
+      "query_role": "supporting"
+    },
+    {
+      "query": "글로벌 \"OTT\" 연령별·지역별 세그먼트 차이",
+      "priority": 2,
+      "query_role": "supporting"
+    },
+    {
+      "query": "국내 \"OTT\" 주요 변화 (신규 서비스 출시, 가격 정책, 기술)",
+      "priority": 2,
+      "query_role": "supporting"
+    },
+    {
+      "query": "글로벌 \"OTT\" 주요 변화 (신규 서비스 출시, 가격 정책, 기술)",
+      "priority": 2,
+      "query_role": "supporting"
+    },
+    {
+      "query": "\"OTT\" 생태계 변화 트렌드 드라이버 (\"규제\", 기술, 콘텐츠 제작)",
+      "priority": 2,
+      "query_role": "supporting"
+    }
+  ]
+}
