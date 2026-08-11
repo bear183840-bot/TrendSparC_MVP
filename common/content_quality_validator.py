@@ -97,7 +97,18 @@ _SEGMENT_QUALIFIED_NOUN_RE = re.compile(
     r"(?:헤비|라이트|신규|기존|유료|무료|시범)\s*(?:이용자|사용자|가입자|고객|시청자|구독자|유저)"
 )
 
-EntityKind = Literal["age", "gender", "household", "segment", "entity"]
+# A distribution/broadcast platform *type* (how a household receives paid
+# TV - cable, satellite, IPTV as a category), not a company. Live-verified
+# 2026-08-12: a "Competitive Landscape" table listed "SO"/"위성" as rows
+# beside "KT"/"SK브로드밴드"/"LG유플러스" - the source table breaks down the
+# whole 유료방송 market by platform type first, then names companies within
+# IPTV specifically, and both axes landed in one 경쟁사 column because
+# neither is a person-slice `is_demographic()` already screens for. SO and
+# 위성 are exact platform-type tokens (unlike company names, which vary),
+# so a closed set is safe here the way it would not be for competitors.
+_CHANNEL_WORDS = ("SO", "위성", "위성방송", "지상파", "케이블", "케이블방송", "종합유선방송")
+
+EntityKind = Literal["age", "gender", "household", "segment", "channel", "entity"]
 
 
 def entity_kind(entity: str) -> EntityKind:
@@ -114,6 +125,8 @@ def entity_kind(entity: str) -> EntityKind:
         return "segment"
     if _SEGMENT_QUALIFIED_NOUN_RE.search(text):
         return "segment"
+    if text in _CHANNEL_WORDS:
+        return "channel"
     return "entity"
 
 
@@ -140,7 +153,14 @@ def leading_subject_kind(text: str) -> EntityKind:
 
 
 def is_demographic(entity: str) -> bool:
-    """Whether this is a slice of people rather than a named organisation."""
+    """Whether this is a slice of people or a distribution-platform type
+    (SO/위성/케이블/...) rather than a named organisation.
+
+    The name predates the "channel" kind, but the behavioural contract every
+    caller actually relies on is "route this away from a company-only
+    table" - a platform-type row belongs there exactly as much as an age
+    bracket does, so it is grouped in rather than given a third bucket.
+    """
     return entity_kind(entity) != "entity"
 
 

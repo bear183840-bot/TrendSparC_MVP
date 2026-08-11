@@ -979,6 +979,26 @@ _CAUSAL_LABEL_SUFFIX_RE = re.compile(
     r"비롯(?:돼|되어)|계기로|따라서?)\s*$"
 )
 
+# Same failure class as the causal-clause label above, different shape:
+# live-verified 2026-08-12, a label came back as "유지했으며 에스케이(SK)
+# 브로드밴드(IPTV) 6,691,354 가입자(18.51%" - a whole clause quoted straight
+# out of the source sentence, value and all, instead of the metric's name.
+# `value`/`unit`/`period` already carry the real number; a label that
+# embeds a second, large raw figure of its own is that same clause leaking
+# in, and an unbalanced "(" is the direct fingerprint of a quote cut off
+# mid-parenthetical. Neither can happen in a genuine metric name.
+_LABEL_EMBEDDED_VALUE_RE = re.compile(r"\d[\d,]{3,}")
+
+
+def _label_is_sentence_fragment(label: str) -> bool:
+    if label.count("(") != label.count(")"):
+        return True
+    if _LABEL_EMBEDDED_VALUE_RE.search(label):
+        return True
+    if len(label) > 60:
+        return True
+    return False
+
 
 def _verified_metric_points(
     data: dict,

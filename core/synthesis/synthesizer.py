@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from common.block_shapes import clean_citation
 from common.content_quality_validator import (
     dedupe_structured_across_sections,
     extract_metric_points_from_evidence,
@@ -365,11 +366,28 @@ def synthesize(
         if claim.claim
     ]
 
+    # `synthesis_text` used to be AI-only: `refine_synthesis_ai()` is the
+    # only writer, and every other field in this function follows the "rule-
+    # based first, AI refines" pattern this one skipped. Live-verified
+    # 2026-08-12: when that AI call fails (rate limit, refusal, timeout - the
+    # same failure modes every other AI pass here already tolerates), the
+    # Executive Summary rendered "분석 가능한 근거가 부족합니다" while its own
+    # KPI cards, right beside it, were full of real numbers - the paragraph
+    # was empty for a reason that had nothing to do with whether evidence
+    # existed. `key_points` is the analyzer's own key-fact sentences, already
+    # grounded and already Korean, so joining the first few is a genuine
+    # rule-based summary rather than an invented one - the same "no
+    # fabrication, just no AI polish" fallback every sibling field gets.
+    rule_based_summary = (
+        " ".join(clean_citation(point) for point in key_points[:3])
+        if key_points else None
+    )
+
     return TrendSynthesis(
         request_id=request_id,
         sector_id=sector_id,
         highlights=highlights,
-        synthesis_text=None,
+        synthesis_text=rule_based_summary,
         source_count=len(document_analyses),
         unique_source_count=len(source_ids),
         source_ids=source_ids,
