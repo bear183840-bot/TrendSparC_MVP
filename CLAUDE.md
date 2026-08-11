@@ -36,17 +36,22 @@ someone updates it.
   tiers for unregistered sources, no fake analysis when a stage isn't
   implemented (`prompts/global_system_prompt.md` has the full list).
 - **1st-pass rule-based → 2nd-pass AI-based, silent fallback**: this pattern
-  repeats three times — `core/entity/{extractor.py,ai_based.py}`,
-  `core/synthesis/{synthesizer.py,ai_based.py}` — and analyzer's use of
-  OpenAI per sector. The AI pass is always optional; missing key / API
-  failure / refusal must silently fall back to the rule-based result, never
-  break the pipeline.
+  repeats four times — `core/entity/{extractor.py,ai_based.py}`,
+  `core/synthesis/{synthesizer.py,ai_based.py}`, `core/question_brief.py`
+  (`build_rule_based_question_brief` → `refine_question_brief_ai`) — and
+  analyzer's use of OpenAI per sector. The AI pass is always optional;
+  missing key / API failure / refusal must silently fall back to the
+  rule-based result, never break the pipeline.
 
 ## Pipeline stages (`core/request_pipeline/pipeline.py`)
 
 ```
 UserRequest
   -> entity            (rule-based + AI refinement; also classifies primary_intent)
+  -> question_brief    (rule-based extraction -> optional AI refinement of
+                         answer_requirements/evidence_requirements; after
+                         synthesis, build_fulfillment() marks each requested
+                         answer fulfilled/partial/unmet — core/question_brief.py)
   -> sector_router      (scans sectors/*/profile.json, matches aliases/keywords)
   -> source_planner     (sector registry + sources/registry/common/ merged in)
   -> sector_adapter     collector -> processor -> validator -> analyzer  (per-sector code)
@@ -263,9 +268,13 @@ Each sector's analyzer has its own key (`TRENDSPARC_SK_HYNIX_ANALYZER_API_KEY`,
 `TRENDSPARC_SK_PLANET_ANALYZER_API_KEY`, `TRENDSPARC_SK_TELECOM_ANALYZER_API_KEY`,
 `TRENDSPARC_SK_INNOVATION_ANALYZER_API_KEY`, ...). Shared/sector-agnostic AI
 passes (`TRENDSPARC_ENTITY_AI_API_KEY`, `TRENDSPARC_SYNTHESIS_AI_API_KEY`)
-and `FIRECRAWL_API_KEY` are shared across all sectors. All of these are
-optional in the sense that missing ones degrade gracefully (rule-based
-fallback, or a `template_only` trace entry) rather than crashing.
+and `FIRECRAWL_API_KEY` are shared across all sectors.
+`TRENDSPARC_QUESTION_BRIEF_AI_API_KEY`/`_MODEL`/`_BASE_URL` (added by PR #33,
+`core/question_brief.py`) refine the question-brief extraction step; if unset,
+it falls back to `TRENDSPARC_ENTITY_AI_API_KEY`/`_MODEL`/`_BASE_URL`, and if
+that's also unset, to the rule-based brief only — no dedicated key required.
+All of these are optional in the sense that missing ones degrade gracefully
+(rule-based fallback, or a `template_only` trace entry) rather than crashing.
 
 ## Running things
 

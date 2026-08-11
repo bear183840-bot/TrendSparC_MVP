@@ -219,7 +219,7 @@ Bash 힙독(heredoc)에 파이썬을 넣으면 따옴표가 자주 망가진다 
 2. **진단부터.** 실제 실행 JSON / 브라우저 / 직접 호출로 현상을 재현하라. 코드만 읽고
    원인을 추정하지 마라.
 3. **픽스처로 회귀 확인.** `tests/fixtures/synthesis_*.json` 9개 전부.
-4. `pytest -q` 통과. 현재 기준 **1412 passed, 2 skipped** (2026-08-11, Source
+4. `pytest -q` 통과. 현재 기준 **1435 passed, 2 skipped** (2026-08-11, Source
    Router grounding/pacing PR #32 반영). 숫자는 새 테스트가 추가되면 실제 실행 결과로 갱신한다.
    외부 호출이 없는지까지 확인하려면 소켓을 막고 키를 지운 채 돌려라 — 통합 시점에
    이 조건에서 동일하게 통과하는 것을 확인했다.
@@ -356,6 +356,13 @@ evidence requirement**(예: 연령대 × 같은 매체 reach, 회사 × 같은 �
 - 부족 요구사항이 있으면 bounded 추가수집 기회를 준다.
 - 추가수집 실패가 기존 유효 근거까지 버리거나 전체 파이프라인을 중단하지 않는다
   (`d785cad`).
+- `core/question_brief.py`(PR #33, 2026-08-11 병합)가 `answer_requirements`/
+  `evidence_requirements`를 만드는 자리를 규칙 기반 1차 추출 → 선택적 AI 정제(
+  `refine_question_brief_ai`, 실패 시 규칙 기반 결과로 조용히 폴백)로 승격했고,
+  synthesis 완료 후 `build_fulfillment()`로 각 requested answer를
+  `fulfilled/partial/unmet`으로 판정한다 — 아래 미완료 2번이 이걸로 해결됐다.
+  `pipeline.py`의 `entities.answer_requirements`/`evidence_requirements`는 이제
+  `question_brief`에서 파생된 값이다.
 - Solar Pro 3를 entity / synthesis / sk_broadband analyzer에 쓰는 운영 방침은 유지한다.
   BASE_URL과 모델명은 서로 다른 설정이며, 실제 `.env` 값은 에이전트가 수정하지 않는다.
 - report-generator payload 중복 축소, 근거 추적, 결정론적 블록 계약, 슬롯 2패스,
@@ -365,8 +372,9 @@ evidence requirement**(예: 연령대 × 같은 매체 reach, 회사 × 같은 �
 
 1. 목적 분류가 단순 `추천/전략` 신호를 미래사업으로 과대 해석하는지 실제 사례군으로
    감사한다.
-2. 요구사항을 보존하는 데서 끝내지 말고, 각각을 `충족/부분충족/미충족`으로 판정하고
-   근거와 최종 블록까지 연결한다.
+2. ~~요구사항을 보존하는 데서 끝내지 말고, 각각을 `충족/부분충족/미충족`으로 판정한다~~
+   → `core/question_brief.py`의 `build_fulfillment()`로 완료(위 "완료·유지할 것" 참고).
+   근거와 최종 블록까지의 연결(대시보드 표시)은 아직 미완료.
 3. 질문·계열사·비교축과 먼 문서는 analyzer 이전/이후 어느 단계에서 제거할지 수율을
    보고 결정한다. 단순 키워드 포함만으로 관련 있다고 판단하지 않는다.
 4. `comparison_points`에는 비교 주체·공통 기준·값/등급이 실제로 있어야 한다. 일반
@@ -458,6 +466,6 @@ evidence requirement**(예: 연령대 × 같은 매체 reach, 회사 × 같은 �
   브랜드 인지도·선호도, 모델 선호·브랜드 적합도, 롱폼·숏폼, 셋톱박스 원가처럼
   서로 다른 측정값은 분리한다. 문자열이 비슷하다는 이유로 통합하지 않는다.
 
-이 상태의 회귀 기준은 `python -m pytest -q`의 **1412 passed, 2 skipped**다(2026-08-11,
-Source Router grounding/pacing PR #32 이후). 문서만 고치는 작업에서는 코드·프롬프트·테스트를 함께 바꾸지
+이 상태의 회귀 기준은 `python -m pytest -q`의 **1435 passed, 2 skipped**다(2026-08-11,
+PR #33 `core/question_brief.py` 병합 이후). 문서만 고치는 작업에서는 코드·프롬프트·테스트를 함께 바꾸지
 않는다.

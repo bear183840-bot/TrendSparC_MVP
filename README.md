@@ -130,9 +130,10 @@ streamlit run reporting/dashboard_streamlit/app.py --server.port 8503
 python -m pytest -q
 ```
 
-현재 기준은 **1412 passed, 2 skipped**입니다(2026-08-11). 라우팅, 소스 계획,
+현재 기준은 **1435 passed, 2 skipped**입니다(2026-08-11). 라우팅, 소스 계획,
 어댑터, 근거 검증, 수치·비교 구조화, 목적별 슬롯, 블록 적격성, Streamlit 렌더링,
-payload 예산과 전체 dry-run을 포함합니다.
+payload 예산, question brief(요청 답변/증거 요구사항 추출·충족 판정)와 전체
+dry-run을 포함합니다.
 
 에이전트가 작업을 이어받을 때는 [AGENTS.md](AGENTS.md)와 `CLAUDE.md`를 먼저 읽어야
 합니다.
