@@ -47,9 +47,6 @@ class SourceRouterConfig:
     # queries). Real enforcement backstop stays max_web_search_calls below.
     max_priority1_queries: int = 8
     max_priority2_queries: int = 6
-    # Planner + refiner share this plan-level cap. It is intentionally lower
-    # than the old 15+15 parallel prototype; direct queries are reserved first.
-    max_planned_queries: int = 12
 
     # doc1 §25/§27 stop policy. The loop always terminates within these
     # bounds, however the model behaves. max_gap_loop_iterations deliberately
@@ -59,29 +56,36 @@ class SourceRouterConfig:
     # multiplies cost (iterations x pool size) rather than just adding to
     # it; raising query/result ceilings alone stays roughly linear.
     max_gap_loop_iterations: int = 3
-    # sources_to_inspect is already naturally bounded by the `results` pool
-    # size (coverage.py drops any url not in that round's known_urls), which
-    # is itself capped at max_results below — so this is a defensive ceiling
-    # decoupled from that bound, not the primary throttle. Kept equal to
-    # max_results so it doesn't bind in practice (same reasoning as before,
-    # just at the new value) — coverage.md already only requests full-text
-    # for genuinely deficient sources. NOTE: each inspection may be an
-    # html_extractor.py (Firecrawl) call — Firecrawl is rate-limited to
-    # ~10-11 req/min (see CLAUDE.md) — 15 sequential inspections in one run
-    # can approach that limit; not currently paced/throttled here.
-    max_sources_to_inspect: int = 15
-    # Hard ceiling on total GPT-5 mini web_search calls per run - planner,
-    # refiner and every gap-loop follow-up draw on this one allowance, so a
-    # long run cannot spend a fresh budget per tier. router._search_budget()
-    # then picks the run's actual budget below this, from the question's own
-    # comparison/trend/response complexity and its evidence-need count.
+    # Per-round cap on NEW sources whose full text gets fetched. Was 15
+    # (== max_results), which meant it never actually bound: coverage.py
+    # drops any url not in that round's known_urls, so sources_to_inspect
+    # can't exceed the pool anyway. Lowered to 10 (2026-08-11) now that
+    # router.py filters out already-inspected/not-in-pool entries BEFORE
+    # applying this cap — before that reordering, lowering it would have
+    # spent slots on entries that produce no scrape at all.
+    # Each inspection may be an html_extractor.py (Firecrawl) call; that
+    # module paces and retries against the API's per-minute limit itself, so
+    # this number is about bounding per-round latency and cost, not about
+    # staying under the rate limit.
+    max_sources_to_inspect: int = 10
+    # Hard ceiling on total GPT-5 mini web_search calls per run - the
+    # planner's initial batch and every gap-loop follow-up draw on this one
+    # allowance, so a long run cannot spend a fresh budget per tier.
+    # router._search_budget() then picks the run's actual budget below this,
+    # from the question's own comparison/trend/response complexity and its
+    # direct-query count (see _search_budget_terms).
     # Raised 12 -> 40 (2026-08-11, temporary stopgap alongside
     # _search_budget_terms()'s own increase): this ceiling clips whatever
     # _search_budget() computes via min(ceiling, budget), so raising the
     # per-question budget terms without raising this cap would have been a
-    # no-op — a question that now scores 26 (base 14 + evidence_needs_bonus
+    # no-op — a question that now scored 26 (base 14 + direct_query_bonus
     # 12) was previously being clipped down to 12 regardless.
-    max_web_search_calls: int = 40
+    # Lowered 40 -> 30 (2026-08-11, same day): _search_budget_terms()'s own
+    # terms were lowered -6 each once eager direct-batch inspection reduced
+    # how much follow-up search the gap loop actually needed, so this
+    # ceiling no longer needs to accommodate the old, larger per-question
+    # totals either.
+    max_web_search_calls: int = 30
 
     # Cost guards added after a live-cost review found two uncapped points:
     # a single execute_web_search() call could return an unbounded number of
@@ -98,6 +102,26 @@ class SourceRouterConfig:
     # queries/rounds run.
     max_urls_per_query: int = 2
     max_results: int = 15
+
+    # Eager inspection of the planner's own direct-priority batch (2026-08-11)
+    # — live-verified that coverage.py's own needs_full_text request only
+    # fires when the model recognizes its own uncertainty, which does not
+    # help when the model instead confidently asserts an ungrounded claim
+    # from prior knowledge instead of the actual (thin) search summary.
+    # Fetching a direct result's real text unconditionally sidesteps that —
+    # verify_evidence's own input is already capped
+    # (max_evidence_chars_for_coverage_check), so the real limiting cost is
+    # Firecrawl's rate limit, not tokens. Bounded to the direct batch only
+    # (not every result, not every round) even so
+    # (max_priority1_queries=8 x max_urls_per_query=2 = 16 candidates before
+    # dedup) — non-direct/gap-loop candidates still go through coverage.py's
+    # own needs_full_text judgment as before.
+    # A live run on 2026-08-11 still tripped the limit at this cap (the API
+    # reported 20 req/min consumed and refused two scrapes), because these
+    # fire back to back with nothing between them; html_extractor.py now
+    # paces and retries at the call site rather than this number being
+    # lowered, so the eager batch keeps its coverage.
+    max_auto_inspect_direct_results: int = 8
 
     # PDF size routing (doc1 §11). Token counts are estimated from character
     # count when no real tokenizer is available — see pdf_parser.py.

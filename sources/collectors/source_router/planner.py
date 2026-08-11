@@ -12,6 +12,7 @@ from __future__ import annotations
 
 from typing import Literal
 
+from common.recency import format_recency_hint, max_age_days
 from sources.collectors.source_router import _prompts, _solar
 from sources.collectors.source_router.contracts import SearchPlan, SearchPlanQuery
 from sources.collectors.source_router.question_type_ai_based import refine_question_type_ai
@@ -138,8 +139,13 @@ def _assemble_system_prompt(
 
 
 def _fallback_plan(
-    question: str, *, audience: str | None = None, purpose_id: str | None = None
+    question: str,
+    *,
+    audience: str | None = None,
+    purpose_id: str | None = None,
+    as_of_date: str | None = None,
 ) -> SearchPlan:
+    resolved_max_age_days = max_age_days(question, as_of_date, purpose_id)
     query = question.strip()
     if not query:
         return SearchPlan(
@@ -147,12 +153,16 @@ def _fallback_plan(
             queries=[],
             audience=_clamp_audience(audience),
             purpose_id=_clamp_purpose_id(purpose_id),
+            as_of_date=as_of_date,
+            resolved_max_age_days=resolved_max_age_days,
         )
     return SearchPlan(
         intent=question,
         queries=[SearchPlanQuery(query=query, angle="direct", purpose="fallback", priority=1)],
         audience=_clamp_audience(audience),
         purpose_id=_clamp_purpose_id(purpose_id),
+        as_of_date=as_of_date,
+        resolved_max_age_days=resolved_max_age_days,
     )
 
 
@@ -181,6 +191,7 @@ def plan_searches(
     audience: str | None = None,
     purpose_id: str | None = None,
     purpose_confidence: str | None = None,
+    as_of_date: str | None = None,
     model_override: str | None = None,
     timeout_seconds: int = 30,
 ) -> SearchPlan:
@@ -198,6 +209,19 @@ def plan_searches(
     gates whether the assembled prompt sends only that one purpose branch or
     falls back to sending all four - see `_assemble_system_prompt`.
 
+    `as_of_date` (today's reference date, "YYYY-MM-DD") is, like audience,
+    never inferred - only echoed onto the returned SearchPlan and surfaced
+    to the model as an explicit input (see `_assemble_system_prompt`'s
+    Inputs section) so freshness-sensitive queries anchor on the actual
+    current date instead of whatever year the model's own training data
+    makes feel "recent". `common.recency.max_age_days()` (shared with
+    sk_broadband's validator, which uses the same question-sensitive
+    judgment post-hoc to filter documents) additionally resolves a concrete
+    recency window from `question`/`as_of_date`/`purpose_id`, surfaced to
+    the model as a `recency_hint` guidance string (not a hard filter -
+    source_router has no post-hoc age filter of its own) and echoed onto
+    the plan as `resolved_max_age_days` for auditability.
+
     `question_type` is not a parameter here - unlike purpose_id/audience it
     is classified entirely from `question` inside this package (see
     question_type_classifier.py's module docstring), so it's computed
@@ -205,6 +229,7 @@ def plan_searches(
     codebase uses (`classify_question_type` -> `refine_question_type_ai`)
     rather than threaded in from a caller."""
     audience = _clamp_audience(audience)
+    resolved_max_age_days = max_age_days(question, as_of_date, purpose_id)
     question_type, question_type_confidence = refine_question_type_ai(
         classify_question_type(question),
         question,
@@ -219,13 +244,15 @@ def plan_searches(
             "question": question,
             "audience": audience or "unspecified",
             "purpose_id": purpose_id or "infer",
+            "as_of_date": as_of_date or "unknown",
+            "recency_hint": format_recency_hint(resolved_max_age_days),
         },
         caller="planner",
         model_override=model_override,
         timeout_seconds=timeout_seconds,
     )
     if not data:
-        return _fallback_plan(question, audience=audience, purpose_id=purpose_id)
+        return _fallback_plan(question, audience=audience, purpose_id=purpose_id, as_of_date=as_of_date)
     raw_queries = data.get("queries") or data.get("search_plan") or []
     queries = []
     for item in raw_queries:
@@ -237,21 +264,33 @@ def plan_searches(
         key_terms = [
             str(term).strip() for term in item.get("key_terms") or [] if str(term).strip()
         ][:_MAX_KEY_TERMS_PER_QUERY]
+        priority = int(item.get("priority") or 1)
         queries.append(
             SearchPlanQuery(
                 query=_apply_quoting(raw_query, key_terms),
                 angle=str(item.get("angle", "")).strip(),
                 purpose=str(item.get("purpose", "")).strip(),
-                priority=int(item.get("priority") or 1),
+                priority=priority,
                 key_terms=key_terms,
+                # Self-contained: "direct" means "one of the planner's own
+                # priority-1 angles", not an entity-derived answer
+                # requirement (see research()'s docstring in router.py for
+                # the 2026-08-11 removal of that coupling). Priority itself
+                # already carries this meaning per SearchPlanQuery's own
+                # docstring ("1 = run first"); this just makes query_role
+                # agree with it instead of defaulting to the Pydantic
+                # field's "direct" for every query regardless of priority.
+                query_role="direct" if priority == 1 else "supporting",
             )
         )
     if not queries:
-        return _fallback_plan(question, audience=audience, purpose_id=purpose_id)
+        return _fallback_plan(question, audience=audience, purpose_id=purpose_id, as_of_date=as_of_date)
     resolved_purpose_id = purpose_id or _clamp_purpose_id(data.get("resolved_purpose_id"))
     return SearchPlan(
         intent=str(data.get("intent", question)),
         queries=queries,
         audience=audience,
         purpose_id=resolved_purpose_id,
+        as_of_date=as_of_date,
+        resolved_max_age_days=resolved_max_age_days,
     )

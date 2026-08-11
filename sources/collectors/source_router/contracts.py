@@ -7,11 +7,15 @@ different subject from the evidence contracts the report is built out of.
 `adapter.py` is the single translation point between the two, so the router
 can change its own shapes without touching downstream contracts.
 
-Shapes follow final_research_router.md §22, with two additive fields the
-attached doc2/doc3 alignment notes asked for (both optional, so a strict
+Shapes follow final_research_router.md §22, with one additive field the
+attached doc2/doc3 alignment notes asked for (optional, so a strict
 doc1-only reading of a payload still validates):
   - WebSearchResult.evidence_depth: doc2 §7's "Level 1 vs Level 2" split.
-  - CoverageDecision.semantic_sufficient / structural_sufficient: doc2 §8.
+(CoverageDecision.semantic_sufficient/structural_sufficient, doc2 §8's other
+additive field, was removed 2026-08-11 - the coverage.md prompt actually in
+use (replaced 2026-08-09, see below) never asks the model for either value,
+so both were permanently None/dead in every real response; nothing in
+router.py ever read them either.)
 
 2026-08-09: the user replaced all 5 Solar-role prompts (prompts/*.md) with a
 richer prompt suite (labeled A-E in the source material) that returns
@@ -135,6 +139,18 @@ class SearchPlan(BaseModel):
     audience: Optional[Literal[
         "practitioner", "executive", "management", "external"
     ]] = None
+    # The as_of_date this plan's query generation used to resolve
+    # freshness-sensitive year/date terms (planner_common_tail.md's
+    # freshness rule) - always an echo of the caller-supplied value, never
+    # invented here. None means the caller passed none (as_of_date is
+    # optional upstream too - see common/contracts.py's WebSearchContext).
+    as_of_date: Optional[str] = None
+    # The recency window (in days) common.recency.max_age_days() derived
+    # from `question`/`as_of_date`/`purpose_id` - a planning hint surfaced
+    # to the model, not a hard filter (source_router has no post-hoc age
+    # filter of its own). None means either no as_of_date was available or
+    # the question implies no bound (e.g. a historical question).
+    resolved_max_age_days: Optional[int] = None
 
     def by_priority(self, priority: int) -> list[SearchPlanQuery]:
         return [query for query in self.queries if query.priority == priority]
@@ -302,10 +318,14 @@ class SourceToInspect(BaseModel):
 
 
 class CoverageDecision(BaseModel):
-    """Coverage/Gap Check output — doc1 §6/§22, plus doc2 §8's additive
-    semantic/structural split, plus prompt B's richer per-aspect coverage
-    and contradiction detection (all additive; a doc1-only consumer that
-    never reads the new fields still works)."""
+    """Coverage/Gap Check output — doc1 §6/§22, plus prompt B's richer
+    per-aspect coverage and contradiction detection (additive; a doc1-only
+    consumer that never reads the new fields still works).
+
+    Does not carry a semantic/structural sufficiency split - doc2 §8 asked
+    for one, but coverage.md (replaced 2026-08-09) never asks the model to
+    produce it, so the field was always None in practice. Removed
+    2026-08-11 rather than kept as permanently-dead observability."""
 
     sufficient: bool = False
     coverage: list[CoverageAspect] = Field(default_factory=list)
@@ -318,8 +338,15 @@ class CoverageDecision(BaseModel):
     needs_full_text: bool = False
     sources_to_inspect: list[SourceToInspect] = Field(default_factory=list)
     next_queries: list[NextQuery] = Field(default_factory=list)
-    semantic_sufficient: Optional[bool] = None
-    structural_sufficient: Optional[bool] = None
+    # Text of every covered/covered_information claim this round's model
+    # response made that _parse_coverage_aspects/_parse_covered_items
+    # rejected for citing no real source_urls in this round's evidence pool
+    # (the same claims that print an UNGROUNDED CLAIM WARNING to stderr).
+    # Added 2026-08-11 so router.py can feed this list back into the NEXT
+    # round's check_coverage() call (previously_rejected_claims) - without
+    # it, the model has no memory of what it fabricated last round and can
+    # repeat the exact same ungrounded claim indefinitely.
+    rejected_claims: list[str] = Field(default_factory=list)
     reason: str = ""
 
 

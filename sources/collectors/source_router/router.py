@@ -23,7 +23,6 @@ from sources.collectors.source_router import coverage as coverage_module
 from sources.collectors.source_router import html_extractor
 from sources.collectors.source_router import pdf_parser
 from sources.collectors.source_router import planner as planner_module
-from sources.collectors.source_router import refiner as refiner_module
 from sources.collectors.source_router import web_search as web_search_module
 from sources.collectors.document_media import detect_document_media_type
 from sources.collectors.source_router.config import SourceRouterConfig
@@ -32,7 +31,6 @@ from sources.collectors.source_router.contracts import (
     SearchPlan,
     SearchPlanQuery,
     SourceRouterResult,
-    SourceToInspect,
     StopReason,
     WebSearchResult,
 )
@@ -131,12 +129,11 @@ def _run_queries(
             )
         except web_search_module.WebSearchTimeoutError:
             found = []
-            # Only direct queries get a retry: they're the ones the
-            # coverage hard-gate (_enforce_direct_original_sources) can
-            # never mark satisfied without a verified source, so losing one
-            # to a timeout is far more costly than losing a supporting
-            # query. One retry only - a second timeout is just left as a
-            # miss, never a second retry.
+            # Only direct queries get a retry: they're the planner's own
+            # priority-1 angles (see planner.py's query_role assignment),
+            # so losing one to a timeout is more costly than losing a
+            # supporting query. One retry only - a second timeout is just
+            # left as a miss, never a second retry.
             if query.query_role == "direct" and used < remaining_calls:
                 simplified = _simplify_query_for_retry(query)
                 if simplified is not None:
@@ -323,21 +320,36 @@ def _search_budget_terms(
     stop.
 
     Every term below raised +10 (2026-08-11, temporary stopgap): a live run
-    on "롱폼과 숏폼 미디어 소비 트랜드" scored only base+evidence_needs_bonus
+    on "롱폼과 숏폼 미디어 소비 트랜드" scored only base+direct_query_bonus
     (6 total) because none of the comparison_temporal_bonus/strategy_bonus
     keyword lists recognize a question joining two parallel topics with "와/
     과" instead of "비교"/"vs"/"대비" - that budget was exhausted (2 of 6
     calls wasted on timed-out queries) before either topic got a verified
     source. This does not fix the keyword list's blind spot (see the plan's
     "다음 라운드 후보" note); it only buys more room while that's true.
+    Every term then lowered -6 (2026-08-11, same day): the +10 stopgap
+    over-corrected once eager direct-batch inspection (see
+    SourceRouterConfig.max_auto_inspect_direct_results) started securing
+    original-source evidence from the initial batch alone, so the gap loop
+    needed less follow-up search budget than the stopgap assumed.
+
+    `direct_query_bonus` reads `search_plan.queries` (the planner's own
+    priority-1/`query_role="direct"` angles) rather than
+    `search_plan.evidence_needs` - as of 2026-08-11 the router no longer
+    depends on entity-derived answer_requirements/evidence_requirements at
+    all (see planner.py/refiner-removal history), so `evidence_needs` is
+    always empty now. Renamed from `evidence_needs_bonus` to match.
     """
+    direct_query_count = len([
+        query for query in search_plan.queries if query.query_role == "direct"
+    ])
     return {
-        "base": 14,
-        "evidence_needs_bonus": 12 if len(search_plan.evidence_needs) >= 2 else 0,
-        "comparison_temporal_bonus": 12 if any(
+        "base": 8,
+        "direct_query_bonus": 6 if direct_query_count >= 2 else 0,
+        "comparison_temporal_bonus": 6 if any(
             token in question.casefold() for token in ("비교", "추이", "변화", "vs", "대비")
         ) else 0,
-        "strategy_bonus": 12 if any(
+        "strategy_bonus": 6 if any(
             token in question for token in ("대응", "전략", "원인", "영향", "추천")
         ) else 0,
         "ceiling": ceiling,
@@ -349,89 +361,19 @@ def _search_budget(question: str, search_plan: SearchPlan, ceiling: int) -> int:
     terms = _search_budget_terms(question, search_plan, ceiling)
     budget = terms["base"] + sum(
         terms[key] for key in
-        ("evidence_needs_bonus", "comparison_temporal_bonus", "strategy_bonus")
+        ("direct_query_bonus", "comparison_temporal_bonus", "strategy_bonus")
     )
     return min(ceiling, max(1, budget))
-
-
-def _enforce_direct_original_sources(
-    decision: CoverageDecision,
-    search_plan: SearchPlan,
-    results: list[WebSearchResult],
-    inspected_urls: set[str],
-) -> CoverageDecision:
-    """A search summary can never satisfy an explicit direct requirement.
-
-    What the gate asks is that the original document was actually fetched
-    and put through verification - not how the verifier then graded the
-    strength of what it found. Requiring `evidence_strength == "direct"` on
-    top of that made a fourth AND condition out of a judgement about
-    *relevance*, and a whole run could fail on it while holding the source
-    text it needed. Live-verified 2026-08-10
-    (storage/requests/req_cli_8452ace0): coverage came back
-    `structural_sufficient: False` with reason "DIRECT requirements are not
-    linked to verified original source text", which forced `sufficient=False`
-    on every gap round until the search budget ran out.
-
-    `_is_direct_verification` is deliberately left in place - the strength
-    classification still exists and is still recorded; it is no longer a
-    pass/fail condition here.
-    """
-    direct_ids = {
-        need.evidence_need_id
-        for need in search_plan.evidence_needs
-        if need.requirement_type == "direct"
-    }
-    if not direct_ids:
-        return decision
-    verified_ids = {
-        need_id
-        for result in results
-        if result.evidence_depth == "original_source"
-        and result.original_content
-        and result.verification is not None
-        for need_id in result.evidence_need_ids
-    }
-    missing = direct_ids - verified_ids
-    if not missing:
-        return decision
-    candidates = [
-        SourceToInspect(
-            url=result.url,
-            reason="DIRECT requirement needs verified original source",
-            target_information=sorted(missing & set(result.evidence_need_ids)),
-        )
-        for result in results
-        if result.evidence_depth != "original_source"
-        and result.url not in inspected_urls
-        and result.query_role == "direct"
-        and (not result.evidence_need_ids or missing & set(result.evidence_need_ids))
-    ]
-    existing = {item.url for item in decision.sources_to_inspect}
-    combined = [*decision.sources_to_inspect]
-    combined.extend(item for item in candidates if item.url not in existing)
-    return decision.model_copy(update={
-        "sufficient": False,
-        "structural_sufficient": False,
-        "needs_full_text": bool(combined),
-        "sources_to_inspect": combined,
-        "missing": list(dict.fromkeys([
-            *decision.missing,
-            *(f"verified original source for {need_id}" for need_id in sorted(missing)),
-        ])),
-        "reason": "DIRECT requirements are not linked to verified original source text",
-    })
 
 
 def research(
     question: str,
     config: SourceRouterConfig | None = None,
     *,
-    answer_requirements: list[str] | None = None,
-    evidence_requirements: list[str] | None = None,
     purpose_id: str | None = None,
     purpose_confidence: str | None = None,
     audience: str | None = None,
+    as_of_date: str | None = None,
     excluded_urls: list[str] | None = None,
     excluded_domains: list[str] | None = None,
 ) -> SourceRouterResult:
@@ -446,23 +388,25 @@ def research(
     (search_call_budget_exhausted) from "every gap-loop round ran without
     ever reaching sufficient" (gap_loop_iterations_exhausted) - three
     genuinely different situations for whoever reads the result to reason
-    about, previously indistinguishable."""
+    about, previously indistinguishable.
+
+    No entity-derived input (answer_requirements/evidence_requirements)
+    reaches this function as of 2026-08-11 — the router judges its own gap
+    coverage entirely from `question` + the accumulated `results`, via
+    coverage.py's check_coverage(), matching this package's original design
+    (cc7d4da) before the entity-coupled refiner.py/
+    _enforce_direct_original_sources hard gate (69704a6) was layered on top
+    and then removed again. `as_of_date` is the one exception: it is not
+    entity-derived (it is `request.created_at`, see common/contracts.py),
+    and is still threaded through so freshness-sensitive queries anchor on
+    the real current date."""
     config = config or SourceRouterConfig()
     search_plan: SearchPlan = planner_module.plan_searches(
         question,
         audience=audience,
         purpose_id=purpose_id,
         purpose_confidence=purpose_confidence,
-        model_override=config.planner_model,
-        timeout_seconds=config.call_timeout_seconds,
-    )
-    search_plan = refiner_module.refine_search_plan(
-        question,
-        search_plan,
-        answer_requirements or (),
-        evidence_requirements or (),
-        purpose_id=purpose_id,
-        max_total_queries=config.max_planned_queries,
+        as_of_date=as_of_date,
         model_override=config.planner_model,
         timeout_seconds=config.call_timeout_seconds,
     )
@@ -490,8 +434,28 @@ def research(
     results = _merge_results([], results, config.max_results)
     search_call_count += used
 
-    coverage_history: list[CoverageDecision] = []
     inspected_urls: set[str] = set()
+    # Eagerly inspect the direct-priority batch's own real text, rather than
+    # waiting on coverage.py's needs_full_text request - see
+    # SourceRouterConfig.max_auto_inspect_direct_results for why (bounded to
+    # this one batch, not every round, to respect Firecrawl's rate limit).
+    # A failed/None inspection just leaves that result at search_summary
+    # depth, same as if this loop never ran - not a hard requirement.
+    for candidate in [
+        result for result in results
+        if result.query_role == "direct" and result.evidence_depth != "original_source"
+    ][:config.max_auto_inspect_direct_results]:
+        inspected_urls.add(candidate.url)
+        inspected = _inspect_source(question, candidate, config)
+        if inspected is not None:
+            results = _merge_results(results, [inspected], config.max_results)
+
+    coverage_history: list[CoverageDecision] = []
+    # Accumulates every round's CoverageDecision.rejected_claims so the next
+    # check_coverage() call can remind the model what it already fabricated
+    # once (2026-08-11) - the payload otherwise carries no memory between
+    # calls, so an ungrounded claim could otherwise repeat every round.
+    rejected_claims_so_far: list[str] = []
 
     def _finish(
         stop_reason: StopReason, *, rounds_completed: int, final_coverage: CoverageDecision | None
@@ -519,13 +483,12 @@ def research(
             question,
             search_plan,
             results,
+            previously_rejected_claims=rejected_claims_so_far,
             model_override=config.planner_model,
             timeout_seconds=config.call_timeout_seconds,
         )
-        decision = _enforce_direct_original_sources(
-            decision, search_plan, results, inspected_urls
-        )
         coverage_history.append(decision)
+        rejected_claims_so_far.extend(decision.rejected_claims)
         results_changed_since_last_check = False
 
         if decision.sufficient:
@@ -533,13 +496,31 @@ def research(
 
         if decision.needs_full_text and decision.sources_to_inspect:
             new_evidence: list[WebSearchResult] = []
-            for source in decision.sources_to_inspect[: config.max_sources_to_inspect]:
+            # Select first, THEN cap (2026-08-11) - the cap used to slice
+            # decision.sources_to_inspect before the already-inspected/not-in-
+            # pool entries were skipped, so those entries consumed budget
+            # without ever producing a scrape. That was harmless while the cap
+            # was 15 (== max_results, so it never bound), but the eager direct
+            # batch now pre-fills inspected_urls with up to
+            # max_auto_inspect_direct_results URLs, and coverage tends to list
+            # the most relevant sources first - exactly the ones already
+            # inspected. Filtering first makes the cap mean "this many NEW
+            # sources", which is what it reads as.
+            selected: list[WebSearchResult] = []
+            for source in decision.sources_to_inspect:
+                if len(selected) >= config.max_sources_to_inspect:
+                    break
                 if source.url in inspected_urls:
                     continue
-                inspected_urls.add(source.url)
                 candidate = next((result for result in results if result.url == source.url), None)
                 if candidate is None:
                     continue
+                # Marked here, not after the attempt, so a failed inspection
+                # isn't retried next round (unchanged behavior) and a URL
+                # listed twice in one decision is only inspected once.
+                inspected_urls.add(source.url)
+                selected.append(candidate)
+            for candidate in selected:
                 inspected = _inspect_source(question, candidate, config)
                 if inspected is not None:
                     new_evidence.append(inspected)
@@ -595,11 +576,9 @@ def research(
             question,
             search_plan,
             results,
+            previously_rejected_claims=rejected_claims_so_far,
             model_override=config.planner_model,
             timeout_seconds=config.call_timeout_seconds,
-        )
-        final_decision = _enforce_direct_original_sources(
-            final_decision, search_plan, results, inspected_urls
         )
         coverage_history.append(final_decision)
 

@@ -10,7 +10,7 @@
 
 ## Inputs
 
-세 가지 입력을 받습니다.
+네 가지 입력을 받습니다.
 
 - `question`: 사용자의 실제 질문입니다. 항상 최우선 기준입니다.
 - `audience`: 결과 보고서를 보게 될 대상입니다. 호출 측에서 아직 알 수 없는 경우 literal string `"unspecified"`를 사용합니다. 다음 중 하나입니다.
@@ -23,6 +23,7 @@
   - `issue_response` — 발생한 문제나 이슈에 대한 대응이 필요한 질문입니다.
   - `future_business` — 미래 지향적 기회 또는 전략을 묻는 질문입니다.
   - `root_cause` — "왜 이런 일이 발생했는가"를 구조적으로 규명하는 질문입니다.
+- `as_of_date`: 오늘 날짜입니다 (YYYY-MM-DD). 호출 측에서 알 수 없는 경우 literal string `"unknown"`을 사용합니다. freshness가 중요한 query에 연도나 날짜 표현을 넣을 때는 반드시 이 날짜를 기준으로 판단하십시오 — 학습 데이터에 남아있는 임의의 과거 연도를 사용하지 마십시오. 함께 주어지는 `recency_hint`는 이 질문에 대해 시스템이 추정한 적정 검색 기간입니다(예: "최근 90일 이내", "특별한 기간 제약 없음") — 참고용 가이드이며, 질문 자체가 이와 다른 기간을 명시하면 질문을 우선하십시오.
 
 STEP 2.5는 `purpose_id`를 사용해 candidate search angle을 확장합니다. `purpose_id`가 `"infer"`이면 모델이 직접 분류합니다. STEP 2.6은 `audience`를 사용해 어떤 angle이 더 중요한지와 표현 방식을 조정합니다. `audience`가 `"unspecified"`이면 이 단계를 건너뜁니다. **두 단계 모두 STEP 2의 일반 candidate generation을 대체하지 않으며, 추가로 확장하는 역할만 합니다.**
 
