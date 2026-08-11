@@ -6,7 +6,6 @@ import json
 import os
 import re
 import sys
-import unicodedata
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -14,6 +13,7 @@ from openai import OpenAI
 
 from common.ai_usage import emit_ai_usage
 from common.ai_client import openai_client_kwargs
+from common.analyzer_quality import normalize_quote
 from common.content_quality_validator import (
     COMPARISON_COMPLETENESS_INSTRUCTION,
     SWOT_COMPLETENESS_INSTRUCTION,
@@ -118,7 +118,11 @@ _ANALYSIS_SCHEMA = {
                         "type": "string",
                         "enum": ["key_point", "business_impact", "risk", "opportunity", "strength", "weakness", "comparison", "metric", "factor", "action", "monitoring"],
                     },
-                    "claim": {"type": "string", "maxLength": 350},
+                    "claim": {
+                        "type": "string", "maxLength": 350,
+                        "description": "한국어로 쓸 것. 원문이 영어 등 다른 언어여도 반드시 한국어로 번역·요약. "
+                                        "고유명사(회사명·제품명 등)만 원문 표기 유지 가능.",
+                    },
                     "evidence_passage_id": {
                         "type": ["string", "null"],
                         "maxLength": 80,
@@ -152,7 +156,7 @@ _ANALYSIS_SCHEMA = {
                     "importance_basis": {
                         "type": ["string", "null"],
                         "maxLength": 240,
-                        "description": "그 중요도로 본 이유. importance를 채웠으면 필수.",
+                        "description": "그 중요도로 본 이유. importance를 채웠으면 필수. 반드시 한국어로 작성.",
                     },
                 },
                 "required": ["claim_id", "claim_type", "claim", "evidence_passage_id", "evidence_quote", "evidence_location", "as_of_date", "parent_claim_id", "importance", "importance_basis"],
@@ -523,12 +527,7 @@ def _selected_pdf_chunks(
 
 def _normalized_text(value: str) -> str:
     """Normalize extraction artifacts without weakening factual matching."""
-    value = unicodedata.normalize("NFKC", value)
-    value = value.replace("\u00a0", " ").replace("\u00ad", "")
-    value = re.sub(r"[\u200b-\u200d\u2060\ufeff]", "", value)
-    # PDF extraction often inserts a line break and hyphen inside one word.
-    value = re.sub(r"(?<=\w)-\s*\r?\n\s*(?=\w)", "", value)
-    return " ".join(value.split())
+    return normalize_quote(value)
 
 
 def _split_evidence_passages(content: str) -> list[dict[str, str]]:
@@ -1107,9 +1106,15 @@ def _semantically_complete_label(text: str, *, context: str = "sentence") -> boo
         context == "table" and candidate in _TABLE_STRUCTURAL_LABELS
     ):
         return False
-    # An unmatched closing bracket means the split landed inside a
-    # parenthetical: "008억 원) 대비" kept the tail of "(9,008억 원)".
+    # An unmatched bracket in either direction means the split landed inside
+    # a parenthetical: "008억 원) 대비" kept the tail of "(9,008억 원)", and
+    # "IPTV 점유율(B" (an unmatched *open* paren - live-verified 2026-08-11,
+    # a table column header like "점유율(B수치)" split mid-parenthetical the
+    # other way) kept the head. Both read as a real, complete-looking label
+    # on their own, so only the bracket count reveals either is a fragment.
     if candidate.count(")") > candidate.count("(") or candidate.count("）") > candidate.count("（"):
+        return False
+    if candidate.count("(") > candidate.count(")") or candidate.count("（") > candidate.count("）"):
         return False
     # A fragment that starts mid-number ("006가구 내") is the far end of a
     # figure the boundary split cut through.
@@ -1118,14 +1123,11 @@ def _semantically_complete_label(text: str, *, context: str = "sentence") -> boo
     return True
 
 
-def _metric_label_before(text: str, position: int, fallback: str) -> str:
-    prefix = text[:position]
-    # Protect the numeric spans, split on real clause boundaries, restore.
-    masked = _GROUPED_NUMBER_RE.sub(
-        lambda m: m.group().replace(",", _COMMA_SENTINEL), prefix
-    )
-    fragment = _METRIC_LABEL_BOUNDARY_RE.split(masked)[-1].replace(_COMMA_SENTINEL, ",")
-    fragment = re.sub(r"^[\s*#|:'\"([{]+|[\s*#|:'\"([{]+$", "", fragment).strip()
+def _clean_label_fragment(fragment: str) -> str:
+    """Shared cleanup for a raw clause-boundary split, either direction."""
+    fragment = re.sub(
+        r"^[\s*#|:'\"“”‘’([{]+|[\s*#|:'\"“”‘’([{]+$", "", fragment
+    ).strip()
     fragment = re.sub(r"\b20\d{2}\s*년?\b", "", fragment).strip(" :-()[]")
     fragment = re.sub(r"^\d+(?:\.\d+)?\s*%p?\s*(?:로|보다|에서)?\s*", "", fragment)
     if fragment.endswith("전년"):
@@ -1134,9 +1136,116 @@ def _metric_label_before(text: str, position: int, fallback: str) -> str:
     # judging completeness, so "으로 전년 대비 증감" can still recover as
     # "전년 대비 증감" rather than being thrown away wholesale.
     fragment = _DANGLING_LABEL_PREFIX_RE.sub("", fragment).strip()
+    return fragment
+
+
+def _trim_trailing_fragment(text: str, limit: int) -> str:
+    """Keep at most `limit` trailing characters without starting mid-token.
+
+    Live-verified 2026-08-11: a plain `text[-limit:]` on a long clause landed
+    inside the compound number "1조 3,674억 원" and kept only "674억 원으로
+    전년" - a stray-looking figure fragment stitched onto whatever number
+    followed it in the next label slot. Drops the leading partial word
+    instead, even if that leaves fewer than `limit` characters.
+    """
+    if len(text) <= limit:
+        return text
+    truncated = text[-limit:]
+    if text[-limit - 1] not in " \t\n":
+        first_space = truncated.find(" ")
+        truncated = truncated[first_space + 1:] if first_space != -1 else ""
+    return truncated
+
+
+def _trim_leading_fragment(text: str, limit: int) -> str:
+    """The forward-reading twin of `_trim_trailing_fragment` - see there."""
+    if len(text) <= limit:
+        return text
+    truncated = text[:limit]
+    if text[limit] not in " \t\n":
+        last_space = truncated.rfind(" ")
+        truncated = truncated[:last_space] if last_space != -1 else ""
+    return truncated
+
+
+def _metric_label_before(text: str, position: int, fallback: str) -> str:
+    prefix = text[:position]
+    # Protect the numeric spans, split on real clause boundaries, restore.
+    masked = _GROUPED_NUMBER_RE.sub(
+        lambda m: m.group().replace(",", _COMMA_SENTINEL), prefix
+    )
+    fragment = _clean_label_fragment(
+        _METRIC_LABEL_BOUNDARY_RE.split(masked)[-1].replace(_COMMA_SENTINEL, ",")
+    )
     if not _semantically_complete_label(fragment):
         fragment = fallback
-    return fragment[-70:].strip()
+    return _trim_trailing_fragment(fragment, 70).strip()
+
+
+def _metric_label_after(text: str, position: int) -> str:
+    """A subject named right after the number, not before it.
+
+    `_metric_label_before` has nothing to work with when the number leads the
+    quote entirely - live-verified 2026-08-11: bullet-point survey findings
+    are commonly written "<percent>, <description>" (`**\\- 71.1%, "'롱폼
+    콘텐츠', 숏폼과 달리 깊이감 있어"**`), so `text[:position]` is empty or
+    just markdown/punctuation. Korean headline phrasing like this often
+    juxtaposes the subject before a comma with no topic particle attached at
+    all ("'롱폼 콘텐츠', 숏폼과 달리..." - not "롱폼 콘텐츠는"), so this reads
+    up to the same clause boundary `_metric_label_before` reads backward from
+    (comma, sentence end, etc.) rather than requiring a particle - the first
+    clause after the number is the subject a reader would take it to be.
+    """
+    # The number sits right at the start of `suffix` (that's the whole reason
+    # this function is being tried), almost always followed immediately by
+    # its own delimiter - "71.1%," - so splitting without stripping that
+    # leading delimiter first returns an empty leading segment, not the
+    # clause after it.
+    suffix = text[position:].lstrip("*\\").lstrip(",.;: \t")
+    masked = _GROUPED_NUMBER_RE.sub(
+        lambda m: m.group().replace(",", _COMMA_SENTINEL), suffix
+    )
+    segments = [
+        segment for segment in _METRIC_LABEL_BOUNDARY_RE.split(masked) if segment.strip()
+    ]
+    if not segments:
+        return ""
+    fragment = _clean_label_fragment(segments[0].replace(_COMMA_SENTINEL, ","))
+    return _trim_leading_fragment(fragment, 70).strip() if _semantically_complete_label(fragment) else ""
+
+
+_BASELINE_QUALIFIER_RE = re.compile(r"(전년(?:\s*동기)?|직전(?:\s*분기|\s*연도)?|전월|지난해|전분기)\s*\(\s*$")
+
+
+def _parenthetical_baseline_qualifier(text: str, position: int) -> str | None:
+    """A baseline word ("전년", "직전분기", ...) sitting right before the
+    open paren a same-subject comparison figure lives inside.
+
+    Live-verified 2026-08-11: "...채널제공 매출액은 1조 3,674억 원으로
+    전년(1조 3,008억 원) 대비..." - the 3,008억원 inside the parens has no
+    label of its own (`_semantically_complete_label` rejects it as an
+    unmatched-paren fragment, by design: it *is* one), so the caller falls
+    back to reusing its sibling figure's label verbatim. Two different
+    numbers under the identical "Key Comparisons" label read as one label
+    smeared across two bars. This only supplies a qualifier to distinguish
+    them - it never manufactures a label from nothing.
+    """
+    paren_start = text.rfind("(", 0, position)
+    if paren_start == -1:
+        return None
+    match = _BASELINE_QUALIFIER_RE.search(text[:paren_start + 1])
+    return match.group(1) if match else None
+
+
+def _metric_label_near(text: str, start: int, end: int, fallback: str) -> str:
+    """Prefer the text before the number; only read after it if that failed.
+
+    Both directions read the same clause a reader would - the label is
+    whichever side of the number actually names what was measured. Falling
+    all the way to `fallback` (usually the whole claim sentence) only
+    happens when neither side offers a real label.
+    """
+    return _metric_label_before(text, start, "") or _metric_label_after(text, end) or fallback
 
 
 def _canonical_recovered_unit(unit: str) -> str:
@@ -1690,7 +1799,7 @@ def _recovered_metric_points(
         matches = list(_GROUNDED_METRIC_RE.finditer(quote))
         list_contexts = _list_metric_contexts(quote, matches)
         base_label = (
-            _metric_label_before(quote, matches[0].start(), claim.get("claim") or "수치")
+            _metric_label_near(quote, matches[0].start(), matches[0].end(), claim.get("claim") or "수치")
             if matches else claim.get("claim") or "수치"
         )
         last_label: str | None = None
@@ -1717,7 +1826,7 @@ def _recovered_metric_points(
                     metric_start = previous.start()
             if value.is_integer():
                 value = int(value)
-            local_label = _metric_label_before(quote, metric_start, "")
+            local_label = _metric_label_near(quote, metric_start, match.end(), "")
             if (
                 local_label.casefold() in _WEAK_METRIC_LABELS
                 or len(local_label) < 2
@@ -1740,12 +1849,25 @@ def _recovered_metric_points(
                     subject = None
                 if not _semantically_complete_label(label or ""):
                     label = base_label
+                # A heading shared by every figure in its list ("...채널제공
+                # 매출액은") does not by itself tell a same-year figure apart
+                # from the "전년(...)" one right beside it - same fix as the
+                # plain-label branch below, needed here too since a heading
+                # match takes priority over `local_label`.
+                if not local_label:
+                    qualifier = _parenthetical_baseline_qualifier(quote, metric_start)
+                    if qualifier and label:
+                        label = f"{label} ({qualifier})"
                 last_label = label
             elif canonical_unit == "%p":
                 label = f"{last_label or base_label} 증감폭"
                 subject = None
             else:
                 label = local_label or last_label or base_label
+                if not local_label:
+                    qualifier = _parenthetical_baseline_qualifier(quote, metric_start)
+                    if qualifier and label:
+                        label = f"{label} ({qualifier})"
                 subject = local_label or None
                 last_label = label
             is_relative, comparison_period = relative_metric_context(quote)

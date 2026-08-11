@@ -219,8 +219,8 @@ Bash 힙독(heredoc)에 파이썬을 넣으면 따옴표가 자주 망가진다 
 2. **진단부터.** 실제 실행 JSON / 브라우저 / 직접 호출로 현상을 재현하라. 코드만 읽고
    원인을 추정하지 마라.
 3. **픽스처로 회귀 확인.** `tests/fixtures/synthesis_*.json` 9개 전부.
-4. `pytest -q` 통과. 현재 기준 **968 passed, 2 skipped** (2026-08-10, Source Router
-   통합). 숫자는 새 테스트가 추가되면 실제 실행 결과로 갱신한다.
+4. `pytest -q` 통과. 현재 기준 **1412 passed, 2 skipped** (2026-08-11, Source
+   Router grounding/pacing PR #32 반영). 숫자는 새 테스트가 추가되면 실제 실행 결과로 갱신한다.
    외부 호출이 없는지까지 확인하려면 소켓을 막고 키를 지운 채 돌려라 — 통합 시점에
    이 조건에서 동일하게 통과하는 것을 확인했다.
 5. 프롬프트 규칙을 건드렸으면 `tests/test_prompt_invariants.py`에 불변식 추가.
@@ -458,6 +458,6 @@ evidence requirement**(예: 연령대 × 같은 매체 reach, 회사 × 같은 �
   브랜드 인지도·선호도, 모델 선호·브랜드 적합도, 롱폼·숏폼, 셋톱박스 원가처럼
   서로 다른 측정값은 분리한다. 문자열이 비슷하다는 이유로 통합하지 않는다.
 
-이 상태의 회귀 기준은 `python -m pytest -q`의 **968 passed, 2 skipped**다(2026-08-10,
-Source Router 통합 이후). 문서만 고치는 작업에서는 코드·프롬프트·테스트를 함께 바꾸지
+이 상태의 회귀 기준은 `python -m pytest -q`의 **1412 passed, 2 skipped**다(2026-08-11,
+Source Router grounding/pacing PR #32 이후). 문서만 고치는 작업에서는 코드·프롬프트·테스트를 함께 바꾸지
 않는다.

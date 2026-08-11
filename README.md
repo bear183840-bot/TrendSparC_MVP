@@ -130,7 +130,7 @@ streamlit run reporting/dashboard_streamlit/app.py --server.port 8503
 python -m pytest -q
 ```
 
-현재 기준은 `2f2ba86`에서 **878 passed, 2 skipped**입니다. 라우팅, 소스 계획,
+현재 기준은 **1412 passed, 2 skipped**입니다(2026-08-11). 라우팅, 소스 계획,
 어댑터, 근거 검증, 수치·비교 구조화, 목적별 슬롯, 블록 적격성, Streamlit 렌더링,
 payload 예산과 전체 dry-run을 포함합니다.
 

@@ -329,7 +329,10 @@ if result is not None and st.session_state.get("sidebar_page") == "artifact_prev
 
 if result is None:
     _html(
-        '<section class="ts-landing">' + wordmark_html(large=True) +
+        '<section class="ts-landing">'
+        '<p class="ts-landing-tagline">질문 하나로 검색·검증·시각화를 거쳐 '
+        '사용자 맞춤 대시보드가 됩니다</p>'
+        + wordmark_html(large=True) +
         '<h1 class="ts-question-title">What Trend should we Spark?</h1></section>'
     )
     with st.form("intake_form"):
@@ -389,26 +392,27 @@ if result is None:
     # redraw one - so a full PipelineResult JSON is what this takes. It means
     # a live run can be executed once, on the command line where its stderr
     # is readable, and still be reviewed here in its finished form.
-    with st.expander("저장된 실행 결과 열기"):
-        uploaded_result = st.file_uploader(
-            "PipelineResult JSON", type="json", key="result_upload",
-            label_visibility="collapsed",
-        )
-        if uploaded_result is not None:
-            try:
-                # A saved result is replayed, not re-synthesised, so a run
-                # archived under an older rule keeps that rule's losses. This
-                # re-applies today's grounding rule to points the run already
-                # verified and stored; it derives nothing new.
-                loaded = repair_dropped_comparison_points(
-                    PipelineResult.model_validate_json(uploaded_result.getvalue())
-                )
-            except Exception as exc:  # noqa: BLE001
-                st.error(f"이 파일은 실행 결과로 읽히지 않습니다: {exc}")
-            else:
-                st.session_state.result = loaded
-                st.session_state.submitted_question = _archived_question(loaded)
-                st.rerun()
+    with st.container(key="landing_saved_run"):
+        with st.expander("저장된 실행 결과 열기"):
+            uploaded_result = st.file_uploader(
+                "PipelineResult JSON", type="json", key="result_upload",
+                label_visibility="collapsed",
+            )
+            if uploaded_result is not None:
+                try:
+                    # A saved result is replayed, not re-synthesised, so a run
+                    # archived under an older rule keeps that rule's losses. This
+                    # re-applies today's grounding rule to points the run already
+                    # verified and stored; it derives nothing new.
+                    loaded = repair_dropped_comparison_points(
+                        PipelineResult.model_validate_json(uploaded_result.getvalue())
+                    )
+                except Exception as exc:  # noqa: BLE001
+                    st.error(f"이 파일은 실행 결과로 읽히지 않습니다: {exc}")
+                else:
+                    st.session_state.result = loaded
+                    st.session_state.submitted_question = _archived_question(loaded)
+                    st.rerun()
 
     if submitted:
         if not question.strip():
@@ -452,24 +456,25 @@ if result is None:
             worker = threading.Thread(target=_run_pipeline_in_background, daemon=True)
             worker.start()
 
-            with st.status("관련 근거를 수집하고 의사결정 흐름을 구성하고 있습니다...", expanded=True) as status:
-                shown = 0
-                while worker.is_alive():
-                    pending = progress_events[shown:]
-                    for event in pending:
-                        icon, label, _ = _STATUS_LABELS.get(event.status, ("·", event.status, ""))
-                        detail = f" · {event.document_count}건" if event.status == "completed" else ""
-                        status.update(
-                            label=f"[{event.source_index}/{event.source_total}] {event.source_name} — {label}{detail}"
-                        )
-                        st.write(f"{icon} [{event.source_index}/{event.source_total}] {event.source_name} — {label}{detail}")
-                    shown = len(progress_events)
-                    time.sleep(0.4)
-                worker.join()
-                if run_outcome.get("error") is not None:
-                    status.update(label="오류가 발생했습니다.", state="error", expanded=True)
-                else:
-                    status.update(label="수집·분석이 끝났습니다.", state="complete", expanded=False)
+            with st.container(key="run_progress_status"):
+                with st.status("관련 근거를 수집하고 의사결정 흐름을 구성하고 있습니다...", expanded=True) as status:
+                    shown = 0
+                    while worker.is_alive():
+                        pending = progress_events[shown:]
+                        for event in pending:
+                            icon, label, _ = _STATUS_LABELS.get(event.status, ("·", event.status, ""))
+                            detail = f" · {event.document_count}건" if event.status == "completed" else ""
+                            status.update(
+                                label=f"[{event.source_index}/{event.source_total}] {event.source_name} — {label}{detail}"
+                            )
+                            st.write(f"{icon} [{event.source_index}/{event.source_total}] {event.source_name} — {label}{detail}")
+                        shown = len(progress_events)
+                        time.sleep(0.4)
+                    worker.join()
+                    if run_outcome.get("error") is not None:
+                        status.update(label="오류가 발생했습니다.", state="error", expanded=True)
+                    else:
+                        status.update(label="수집·분석이 끝났습니다.", state="complete", expanded=False)
 
             if run_outcome.get("error") is not None:
                 st.session_state.terminal_log = log_buffer.getvalue()

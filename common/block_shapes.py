@@ -250,6 +250,99 @@ def has_grouped_bars(metric_points: list[Any]) -> bool:
     return bool(grouped_bar_series(metric_points))
 
 
+def _strip_leading_subject(label: str, subject: str) -> str:
+    """`label` with a leading exact copy of `subject` removed, if present.
+
+    Case/whitespace-insensitive so "KT 점유율" strips to "점유율" regardless
+    of how the subject itself was cased. Only a *leading* match is removed -
+    "IPTV 대비 SO 점유율" keeps "IPTV" since it names something else first.
+    """
+    subject_clean = subject.strip().casefold()
+    if not subject_clean:
+        return label
+    lowered = label.casefold()
+    if lowered.startswith(subject_clean):
+        return label[len(subject_clean):].strip()
+    return label
+
+
+def _has_unbalanced_bracket(text: str) -> bool:
+    """A dangling `(`/`)` (or full-width `（`/`）`) means the text is a cut
+    fragment of a parenthetical, not a complete label - live-verified
+    2026-08-11: "KT 점유율 (B" (an unclosed paren from a source table's own
+    "(A안)"/"(B안)" column sub-headers) read as a complete, distinct
+    attribute next to the genuinely complete "KT 시장점유율", multiplying
+    one real figure into several fake ones.
+    """
+    return (
+        text.count("(") != text.count(")")
+        or text.count("（") != text.count("）")
+    )
+
+
+def entity_attribute_groups(metric_points: list[Any]) -> list[tuple[str, list[Any]]]:
+    """(subject, points) for two or more subjects each measured on several of
+    their OWN distinct percentage attributes, with no shared category between
+    subjects at all - "롱폼 콘텐츠: 깊이감 71.1%, 전문지식 습득 68.4%" and
+    "숏폼 콘텐츠: 가성비 구독 64.7%, 광고 요금제 34.8%" name two subjects
+    whose attributes don't overlap, so `grouped_bar_series` (which requires
+    the *same* categories measured for every subject) can never group them -
+    each subject would need a value for the other's attributes that no
+    source stated.
+
+    General condition, not this question's vocabulary: any 2+ subjects with
+    2+ distinct attribute labels each. A subject whose points already carry
+    a stated `share_of` is excluded - that is a real composition, drawn by
+    `share_groups` instead, and showing it here too would be the same data
+    twice. Without `share_of` nothing else ever draws it as a composition,
+    so a coincidental sum near 100% is not reason enough to hide it -
+    live-verified 2026-08-11: the real "숏폼 콘텐츠" case (가성비 구독
+    64.7% + 광고 요금제 34.8%) sums to 99.5% by coincidence despite being
+    two unrelated survey answers, not a stated whole split in two.
+    """
+    by_subject: dict[str, dict[str, Any]] = {}
+    for point in metric_points:
+        subject = (getattr(point, "subject", None) or "").strip()
+        label = (point.label or "").strip()
+        if not subject or (point.unit or "").strip() not in {"%", "％"}:
+            continue
+        if not label or _has_unbalanced_bracket(label):
+            continue
+        # A label that just restates the subject ("subject: IPTV, label:
+        # IPTV") names no attribute at all - live-verified 2026-08-11, a
+        # table-cell recovery path falls back to the bare entity name as the
+        # label when its own column header didn't survive cleanly, and that
+        # fallback must not be read as a real attribute here.
+        if semantic_metric_key(label) == semantic_metric_key(subject):
+            continue
+        # One point per semantic label per subject, not per exact string -
+        # "KT 점유율"/"KT 시장점유율" from two different source passages are
+        # the same attribute stated twice, not two attributes, even though
+        # their raw label text differs. The subject name is stripped from
+        # the front first: `semantic_metric_key` keeps topic-bearing words
+        # on purpose (so "HBM market size" and "DRAM market size" stay
+        # separate), which is right for a *label* but means a subject's own
+        # name baked into its own label ("KT 점유율" vs "KT 시장점유율")
+        # would never collapse without this - the alias entries this relies
+        # on ("시장점유율"/"점유율" -> "market share") are entity-neutral by
+        # design, see common/content_quality_validator.py.
+        attribute_key = semantic_metric_key(_strip_leading_subject(label, subject))
+        by_subject.setdefault(subject, {}).setdefault(attribute_key, point)
+    groups: list[tuple[str, list[Any]]] = []
+    for subject, by_label in by_subject.items():
+        points = list(by_label.values())
+        if len(points) < 2:
+            continue
+        if all(getattr(point, "share_of", None) for point in points):
+            continue
+        groups.append((subject, points))
+    return groups if len(groups) >= 2 else []
+
+
+def has_entity_attribute_bars(metric_points: list[Any]) -> bool:
+    return bool(entity_attribute_groups(metric_points))
+
+
 def status_levels(comparison_points: list[Any], limit: int = 4) -> list[tuple[str, str, str]]:
     """(criterion, entity + value, level) for the artwork's KPI status bar.
 
@@ -686,8 +779,16 @@ def _landscape_context(points: list[Any]) -> tuple[set[str], set[str], set[str],
         families.add("market_size")
     if re.search(r"\b(?:share|cagr|growth|rate)\b|점유율|비중|구성비|성장률|증가율|감소율|증감률", raw):
         families.add("market_structure")
+    # Year-only, not the full (flag, year, quarter) sort key: this is an
+    # "are these two blocks describing the same time context" overlap test,
+    # not a chronological ordering, and a trend point stated as a bare
+    # "2025년" legitimately shares its year with a share point stated as
+    # "2025년 상반기" - narrowing this to full sort-key equality would make
+    # a landscape's donut incompatible with its own trend chart the moment
+    # either side states a quarter/half the other doesn't, for no reason
+    # this check actually cares about.
     periods = {
-        period_sort_key(getattr(point, "period", ""))
+        period_sort_key(getattr(point, "period", ""))[:2]
         for point in points if is_time_period(getattr(point, "period", ""))
     }
     return topics, scopes, families, periods
@@ -1255,10 +1356,22 @@ def importance_ranked(grounded_claims: list[Any], limit: int = 5) -> list[Any]:
     Only claims carrying both a score and its stated basis - the verifier
     drops one without the other, and a renderer must show the basis, so a
     claim that can't explain its own score never reaches a bar.
+
+    Restricted to `claim_type == "factor"` - live-verified 2026-08-11: this
+    fed "Key Drivers" (block_title "driver_bars") from every claim type the
+    model happened to score, so an `opportunity` claim like "AI 메모리 수요
+    증가에 기반한 시장 성장 기회가 있다" or a `risk` claim ended up ranked
+    under a heading that promises causes, not general findings. `factor` is
+    the one claim_type the schema defines as "무엇이 그것을 좌우하는가" - an
+    actual driver/reason, not a fact, impact, or opportunity about the
+    subject. A `business_impact`/`risk`/`opportunity` claim can still be
+    important; it just isn't a *driver*, and this block's whole promise is
+    that ranking.
     """
     scored = [
         claim for claim in grounded_claims
-        if getattr(claim, "importance", None) is not None
+        if getattr(claim, "claim_type", None) == "factor"
+        and getattr(claim, "importance", None) is not None
         and (getattr(claim, "importance_basis", None) or "").strip()
     ]
     return sorted(scored, key=lambda claim: claim.importance, reverse=True)[:limit]
@@ -1421,36 +1534,46 @@ def rank_kpi_candidates(
     return candidates[:limit]
 
 
-def headline_kpi(metric_points: list[Any], question: str | None) -> Any | None:
+def headline_kpi(
+    metric_points: list[Any], question: str | None, core_entities: list[str] | None = None,
+) -> Any | None:
     """The one figure that answers the question, or None if there isn't one.
 
     Deliberately not a new notion of importance. It is the top of
     `rank_kpi_candidates` - the same relevance-over-recency ranking the KPI
-    grid already uses - narrowed by the two conditions that make a figure
+    grid already uses - narrowed by the conditions that make a figure
     quotable on its own:
 
     * it is grounded, meaning it carries the claim id of a quote verified
       against the source text (`evidence_claim_id`), and a document to go
       back to;
     * it actually answers *this* question, meaning its label matches at
-      least one term of it.
+      least one term of it;
+    * when `core_entities` is given (see `executive_summary_supporting_kpis`
+      for why - generic sector words like "배터리" match a market-wide
+      figure exactly as well as the company being asked about), it also
+      names one of them.
 
-    The second condition is what leaves the slot empty rather than filling
-    it. A question that no single number answers - "왜 가입자가 줄었나" - has
-    no headline KPI, and putting the largest figure lying around there would
-    assert a relevance nothing established.
+    These are what leave the slot empty rather than filling it. A question
+    that no single number answers - "왜 가입자가 줄었나" - has no headline
+    KPI, and putting the largest figure lying around there would assert a
+    relevance nothing established.
     """
     terms = [term.casefold() for term in (question or "").split() if len(term) >= 2]
     if not terms:
         return None
+    entities = [entity.casefold() for entity in (core_entities or []) if entity]
     for point in rank_kpi_candidates(metric_points, (question or "").split()):
         if not getattr(point, "evidence_claim_id", None):
             continue
         if not (getattr(point, "doc_id", None) or getattr(point, "source_url", None)):
             continue
         label = f"{getattr(point, 'label', '') or ''} {getattr(point, 'subject', '') or ''}".casefold()
-        if any(term in label for term in terms):
-            return point
+        if not any(term in label for term in terms):
+            continue
+        if entities and not any(entity in label for entity in entities):
+            continue
+        return point
     return None
 
 
@@ -1462,6 +1585,7 @@ def executive_summary_supporting_kpis(
     question: str | None,
     headline_point: Any | None,
     limit: int = _EXEC_SUMMARY_KPI_LIMIT,
+    core_entities: list[str] | None = None,
 ) -> list[Any]:
     """A few more figures worth a small KPI card beside the summary's
     headline number - "[핵심 메시지] [KPI][KPI][KPI]", never a text
@@ -1471,8 +1595,31 @@ def executive_summary_supporting_kpis(
     metric the headline already shows - a caller seeds these into
     `resolve_slots`'s dedup state (see `common/purpose_slots.
     kpi_evidence_key`) so Key Metrics does not repeat them either.
+
+    `core_entities` (the entity stage's own extracted organizations/
+    technologies for this question, when the caller has them) is an
+    optional hard filter on top of the soft ranking. Live-verified
+    2026-08-11: "SK온 배터리 사업 수익성 부진의 원인은?" ranked a
+    2040-forecast humanoid-robot battery-demand figure into a supporting
+    KPI slot, because `rank_kpi_candidates`'s term overlap counts generic
+    sector words ("배터리") the same as the actual company name ("SK온") -
+    a figure about the whole battery market scored exactly as "relevant" as
+    one about the company being asked about. Entities are a much sharper
+    signal (they name *who* the question is about, not just its topic
+    vocabulary), so when they're available, a candidate whose label+subject
+    names none of them is dropped rather than padded in to fill the quota -
+    same "don't force-fill" principle as `_driver_bars`.
     """
     candidates = rank_kpi_candidates(metric_points, (question or "").split())
+    if core_entities:
+        entities = [entity.casefold() for entity in core_entities if entity]
+        candidates = [
+            point for point in candidates
+            if any(
+                entity in f"{getattr(point, 'label', '') or ''} {getattr(point, 'subject', '') or ''}".casefold()
+                for entity in entities
+            )
+        ]
     if headline_point is not None:
         headline_key = semantic_metric_key(getattr(headline_point, "label", None))
         candidates = [

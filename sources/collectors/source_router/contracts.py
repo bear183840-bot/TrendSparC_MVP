@@ -33,7 +33,19 @@ from typing import Any, Literal, Optional
 
 from pydantic import BaseModel, Field
 
-ValueType = Literal["actual", "estimate", "forecast", "target", "guidance"]
+# "planned" added 2026-08-11: live-verified, a web_search KeyFact for a
+# stated roadmap/schedule item ("12단은 2025년에 공급 예정") raised a
+# pydantic ValidationError against the original 5 values, halting the whole
+# collector stage. It is not "target" (a company's own aspirational goal
+# figure) or "guidance" (official forward financial guidance) or "forecast"
+# (an analyst's prediction) - a scheduled roadmap commitment is none of
+# those, so folding it into an existing value would misrepresent what the
+# source actually said rather than just widen a category. This field is
+# populated by a plain-text-prompted model response (see web_search.py's
+# `_system_prompt`, not a strict JSON-schema tool call), so the prompt's own
+# allowed-value list was updated alongside this enum - schema alone doesn't
+# enforce it here.
+ValueType = Literal["actual", "estimate", "forecast", "target", "guidance", "planned"]
 SourceType = Literal["official", "research", "independent", "news", "other"]
 StopReason = Literal[
     "sufficient",

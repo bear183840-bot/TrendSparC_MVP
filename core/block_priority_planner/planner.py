@@ -25,6 +25,7 @@ _REQUIRED_DATA_HINTS: dict[str, str] = {
     "chart": "같은 semantic metric·비교 가능한 단위로 실제 시점 3개 이상의 수치 (비연속 시점 허용, actual/estimate/forecast/target 구분)",
     "landscape": "핵심 시장 추이/스냅샷 1개와 구성비·현재 KPI·주요 주체 비교 중 보완 구조 1개",
     "grouped_bar": "같은 semantic metric·단위로 2개 이상 주체 × 2개 이상 공통 항목에 대해 측정한 수치",
+    "entity_attribute_bars": "%로 측정된 2개 이상 주체 각각에 대해, 그 주체만의 서로 다른 속성 2개 이상 (주체 간 공통 항목 없음, 합계는 100%에 근접하지 않음)",
     "status_bar": "근거가 등급(High/Medium/Low)을 매긴 항목 2개 이상",
     "bar": "같은 semantic metric·단위의 정확히 두 시점 또는 명시적 current/target·before/after 상태",
     "item_bar": "같은 semantic metric·시점/맥락을 2개 이상 주체(기업·연령대 등)에 대해 측정한 수치",

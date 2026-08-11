@@ -26,8 +26,10 @@ from common.block_shapes import (
 )
 from common.block_titles import block_title, slot_title
 from common.content_quality_validator import select_chartable_series
+from common.content_quality_validator import plotted_chart_series
 from common.content_quality_validator import dedupe_across_blocks
 from common.content_quality_validator import exclude_non_competitor_comparisons
+from common.content_quality_validator import is_chart_trend_restatement
 # Importing the package is what registers every block, including the live
 # ones - the registry is only "the one table" if nothing can reach the
 # dashboard without it being populated.
@@ -64,6 +66,7 @@ from reporting.dashboard_streamlit.components import (
     render_footer_note,
     render_metric_bar,
     render_metric_chart,
+    render_metric_insight,
     render_cause_map,
     render_cause_tree,
     render_factor_list,
@@ -215,7 +218,7 @@ _BLOCK_UNITS = {
     "factor_list": 1, "status_bar": 1,
     # Comparisons and actions need two readable columns.
     "benchmark_table": 2, "table": 2, "level_matrix": 2,
-    "radar": 2, "metric_comparison": 2, "grouped_bar": 2,
+    "radar": 2, "metric_comparison": 2, "grouped_bar": 2, "entity_attribute_bars": 2,
     "action_list": 2, "narrative_list": 2, "chart": 2, "driver_bars": 2,
     "question_comparison": 2,
     "composition_breakdown": 2, "share_split": 2,
@@ -362,6 +365,27 @@ def _render_slot(
         # already account for it, and an apology card here would be the third
         # copy of the same message.
         return
+    if slot.slot.slot_id == "factors":
+        # A "factors" item that only narrates the trend the Market Analysis
+        # chart already draws (same subjects, direction words, no causal
+        # link) adds nothing next to the chart itself - live-verified
+        # 2026-08-11: "최근 3년간 추이를 보면 IPTV 가입자는 완만하게
+        # 증가한 반면 SO와 위성방송은 감소세가 이어졌다" names the same
+        # three series the chart plots and states no "why".
+        # `is_chart_trend_restatement` is the general, structural test - a
+        # sentence that explains a cause, or names a subject the chart never
+        # plotted, is kept regardless of wording. Filtered here, before the
+        # block_type branch below, so it also governs whether driver_bars/
+        # factor_list (which key on `len(items)`) are eligible at all - a
+        # slot whose only content was a restatement should end up with
+        # nothing to show, not fall through to a different shape for the
+        # same now-empty list.
+        chart_subjects = list(dict.fromkeys(
+            point.label for point in plotted_chart_series(select_chartable_series(synthesis.metric_series))
+        ))
+        items = [item for item in items if not is_chart_trend_restatement(item, chart_subjects)]
+        if not items:
+            return
     if slot.block_type == "narrative_list":
         # A status/finding slot may quote what the source observed, but a
         # source author's proposal is not itself market status. Recommendations
@@ -428,10 +452,36 @@ def _render_slot(
         )
         if draw is None:
             continue
-        card_title = title if index == 0 else block_title(block_type, title)
+        # `matrix` (the SWOT quadrant grid) is the one block type whose own
+        # meaning doesn't track the slot that picked it: `_matrix()` always
+        # draws from the full strengths/weaknesses/opportunities/risks
+        # pool (see slot_blocks.py), never just the calling slot's own
+        # narrow category - live-verified 2026-08-11, the "opportunity"
+        # slot (titled "Opportunity") ended up leading with a 3-quadrant
+        # SWOT once strengths/weaknesses were also populated, so the card
+        # showed Strength+Weakness+Opportunity under a header that named
+        # only one of them. Every other block type's meaning doesn't shift
+        # under a different slot this way, so this override stays scoped
+        # to `matrix` specifically rather than applying to every lead
+        # block via `block_title()`.
+        card_title = (
+            block_title("matrix", "Positioning") if block_type == "matrix"
+            else title if index == 0
+            else block_title(block_type, title)
+        )
         with st.container(border=True):
             st.markdown(f'<div class="ts-card-inner"><h3>{escape(card_title)}</h3></div>', unsafe_allow_html=True)
             draw()
+        # AI Insight now sits below the card, not inside it - live-verified
+        # 2026-08-11: nested inside `landscape`'s own bordered container, it
+        # read as part of the trend chart specifically rather than a comment
+        # on the whole card. Recomputed here (not threaded out of `draw()`)
+        # so this stays a pure addition after the container closes, rather
+        # than changing what every other block's `draw()` returns.
+        if block_type == "landscape":
+            chartable_points = plotted_chart_series(select_chartable_series(synthesis.metric_series))
+            if chartable_points:
+                render_metric_insight(chartable_points, synthesis.grounded_claims)
 
 
 def _body_renderer(
@@ -689,9 +739,17 @@ def render_generic_dashboard(
     presentation = load_audience_presentation(audience_id)
 
     render_page_header(question, sector, audience, purpose)
-    headline_point = headline_kpi(synthesis.metric_series, question)
+    # Organizations only, not technologies: a technology entity like "배터리"
+    # or "ESS" is the sector's own topic vocabulary - true of a company's own
+    # figures and of an unrelated industry-wide statistic alike, so it can't
+    # tell them apart. An organization name is what actually distinguishes
+    # "about the company this question asks about" from "about the market
+    # generally" - see `executive_summary_supporting_kpis`'s docstring.
+    entities = getattr(result, "entities", None)
+    core_entities = list(getattr(entities, "organizations", None) or [])
+    headline_point = headline_kpi(synthesis.metric_series, question, core_entities)
     supporting_points = executive_summary_supporting_kpis(
-        synthesis.metric_series, question, headline_point,
+        synthesis.metric_series, question, headline_point, core_entities=core_entities,
     )
     comparison = executive_summary_comparison(synthesis.metric_series)
     # If Landscape will pair this same composition with its trend chart
@@ -734,17 +792,33 @@ def render_generic_dashboard(
     # Landscape lose its own donut whenever Executive Summary claimed the
     # same composition first, splitting the trend chart and its composition
     # into two separate cards instead of the one paired card they belong in.
+    # Seeded in *both* the kpi and bars namespaces for every point drawn here,
+    # not just whichever shape Executive Summary happened to use. Live-verified
+    # 2026-08-11: "Global semiconductor market growth: 975 billion" drawn here
+    # as a bars comparison still showed up again under Key Metrics, because
+    # `_undrawn_kpi_points` only checks the kpi-shaped key and this seed had
+    # only recorded the bars-shaped one for the same point - two different
+    # spellings of "already shown" for a fact the reader has already seen once,
+    # on the one section that always renders first and is never itself subject
+    # to dedup. The multi-shape-family allowance in `resolve_slots()` is for
+    # slots choosing between shapes for their *own* undrawn facts; it was never
+    # meant to let a slot re-draw what the fixed cover section already shows.
     exec_summary_drawn: set[str] = set()
     if headline_point is not None:
         exec_summary_drawn.add(kpi_evidence_key(headline_point))
-    exec_summary_drawn.update(kpi_evidence_key(point) for point in supporting_points)
+        exec_summary_drawn.add(bars_evidence_key(headline_point))
+    for point in supporting_points:
+        exec_summary_drawn.add(kpi_evidence_key(point))
+        exec_summary_drawn.add(bars_evidence_key(point))
     if comparison is not None:
         kind, subject, points = comparison
         if kind == "share":
             if not landscape_owns_this_share:
                 exec_summary_drawn.add(share_evidence_key(subject))
         else:
-            exec_summary_drawn.update(bars_evidence_key(point) for point in points)
+            for point in points:
+                exec_summary_drawn.add(bars_evidence_key(point))
+                exec_summary_drawn.add(kpi_evidence_key(point))
     resolved = order_slots_for_audience(
         resolve_slots(
             purpose_id, synthesis, report,
@@ -763,6 +837,16 @@ def render_generic_dashboard(
     # same rule again over the rendered slots removed items a second time -
     # "시장 변화" showed 1 of its 3 key points because two had been claimed by
     # a neighbouring slot that was drawing from the same section.
+    # A "factors" slot whose only items are chart restatements (see
+    # `_render_slot`, which applies the same `is_chart_trend_restatement`
+    # filter) draws nothing - excluded here too, before `_grid_rows` sizes
+    # the row, so a blank reserved column doesn't sit next to Key
+    # Comparisons squeezing it to a width its bar labels can't fit in.
+    # Live-verified 2026-08-11: an empty grid column (Key Drivers' old spot)
+    # left Key Comparisons at 186px with overlapping axis text next to it.
+    chart_subjects_for_factors = list(dict.fromkeys(
+        point.label for point in plotted_chart_series(select_chartable_series(synthesis.metric_series))
+    ))
     dashboard_slots = _detail_slot_order([
         slot for slot in resolved
         if not slot.is_last_resort and slot.slot.slot_id != "summary"
@@ -771,6 +855,14 @@ def render_generic_dashboard(
             and not (
                 synthesis.recommended_actions
                 or getattr(synthesis, "ai_recommended_actions", None)
+            )
+        )
+        and not (
+            slot.slot.slot_id == "factors"
+            and slot.items
+            and all(
+                is_chart_trend_restatement(item, chart_subjects_for_factors)
+                for item in slot.items
             )
         )
     ])

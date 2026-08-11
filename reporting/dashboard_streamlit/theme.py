@@ -244,6 +244,15 @@ def dashboard_css(dark: bool, accent_theme: str = "orange") -> str:
     .ts-landing {{ min-height:43vh; display:flex; flex-direction:column; align-items:center;
       justify-content:flex-end; padding:3vh 0 2.1rem; text-align:center; }}
     .ts-landing .ts-wordmark {{ font-size:5.35rem; }}
+    /* Sits directly above the logo, deliberately quieter than both the
+       wordmark and "What Trend should we Spark?" - a one-line service
+       description, not a second title. `.ts-landing` is already
+       `justify-content:flex-end`, so adding this as the section's first
+       child pushes the whole (tagline+logo+title) group up as one unit
+       rather than shifting the logo/title's own position - no separate
+       margin tuning needed to keep their relative spacing intact. */
+    .ts-landing-tagline {{ margin:0 0 4rem!important; font-size:1.04rem!important;
+      font-weight:700!important; color:var(--ts-muted)!important; letter-spacing:-.005em; }}
     .ts-question-title {{ margin:1.6rem 0 0!important; font-family:"Pretendard Variable",Pretendard,sans-serif!important;
       font-size:clamp(1.5rem,2.4vw,2.35rem)!important; font-weight:600!important; letter-spacing:-.02em!important;
       color:var(--ts-ink)!important; }}
@@ -296,8 +305,14 @@ def dashboard_css(dark: bool, accent_theme: str = "orange") -> str:
        summary the whole width instead of leaving a hole. */
     .ts-headline-kpi {{ display:flex; flex-direction:column; justify-content:center;
       gap:.12rem; height:100%; padding:0 .35rem; }}
-    .ts-headline-kpi small {{ color:var(--ts-muted); font-size:.68rem; font-weight:700;
-      text-transform:uppercase; letter-spacing:.05em; }}
+    /* Live-verified 2026-08-11: an uppercase+letterspaced label mixing a
+       Latin abbreviation with Korean ("ESS 우선 협상권") read as garbled at
+       .68rem - the transform doesn't change Korean glyphs, but it does
+       shrink/space the Latin run enough that "ESS" misread as noise next to
+       the Korean that follows. Bumped size and dropped the transform/
+       spacing that bought legibility for pure-Latin acronyms at the cost of
+       mixed-script ones. */
+    .ts-headline-kpi small {{ color:var(--ts-muted); font-size:.72rem; font-weight:700; }}
     .ts-headline-kpi b {{ font-size:1.9rem; font-weight:850; letter-spacing:-.03em;
       color:var(--ts-ink); line-height:1.05; }}
     .ts-headline-unit {{ font-size:.72rem; font-weight:600; color:var(--ts-muted); }}
@@ -382,6 +397,23 @@ def dashboard_css(dark: bool, accent_theme: str = "orange") -> str:
     .ts-under-evidenced {{ min-height:0; max-height:none; margin-top:.65rem;
       border-color:color-mix(in srgb,var(--ts-accent) 40%,var(--ts-line));
       background:color-mix(in srgb,var(--ts-accent) 6%,var(--ts-panel)); }}
+    /* A standalone `chart` block (not paired with a donut inside
+       `.ts-landscape`, which already has its own tuned width above) used
+       to fill the full card width whenever nothing else shared its row -
+       `st.columns([2])` with one entry always renders that one column at
+       100%, regardless of `_BLOCK_UNITS["chart"]` declaring it a
+       half-width block; the ratio only matters relative to a sibling
+       column that isn't there. A trend line rarely needs more than half a
+       wide card's width to read cleanly, so this caps the card itself
+       rather than just the SVG inside it (capping only the SVG left the
+       now-mostly-empty card looking like an oversized frame around a
+       small chart, not an actually narrower card). Live-verified
+       2026-08-11. NOTE: this does not (and, without touching
+       `_grid_rows`'s row-packing in generic_dashboard.py, cannot) let a
+       *different* card expand into the space this frees - the freed space
+       is simply left blank next to the narrowed card. */
+    :is(div[data-testid="stVerticalBlockBorderWrapper"],div[data-testid="stVerticalBlock"][data-test-scroll-behavior]):has(> div .ts-chart-svg):not(:has(.ts-landscape)) {{
+      max-width:min(60%, 620px); }}
     .ts-under-evidenced h3 {{ margin:0 0 .3rem; font-size:.92rem; }}
     .ts-under-evidenced p {{ margin:0; font-size:.8rem; color:var(--ts-muted); line-height:1.5; }}
     /* Deployment stamp - bottom-LEFT, deliberately quiet. Streamlit Cloud
@@ -528,9 +560,16 @@ def dashboard_css(dark: bool, accent_theme: str = "orange") -> str:
     .ts-swot > .ts-swot-cell:nth-child(odd) {{ border-right:1px solid var(--ts-border); }}
     .ts-swot > .ts-swot-cell:nth-child(-n+2):not(:only-child) {{ border-bottom:1px solid var(--ts-border); }}
     .ts-swot.duo > .ts-swot-cell {{ border-bottom:0; }}
-    .ts-actions {{ margin-top:.65rem; padding:.65rem 1rem; border:1.5px solid var(--ts-line); border-radius:20px;
+    /* Compact and landscape-shaped (wide, not tall) rather than the card's
+       old default square-ish proportions - live-verified 2026-08-11, a
+       narrow-and-tall card here read heavier than the data (a handful of
+       short action titles) actually needed. Row padding/font are the main
+       lever: shrinking row height is what turns "narrow and tall" into
+       "wide and short" for a fixed number of rows, without touching layout
+       width (`_BLOCK_UNITS` in generic_dashboard.py). */
+    .ts-actions {{ margin-top:.4rem; padding:.4rem .6rem; border:1.5px solid var(--ts-line); border-radius:14px;
       background:var(--ts-panel); }}
-    .ts-actions-owner {{ display:block; margin:0 0 .45rem; font-size:.72rem; font-weight:600;
+    .ts-actions-owner {{ display:block; margin:0 0 .3rem; font-size:.66rem; font-weight:600;
       color:var(--ts-muted); }}
     /* `minmax(250px,…)`/`minmax(160px,…)` used to force these two columns
        wider than the card actually had once `action_list` shares a row with
@@ -539,22 +578,28 @@ def dashboard_css(dark: bool, accent_theme: str = "orange") -> str:
        card and the header's columns stopped lining up with the body's.
        `minmax(0,…)` keeps the same *relative* proportions but lets both
        shrink (and wrap/truncate) to whatever width the card actually has. */
-    .ts-actions-head {{ display:grid; grid-template-columns:42px minmax(0,1.5fr) minmax(0,1fr) 44px;
-      gap:.75rem; padding:0 .3rem .3rem; color:var(--ts-muted); font-size:.66rem; font-weight:700;
+    .ts-actions-head {{ display:grid; grid-template-columns:30px minmax(0,1.5fr) minmax(0,1fr) 34px;
+      gap:.5rem; padding:0 .2rem .2rem; color:var(--ts-muted); font-size:.58rem; font-weight:700;
       text-transform:uppercase; letter-spacing:.04em; }}
     .ts-actions-head span:last-child, .ts-actions-head span:nth-child(3) {{ text-align:right; }}
-    .ts-action-row {{ display:grid; grid-template-columns:42px minmax(0,1.5fr) minmax(0,1fr) 44px;
-      gap:.75rem; align-items:center; padding:.5rem .3rem; border-bottom:1px solid var(--ts-line); font-size:.88rem; }}
-    .ts-action-row:last-child {{ border-bottom:0; }} .ts-action-row .num {{ font-size:1.1rem; color:var(--ts-muted); }}
+    .ts-action-row {{ display:grid; grid-template-columns:30px minmax(0,1.5fr) minmax(0,1fr) 34px;
+      gap:.5rem; align-items:center; padding:.3rem .2rem; border-bottom:1px solid var(--ts-line); font-size:.76rem; }}
+    .ts-action-row:last-child {{ border-bottom:0; }} .ts-action-row .num {{ font-size:.86rem; color:var(--ts-muted); }}
     .ts-action-row .action {{ font-weight:800; }}
     /* Expected-impact cell: plain right-aligned text (reference design's
        "Expected Impact" column). The rank-derived progress bar that used to
        live here was removed - it encoded nothing but row order. */
-    .ts-action-row .impact {{ text-align:right; font-size:.8rem; font-weight:500; color:var(--ts-muted); }}
-    .ts-action-row .impact.ts-empty {{ font-size:.74rem; opacity:.7; }}
-    .ts-evidence-link {{ display:grid; place-items:center; width:27px; height:27px; border-radius:50%;
-      background:color-mix(in srgb,var(--ts-accent) 28%,var(--ts-panel)); color:var(--ts-accent); text-decoration:none;
-      justify-self:end; }}
+    .ts-action-row .impact {{ text-align:right; font-size:.68rem; font-weight:500; color:var(--ts-muted); }}
+    .ts-action-row .impact.ts-empty {{ font-size:.64rem; opacity:.7; }}
+    /* Same evidence-link glyph and weight as `.ts-inline-evidence` below -
+       live-verified 2026-08-11: this used to be a pale 28%-opacity circle
+       around a thin accent-coloured arrow, while Key Drivers/Competitive
+       Landscape's `.ts-inline-evidence` drew a bold white arrow on a filled
+       circle. Same "↗" character, different weight, so Recommended Actions'
+       link read as a plain dot next to every other block's clear arrow. */
+    .ts-evidence-link {{ display:grid; place-items:center; width:20px; height:20px; border-radius:50%;
+      background:color-mix(in srgb,var(--ts-accent) 75%,#6e2525); color:white; text-decoration:none;
+      justify-self:end; font-size:.7rem; font-weight:900; }}
     .ts-footer-note {{ display:flex; gap:1rem; margin-top:.45rem; padding:.45rem .8rem; border-bottom:1px solid var(--ts-orange);
       font-size:.82rem; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }}
     /* auto-fit with a real 260px floor: empty panels are now dropped rather
@@ -780,6 +825,30 @@ def dashboard_css(dark: bool, accent_theme: str = "orange") -> str:
        chart+donut pair apart under it. Streamlit draws the expander
        itself, so only its chrome is restyled; content stays full - this
        is density, not truncation. */
+    /* `st.form` (the intake question box) carries Streamlit's own default
+       max-width:1080px, centered with auto margins - that's the width the
+       page is actually designed around. Live-verified 2026-08-11: an
+       earlier pass widened the form to match the "저장된 실행 결과 열기"
+       expander below it instead of narrowing the expander to match the
+       form, which was backwards - the form's width is the page's real
+       baseline (it also sets the meta row/Start! button's width, since
+       those are columns *inside* it), not the expander's incidental full
+       width. Scoped to `.ts-saved-run-row` (wraps just this one expander,
+       via a keyed `st.container`) rather than `[data-testid="stExpander"]`
+       generally, which would also shrink unrelated expanders elsewhere on
+       the page (AI Insight, Evidence & Sources, ...) that were never part
+       of this row. */
+    [class*="st-key-landing_saved_run"] [data-testid="stExpander"] {{
+      max-width:1080px; margin-left:auto; margin-right:auto; }}
+    /* Same fixed-width baseline for the live run-progress status widget
+       (`st.status`, "[1/1] Source Router — 수집 중" etc.) - it's a
+       different Streamlit widget than the expander above but defaults to
+       the same kind of full-container width, and its label text changes
+       length stage to stage (Source Router vs Processor vs Validator vs
+       Analyzer), so anything content-sized would visibly resize as the
+       pipeline progresses. Fixed to the same 1080px baseline instead. */
+    [class*="st-key-run_progress_status"] [data-testid="stExpander"] {{
+      max-width:1080px; margin-left:auto; margin-right:auto; }}
     [data-testid="stExpander"] details {{ border:1px solid var(--ts-accent); border-radius:8px;
       background:var(--ts-panel); margin:.3rem 0 0; }}
     [data-testid="stExpander"] summary {{ color:var(--ts-accent); font-weight:700;
@@ -812,9 +881,16 @@ def dashboard_css(dark: bool, accent_theme: str = "orange") -> str:
        Live-verified 2026-08-11. `flex:0 0 auto` makes the column shrink-wrap
        its content instead of stretching to its nominal fraction; the chart
        column takes whatever is left. */
+    /* Live-verified again 2026-08-11: `flex:1 1 auto` on the chart column
+       still left a wide gap before the donut, because `.ts-chart` below has
+       its own `max-width:540px` cap - the *column* kept growing to fill the
+       row's remaining width regardless, and the (narrower, left-aligned)
+       chart just sat in the left part of that oversized box. The column
+       has to stop growing at its content's width too, or capping the chart
+       alone can't close the gap. */
     :is(div[data-testid="stVerticalBlockBorderWrapper"],div[data-testid="stVerticalBlock"][data-test-scroll-behavior]):has(.ts-landscape)
       div[data-testid="stHorizontalBlock"] > div[data-testid="stColumn"]:first-child {{
-      flex:1 1 auto !important; min-width:0; }}
+      flex:0 1 auto !important; min-width:0; }}
     :is(div[data-testid="stVerticalBlockBorderWrapper"],div[data-testid="stVerticalBlock"][data-test-scroll-behavior]):has(.ts-landscape)
       div[data-testid="stHorizontalBlock"] > div[data-testid="stColumn"]:last-child {{
       /* `width:auto` alone collapsed this column to ~10px in the running
@@ -826,8 +902,14 @@ def dashboard_css(dark: bool, accent_theme: str = "orange") -> str:
          nothing to shrink-wrap to. An explicit `min-width` floor sidesteps
          that auto-sizing ambiguity by giving the column real space to work
          with regardless of how the browser resolves the content pass. */
-      flex:0 0 auto !important; width:auto !important; min-width:180px !important; max-width:240px;
-      border-left:1px solid var(--ts-line); padding-left:.6rem; margin-left:.6rem; }}
+      /* Tightened from .6rem/.6rem - live-verified 2026-08-11, at that
+         spacing plus the `gap:0` row gap the donut still sat ~20px clear of
+         the chart, reading as two adjacent boxes rather than one drawing's
+         two halves. A hairline divider stays (this is still conceptually a
+         trend + what-it's-made-of split, not one seamless graphic) but the
+         air around it is cut roughly in half. */
+      flex:0 0 auto !important; width:auto !important; min-width:180px !important; max-width:220px;
+      border-left:1px solid var(--ts-line); padding-left:.3rem; margin-left:.3rem; }}
     /* The chart keeps its usual cap (defined once, next to `_CHART_W`) even
        here - letting it grow unbounded was what pulled the whole row wide
        enough to strand the companion column's content on the far right. */
@@ -861,7 +943,27 @@ def dashboard_css(dark: bool, accent_theme: str = "orange") -> str:
         div[data-testid="stColumn"] + div[data-testid="stColumn"] {{
         border-left:none; padding-left:0; margin-left:0;
         border-top:1px solid var(--ts-line); padding-top:.6rem; margin-top:.6rem; }}
+      .ts-landing-tagline {{ font-size:.74rem; padding:0 .8rem; }}
     }}
+    /* A row of slot cards (Key Comparisons beside Competitive Landscape,
+       Problem beside its row-mates, ...) used to stretch every card in the
+       row to match the tallest one - Streamlit's `stHorizontalBlock` is a
+       flex row with the browser default `align-items:stretch`, and nothing
+       here had overridden it for the general case (only the landscape
+       card's own internal row was scoped). A short card next to a long one
+       then carried a slab of blank space at its own bottom instead of
+       ending where its content ends. Scoped with `:has()` to rows whose
+       columns are slot cards specifically (`.ts-card-inner` is every slot
+       card's own title wrapper), so this doesn't touch narrower internal
+       `st.columns()` uses (KPI grids, table cells, the landscape card's own
+       donut+chart pairing above) that legitimately want equal-height cells.
+       True masonry (a shorter card's row-mate below it rising to fill the
+       gap) isn't possible without a JS packing library - CSS grid/flexbox
+       can't reflow content across rows - so this is the honest stopping
+       point: no forced stretch, no reserved dead space, cards simply end
+       where their content ends. */
+    div[data-testid="stHorizontalBlock"]:has(> div[data-testid="stColumn"] .ts-card-inner) {{
+      align-items:flex-start; }}
     .ts-metric-snapshot {{ display:grid; gap:.35rem; }}
     .ts-metric-snapshot > b {{ font-size:.76rem; color:var(--ts-muted); }}
     .ts-metric-snapshot-row {{ display:flex; align-items:baseline; justify-content:space-between;

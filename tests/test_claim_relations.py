@@ -58,9 +58,12 @@ def test_an_importance_with_no_stated_reason_is_discarded():
     assert resolved[0]["importance_basis"] is None
 
 
-def _synthesis_claim(claim_id: str, parent: str | None = None, importance: int | None = None) -> SynthesisClaim:
+def _synthesis_claim(
+    claim_id: str, parent: str | None = None, importance: int | None = None,
+    claim_type: str = "risk",
+) -> SynthesisClaim:
     return SynthesisClaim(
-        synthesis_claim_id=claim_id, claim_id=claim_id, claim_type="risk",
+        synthesis_claim_id=claim_id, claim_id=claim_id, claim_type=claim_type,
         claim=f"주장 {claim_id}", evidence_quote="q", confidence="high",
         doc_id="d1", source_id="s1",
         parent_synthesis_claim_id=parent,
@@ -80,13 +83,34 @@ def test_a_tree_needs_a_root_something_actually_derives_from():
 
 
 def test_one_scored_claim_is_not_a_ranking():
-    assert has_importance_ranking([_synthesis_claim("a", importance=90)]) is False
     assert has_importance_ranking(
-        [_synthesis_claim("a", importance=40), _synthesis_claim("b", importance=90)]
+        [_synthesis_claim("a", importance=90, claim_type="factor")]
+    ) is False
+    assert has_importance_ranking(
+        [_synthesis_claim("a", importance=40, claim_type="factor"),
+         _synthesis_claim("b", importance=90, claim_type="factor")]
     ) is True
     assert [claim.synthesis_claim_id for claim in importance_ranked(
-        [_synthesis_claim("a", importance=40), _synthesis_claim("b", importance=90)]
+        [_synthesis_claim("a", importance=40, claim_type="factor"),
+         _synthesis_claim("b", importance=90, claim_type="factor")]
     )] == ["b", "a"]
+
+
+def test_importance_ranking_is_restricted_to_driver_claims():
+    """Key Drivers ranks causes ("factor"), not every scored claim type.
+
+    Live-verified 2026-08-11: an `opportunity`/`risk`/`business_impact`
+    claim the model happened to score still isn't a *driver* of anything -
+    it answers "what" or "so what", not "why". Ranking it under a heading
+    that promises causes was the actual bug behind Key Drivers showing plain
+    narrative sentences.
+    """
+    claims = [
+        _synthesis_claim("a", importance=90, claim_type="opportunity"),
+        _synthesis_claim("b", importance=40, claim_type="risk"),
+    ]
+    assert importance_ranked(claims) == []
+    assert has_importance_ranking(claims) is False
 
 
 def test_importance_bars_always_say_they_are_an_ai_judgement(monkeypatch):
@@ -96,7 +120,8 @@ def test_importance_bars_always_say_they_are_an_ai_judgement(monkeypatch):
     monkeypatch.setattr(components.st, "markdown", lambda body, **_: captured.append(body))
 
     components.render_importance_bars(
-        [_synthesis_claim("a", importance=90), _synthesis_claim("b", importance=40)]
+        [_synthesis_claim("a", importance=90, claim_type="factor"),
+         _synthesis_claim("b", importance=40, claim_type="factor")]
     )
     body = "".join(captured)
 

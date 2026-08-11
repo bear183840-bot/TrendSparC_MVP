@@ -563,6 +563,7 @@ def render_metric_chart(
     metric_points: list[Any],
     title: str = "Market Trend",
     grounded_claims: list[Any] | None = None,
+    show_insight: bool = True,
 ) -> None:
     """Native Streamlit line chart for real, evidence-backed *time series*
     metrics only (3+ distinct periods for a label - see
@@ -585,7 +586,8 @@ def render_metric_chart(
     if not chartable_points:
         return
     st.markdown(_metric_chart_svg(chartable_points, title), unsafe_allow_html=True)
-    render_metric_insight(chartable_points, grounded_claims)
+    if show_insight:
+        render_metric_insight(chartable_points, grounded_claims)
 
 
 # Moved to common/block_shapes.py so slot resolution, which must not import
@@ -1503,6 +1505,41 @@ def render_grouped_bars(metric_points: list[Any]) -> None:
         )
 
 
+def render_entity_attribute_bars(groups: list[tuple[str, list[Any]]]) -> None:
+    """Two or more subjects, each its own small bar panel of its own
+    distinct attributes - "롱폼 콘텐츠: 깊이감 71.1%, 전문지식 68.4%" beside
+    "숏폼 콘텐츠: 가성비 구독 64.7%, 광고 요금제 34.8%".
+
+    `entity_attribute_groups` only groups subjects whose attributes don't
+    overlap at all, so there is no shared category axis for a crosstab -
+    unlike `render_grouped_bars`, each subject gets its own panel, placed
+    side by side rather than merged into one chart. Reuses `.ts-bar-compare`'s
+    row markup, the same one `render_metric_bar` draws a single subject's
+    bars with, so a reader sees the same bar language everywhere on the page.
+    """
+    if not groups:
+        return
+    columns = st.columns(len(groups), gap="small")
+    for column, (subject, points) in zip(columns, groups):
+        with column:
+            ordered = sorted(points, key=lambda point: abs(point.value), reverse=True)
+            unit = ordered[0].unit or ""
+            max_value = max(abs(point.value) for point in ordered) or 1
+            bar_scale = scale_for([point.value for point in ordered], unit)
+            rows = "".join(
+                f'<div class="ts-bar-compare-row"><span class="period">{escape(point.label)}</span>'
+                f'<div class="ts-bar-compare-track"><div class="ts-bar-compare-fill" '
+                f'style="--pct:{abs(point.value) / max_value * 100:.1f}%;'
+                f'background:{series_color(index, len(ordered))}"></div></div>'
+                f'<span class="value">{escape(joined_value(point.value, unit, bar_scale))}</span></div>'
+                for index, point in enumerate(ordered)
+            )
+            st.markdown(
+                f'<div class="ts-bar-compare"><b>{escape(subject)}</b>{rows}</div>',
+                unsafe_allow_html=True,
+            )
+
+
 _STATUS_TONE = {"high": "high", "medium": "medium", "low": "low"}
 _KPI_ROW_LAYOUT_MAX = 2
 
@@ -1635,7 +1672,10 @@ def render_landscape(
         # `synthesis.metric_series` and undrawn, so the Key Metrics slot
         # picks them up on its own - this just stops double-homing them here.
         if core_kind == "trend":
-            render_metric_chart(core_points, title=block_title("chart"), grounded_claims=grounded_claims)
+            render_metric_chart(
+                core_points, title=block_title("chart"), grounded_claims=grounded_claims,
+                show_insight=False,
+            )
         else:
             render_kpi_row(core_points, limit=4)
         return
@@ -1650,7 +1690,10 @@ def render_landscape(
     trend, split = st.columns([2, 1], gap="small")
     with trend:
         if core_kind == "trend":
-            render_metric_chart(core_points, title=block_title("chart"), grounded_claims=grounded_claims)
+            render_metric_chart(
+                core_points, title=block_title("chart"), grounded_claims=grounded_claims,
+                show_insight=False,
+            )
         else:
             render_kpi_row(core_points, limit=4)
     with split:

@@ -39,6 +39,7 @@ from common.block_shapes import (
     competitor_panels_not_covered_by_ranking,
     has_level_matrix,
     has_grouped_bars,
+    entity_attribute_groups,
     has_landscape,
     has_ranking_list,
     share_groups,
@@ -65,6 +66,7 @@ from reporting.dashboard_streamlit.components import (
     render_level_matrix,
     render_cause_tree,
     render_comparison_table,
+    render_entity_attribute_bars,
     render_factor_list,
     render_grouped_bars,
     render_importance_bars,
@@ -150,12 +152,19 @@ def _grouped_bars(context: SlotContext):
     return (lambda: render_grouped_bars(points)) if has_grouped_bars(points) else None
 
 
+def _entity_attribute_bars(context: SlotContext):
+    groups = entity_attribute_groups(context.synthesis.metric_series)
+    return (lambda: render_entity_attribute_bars(groups)) if groups else None
+
+
 def _status_bar(context: SlotContext):
     points = context.synthesis.comparison_points
     return (lambda: render_status_bar(points)) if has_status_levels(points) else None
 
 
 def _metric_comparison(context: SlotContext):
+    from common.purpose_slots import bars_evidence_key
+
     snapshots = metric_snapshot_groups(context.synthesis.metric_series)
     snapshot_periods = {period for period, _ in snapshots}
     groups = [
@@ -165,6 +174,21 @@ def _metric_comparison(context: SlotContext):
             if group[0] not in snapshot_periods
         ),
     ]
+    # A group is chosen (or not) as a whole by `resolve_slots()`, which only
+    # rejects a candidate when *every* point it would draw is already shown
+    # elsewhere - a group mixing new and already-drawn points still gets
+    # picked, and used to render every point in it regardless. Live-verified
+    # 2026-08-11: Executive Summary's own comparison bars ("Global
+    # semiconductor market growth: 975 billion") stayed in this same group
+    # alongside genuinely new figures, so Key Comparisons repeated them.
+    # Same self-filtering `_undrawn_kpi_points` already does for Key Metrics.
+    drawn = context.drawn_before
+    if drawn:
+        groups = [
+            (period, [point for point in points if bars_evidence_key(point) not in drawn])
+            for period, points in groups
+        ]
+        groups = [(period, points) for period, points in groups if points]
     if not groups:
         return None
     if context.compact:
@@ -301,12 +325,23 @@ def _share_split(context: SlotContext):
 
 
 def _factor_list(context: SlotContext):
-    # Keep the complete grounded set.  Source/analyzer/synthesis all preserve
-    # these factors, so imposing a new display-layer cap here would silently
-    # discard information precisely while building the final block.
-    values = context.items
-    if context.compact:
-        values = values[:getattr(context.presentation, "narrative_limit", 4)]
+    # This is the fallback shape for the "factors" slot (titled "Key
+    # Drivers"), used when driver_bars has no importance-scored claims to
+    # rank. Ordered and capped the same way driver_bars is - by the model's
+    # importance score where one was given, top 5 - so "Key Drivers" reads
+    # the same regardless of which of the two blocks ends up drawing it.
+    # Claims with no importance score keep their original (extraction)
+    # order and sort after every scored one.
+    importance_by_text = {
+        claim.claim: claim.importance
+        for claim in context.synthesis.grounded_claims
+        if claim.claim_type == "factor" and claim.importance is not None
+    }
+    values = sorted(
+        context.items, key=lambda value: importance_by_text.get(value, -1), reverse=True,
+    )
+    limit = getattr(context.presentation, "narrative_limit", 4) if context.compact else 5
+    values = values[:limit]
     rows = [(value, evidence_url(value, context.result)) for value in values]
     return (lambda: render_factor_list(rows)) if rows else None
 
@@ -459,6 +494,8 @@ _LIVE_BLOCKS: tuple[tuple[str, Any, str], ...] = (
     ("item_bar", _bars(item_bar_groups), "항목 간 순위 비교 막대."),
     ("ranking_list", _ranking_list, "4개 이상 항목의 순위·값을 압축한 목록."),
     ("grouped_bar", _grouped_bars, "한 지표를 여러 주체 × 여러 항목으로 비교하는 묶음 막대."),
+    ("entity_attribute_bars", _entity_attribute_bars,
+     "카테고리별로 서로 다른 속성을 각각 막대로, 카테고리마다 별도 패널로 병치."),
     ("status_bar", _status_bar, "근거가 등급을 매긴 항목들의 정성 상태 한 줄."),
     ("metric_comparison", _metric_comparison, "같은 시점·같은 단위 지표들의 항목 비교."),
     ("kpi_grid", _kpi, "확인된 수치 카드 묶음."),

@@ -1,12 +1,4 @@
-"""analyzer for the sk_telecom sector adapter.
-
-Runs each validated SourceDocument through sectors/sk_telecom/prompts/system_prompt.md
-(layered on prompts/global_system_prompt.md) via the OpenAI API, using structured
-outputs (Structured Outputs / strict JSON schema) so every response is a
-schema-valid DocumentAnalysis payload. No document is analyzed without a real
-API response — a missing key, refusal, or API failure surfaces as a
-PipelineStageError, never fabricated analysis.
-"""
+"""Evidence-grounded analyzer for the SK Telecom sector."""
 
 from __future__ import annotations
 
@@ -16,10 +8,15 @@ from pathlib import Path
 
 from openai import OpenAI
 
-from common.ai_client import openai_client_kwargs
+from common.ai_client import openai_client_kwargs, resolve_model
+from common.analyzer_quality import (
+    filter_points_by_verified_claim,
+    split_content,
+    split_evidence_passages,
+    verify_claim_quotes,
+)
 from common.content_quality_validator import (
     COMPARISON_COMPLETENESS_INSTRUCTION,
-    QUALITATIVE_LEVEL_EXTRACTION_INSTRUCTION,
     RELATIVE_METRIC_EXTRACTION_INSTRUCTION,
     SWOT_COMPLETENESS_INSTRUCTION,
     TABLE_COMPLETENESS_INSTRUCTION,
@@ -28,274 +25,89 @@ from common.contracts import DocumentAnalysis, SourceDocument
 from common.errors import PipelineStageError
 from sources.openai_retry import call_with_truncation_retry
 
-# SK텔레콤 전용 환경변수 및 스테이지 설정
 _API_KEY_ENV_VAR = "TRENDSPARC_SK_TELECOM_ANALYZER_API_KEY"
-# Optional - points this stage at an OpenAI-API-compatible alternative
-# provider (e.g. Upstage Solar) instead of stock OpenAI. Unset by default;
-# see common/ai_client.py.
 _BASE_URL_ENV_VAR = "TRENDSPARC_SK_TELECOM_ANALYZER_BASE_URL"
-_MODEL = "gpt-4o"  # 필요 시 사용 중인 OpenAI 모델로 변경 가능
+_MODEL_ENV_VAR = "TRENDSPARC_SK_TELECOM_ANALYZER_MODEL"
+
+
+def _model() -> str:
+    return resolve_model(_MODEL_ENV_VAR, _BASE_URL_ENV_VAR, default_openai_model="gpt-4o")
+
+
 _STAGE = "sectors.sk_telecom.adapter.analyzer"
-_ANALYSIS_MAX_TOKENS = 4096
-# Escalation rung tried only when the first attempt is actually cut off
-# (finish_reason == "length") - see call_with_truncation_retry. Matches
-# sk_broadband's dense-content ceiling for consistency across sectors.
-_ANALYSIS_MAX_TOKENS_ESCALATED = 7000
-# Output ceilings paired with the token ceilings above. Without them
-# metric_points/comparison_points are unbounded while max_tokens is not, so
-# a table-dense document overflows and is lost to a JSONDecodeError on
-# truncated JSON. Sized from real demand: the hungriest block contract
-# wants 4 items (ranking_list / composition_breakdown) and the largest
-# whole-dashboard demand observed across the stored runs was 38, while
-# these caps are per call and synthesis pools across documents. Same
-# values as sk_broadband so the sectors stay comparable.
+_ANALYSIS_MAX_TOKENS = 4_500
+_ANALYSIS_MAX_TOKENS_ESCALATED = 7_000
+_MAX_CLAIMS_PER_CALL = 20
 _MAX_METRIC_POINTS_PER_CALL = 16
 _MAX_COMPARISON_POINTS_PER_CALL = 8
 
-# SK텔레콤 디렉토리 구조 반영
 _SECTOR_ROOT = Path(__file__).resolve().parent.parent.parent
 _PROJECT_ROOT = _SECTOR_ROOT.parent.parent
-_GLOBAL_PROMPT_PATH = _PROJECT_ROOT / "prompts" / "global_system_prompt.md"
-_SECTOR_PROMPT_PATH = _SECTOR_ROOT / "prompts" / "system_prompt.md"
-
-# SK텔레콤 사업 영역(5G/6G, AI 서비스, AI 데이터센터, 알뜰폰·요금제 등) 분석에 최적화된 스키마
-_ANALYSIS_SCHEMA = {
-    "type": "object",
-    "properties": {
-        "summary": {
-            "type": "string",
-            "description": "1-3 sentence factual summary of the document regarding SK Telecom's business, technology, or market context, written in relation to the original question, sourced only from its content",
-        },
-        "key_points": {
-            "type": "array",
-            "items": {"type": "string"},
-            "description": "Key factual points tied to specific business or technological angles explicitly mentioned in the document — never inferred",
-        },
-        "sentiment": {
-            "type": "string",
-            "enum": ["positive", "neutral", "negative", "mixed"],
-        },
-        "relevant_to_question": {
-            "type": "boolean",
-            "description": "true if this document contains ANY fact that meaningfully informs the answer, even partial evidence — it does not need to fully answer the question by itself, since multiple documents combine into one report. false only if it's genuinely off-topic (its actual subject differs from the question, not just sharing a keyword)",
-        },
-        "business_impact": {
-            "type": "string",
-            "description": "질문 관점에서 매출, 비용, 투자, 고객, 경쟁력, 운영 중 어떤 영향이 있는지. 근거 부족 시 빈 문자열.",
-        },
-        "risk": {
-            "type": "string",
-            "description": "문서에서 근거가 확인되는 위험 요인. 근거 부족 시 빈 문자열.",
-        },
-        "opportunity": {
-            "type": "string",
-            "description": "문서에서 근거가 확인되는 기회 요인. 근거 부족 시 빈 문자열.",
-        },
-        "strength": {
-            "type": "string",
-            "description": "문서에서 근거가 확인되는 강점(자사 역량·경쟁 우위). 근거 부족 시 빈 문자열.",
-        },
-        "weakness": {
-            "type": "string",
-            "description": "문서에서 근거가 확인되는 약점(자사 취약점). 근거 부족 시 빈 문자열.",
-        },
-        "metric_points": {
-            "type": "array",
-            "maxItems": _MAX_METRIC_POINTS_PER_CALL,
-            "description": f"문서에 명시된 수치+시점 쌍만 추출. 추정하거나 계산하지 말 것. 없으면 빈 배열. 최대 {_MAX_METRIC_POINTS_PER_CALL}개. 상한에 걸리면 질문의 요구 축에 직접 답하는 수치를 먼저 남기고, 표의 모든 칸을 기계적으로 옮기지 말 것.",
-            "items": {
-                "type": "object",
-                "properties": {
-                    "label": {"type": "string", "description": "무엇을 나타내는 수치인지, 예: 'IPTV 가입자 수'"},
-                    "period": {"type": "string", "description": "문서에 명시된 시점 그대로, 예: '2023년 2분기'"},
-                    "value": {"type": "number"},
-                    "unit": {"type": "string", "description": "예: '만 명', '억원'. 없으면 빈 문자열."},
-                    "is_relative": {"type": "boolean", "description": "원문이 YoY/CAGR/전년 대비/배수로 명시한 상대 수치만 true."},
-                    "comparison_period": {"type": ["string", "null"], "description": "원문이 명시한 비교 기준. 없으면 null."},
-                    "value_origin": {"type": "string", "enum": ["source"]},
-                },
-                "required": ["label", "period", "value", "unit", "is_relative", "comparison_period", "value_origin"],
-                "additionalProperties": False,
-            },
-        },
-        "comparison_points": {
-            "type": "array",
-            "maxItems": _MAX_COMPARISON_POINTS_PER_CALL,
-            "description": f"문서에 명시된 대상 간 비교만 추출. level은 문서가 명시적으로 우열을 말할 때만 채우고 그 외엔 null. 없으면 빈 배열. 최대 {_MAX_COMPARISON_POINTS_PER_CALL}개. 상한에 걸리면 질문이 비교를 요구한 기준(criterion)부터 남길 것.",
-            "items": {
-                "type": "object",
-                "properties": {
-                    "entity": {"type": "string", "description": "비교 대상, 예: 'KT'"},
-                    "criterion": {"type": "string", "description": "비교 기준, 예: '요금제 가격'"},
-                    "value": {"type": "string", "description": "문서에 명시된 값이나 서술, 예: '월 9,900원'"},
-                    "level": {"type": ["string", "null"], "enum": ["low", "medium", "high", None]},
-                },
-                "required": ["entity", "criterion", "value", "level"],
-                "additionalProperties": False,
-            },
-        },
-        "recommended_actions": {
-            "type": "array",
-            "items": {"type": "string"},
-            "description": "전략기획팀이 확인, 검토, 준비 또는 실행해야 할 항목. 근거 부족 시 빈 배열.",
-        },
-        "monitoring_indicators": {
-            "type": "array",
-            "items": {"type": "string"},
-            "description": "후속 모니터링 지표와 실제 대응 단계로 넘어갈 조건. 근거 부족 시 빈 배열.",
-        },
-        "evidence": {
-            "type": "array",
-            "items": {"type": "string"},
-            "description": "각 전략 판단의 근거가 된 문서 내용 요약. 문서 전체 복사 금지.",
-        },
-        "action_level": {
-            "type": "string",
-            "enum": ["Monitor", "Review", "Prepare", "Act", "insufficient_data"],
-            "description": "대응 수준. 근거가 부족하면 insufficient_data.",
-        },
-        "analysis_confidence": {
-            "type": "string",
-            "enum": ["low", "medium", "high"],
-            "description": "문서 근거만 기준으로 한 분석 확신도.",
-        },
-    },
-    "required": ["summary", "key_points", "sentiment", "relevant_to_question", "business_impact", "risk", "opportunity", "strength", "weakness", "metric_points", "comparison_points", "recommended_actions", "monitoring_indicators", "evidence", "action_level", "analysis_confidence"],
-    "additionalProperties": False,
-}
+_ANALYZER_PROMPT_PATH = _PROJECT_ROOT / "prompts" / "analyzer_system_prompt.md"
+_SECTOR_PROMPT_PATH = _SECTOR_ROOT / "prompts" / "analyzer_prompt.md"
+_CLAIM_TYPES = ["key_point", "business_impact", "risk", "opportunity", "strength", "weakness", "comparison", "metric", "factor", "action", "monitoring"]
+_CLAIM_SCHEMA = {"type": "object", "properties": {"claim_id": {"type": "string"}, "claim_type": {"type": "string", "enum": _CLAIM_TYPES}, "claim": {"type": "string", "description": "한국어로 쓸 것. 원문이 영어 등 다른 언어여도 반드시 한국어로 번역·요약. 고유명사(회사명·제품명 등)만 원문 표기 유지 가능."}, "evidence_passage_id": {"type": ["string", "null"]}, "evidence_quote": {"type": "string"}, "evidence_location": {"type": ["string", "null"]}, "as_of_date": {"type": ["string", "null"]}, "confidence": {"type": "string", "enum": ["low", "medium", "high"]}}, "required": ["claim_id", "claim_type", "claim", "evidence_passage_id", "evidence_quote", "evidence_location", "as_of_date", "confidence"], "additionalProperties": False}
+_ANALYSIS_SCHEMA = {"type": "object", "properties": {"summary": {"type": "string"}, "relevance_level": {"type": "string", "enum": ["direct", "partial", "background", "irrelevant"]}, "grounded_claims": {"type": "array", "maxItems": _MAX_CLAIMS_PER_CALL, "items": _CLAIM_SCHEMA}, "metric_points": {"type": "array", "maxItems": _MAX_METRIC_POINTS_PER_CALL, "items": {"type": "object", "properties": {"label": {"type": "string"}, "period": {"type": "string"}, "value": {"type": "number"}, "unit": {"type": ["string", "null"]}, "subject": {"type": ["string", "null"]}, "is_relative": {"type": "boolean"}, "comparison_period": {"type": ["string", "null"]}, "value_origin": {"type": "string", "enum": ["source"]}, "evidence_claim_id": {"type": "string"}}, "required": ["label", "period", "value", "unit", "subject", "is_relative", "comparison_period", "value_origin", "evidence_claim_id"], "additionalProperties": False}}, "comparison_points": {"type": "array", "maxItems": _MAX_COMPARISON_POINTS_PER_CALL, "items": {"type": "object", "properties": {"entity": {"type": "string"}, "criterion": {"type": "string"}, "value": {"type": "string"}, "level": {"type": ["string", "null"], "enum": ["low", "medium", "high", None]}, "evidence_claim_id": {"type": "string"}}, "required": ["entity", "criterion", "value", "level", "evidence_claim_id"], "additionalProperties": False}}, "analysis_confidence": {"type": "string", "enum": ["low", "medium", "high"]}}, "required": ["summary", "relevance_level", "grounded_claims", "metric_points", "comparison_points", "analysis_confidence"], "additionalProperties": False}
+_REPAIR_SCHEMA = {"type": "object", "properties": {"repairs": {"type": "array", "items": {"type": "object", "properties": {"claim_id": {"type": "string"}, "evidence_passage_id": {"type": ["string", "null"]}, "evidence_quote": {"type": ["string", "null"]}}, "required": ["claim_id", "evidence_passage_id", "evidence_quote"], "additionalProperties": False}}}, "required": ["repairs"], "additionalProperties": False}
 
 
 def _load_system_prompt() -> str:
-    """글로벌 프롬프트와 SK텔레콤 섹터 전용 프롬프트를 결합하여 로드합니다."""
-    return "\n\n".join(
-        [
-            _GLOBAL_PROMPT_PATH.read_text(encoding="utf-8"),
-            _SECTOR_PROMPT_PATH.read_text(encoding="utf-8"),
-        ]
-    )
+    return "\n\n".join([_ANALYZER_PROMPT_PATH.read_text(encoding="utf-8"), _SECTOR_PROMPT_PATH.read_text(encoding="utf-8"), SWOT_COMPLETENESS_INSTRUCTION, TABLE_COMPLETENESS_INSTRUCTION, COMPARISON_COMPLETENESS_INSTRUCTION, RELATIVE_METRIC_EXTRACTION_INSTRUCTION])
 
 
-def _analyze_document(client: OpenAI, system_prompt: str, document: SourceDocument, question: str) -> DocumentAnalysis:
-    user_content = (
-        f"조사 중인 질문: {question}\n\n"
-        f"Title: {document.title}\nURL: {document.url}\n\n{document.content}\n\n"
-        "---\n"
-        "위 문서가 영어 등 외국어라도, summary/key_points는 반드시 한국어로만 작성하세요. "
-        "summary/key_points는 위 질문과 어떻게 관련되는지를 기준으로 작성하고, "
-        "이 문서 하나가 질문 전체에 답할 필요는 없습니다 — 여러 문서가 합쳐져 최종 리포트가 되므로, "
-        "질문과 관련된 사실을 조금이라도 포함하면(부분적 근거라도) relevant_to_question을 true로 판단하고, "
-        "실제 주제가 질문과 무관한 경우(키워드만 겹치고 본문 내용은 다른 경우)에만 false로 판단하세요. "
-        f"{SWOT_COMPLETENESS_INSTRUCTION} "
-        f"{COMPARISON_COMPLETENESS_INSTRUCTION} "
-        f"{TABLE_COMPLETENESS_INSTRUCTION} "
-        f"{RELATIVE_METRIC_EXTRACTION_INSTRUCTION} "
-        f"{QUALITATIVE_LEVEL_EXTRACTION_INSTRUCTION} "
-        "문서에 수치와 시점이 함께 명시되어 있으면(예: '2023년 매출 500억원') "
-        "metric_points에 그대로 추출하고, 두 대상을 비교하는 서술이 있으면(예: 'A사가 B사보다 저렴하다') "
-        "comparison_points에 추출하세요. 단, 문서에 명시되지 않은 값은 추정하거나 계산하지 마세요. "
-        "특히 재무제표나 실적 표에는 같은 항목이 3Q25/3Q24/2Q25처럼 여러 시점 컬럼으로 나란히 나오는 경우가 많습니다 — "
-        "이런 표를 보면 절대 한 시점만 뽑지 말고, 같은 label로 시점(period)마다 별도의 metric_point를 하나씩 만들어 "
-        "표에 있는 시점 수만큼 전부 추출하세요(예: 매출 3Q25/3Q24/2Q25 세 값이 있으면 metric_point 3개)."
-    )
-
+def _repair_failed_claims(client: OpenAI, failed: list[dict], passages: list[dict[str, str]]) -> list[dict]:
+    if not failed:
+        return []
+    payload = {"claims": [{"claim_id": claim["claim_id"], "claim": claim["claim"]} for claim in failed], "passages": passages}
     try:
-        response, _ = call_with_truncation_retry(
-            lambda max_tokens: client.chat.completions.create(
-                model=_MODEL,
-                max_tokens=max_tokens,
-                messages=[
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": user_content},
-                ],
-                response_format={
-                    "type": "json_schema",
-                    "json_schema": {
-                        "name": "document_analysis",
-                        "schema": _ANALYSIS_SCHEMA,
-                        "strict": True,
-                    },
-                },
-            ),
-            [_ANALYSIS_MAX_TOKENS, _ANALYSIS_MAX_TOKENS_ESCALATED],
-        )
-    except Exception as exc:  # API/네트워크 실패 시 예외 처리
-        raise PipelineStageError(
-            stage=_STAGE,
-            reason=f"analysis API call failed for doc '{document.doc_id}'",
-            detail=str(exc),
-        ) from exc
+        response = client.chat.completions.create(model=_model(), max_tokens=800, temperature=0, messages=[{"role": "system", "content": "Repair citations only. Never alter a claim; return an exact quote from a supplied passage or null."}, {"role": "user", "content": json.dumps(payload, ensure_ascii=False)}], response_format={"type": "json_schema", "json_schema": {"name": "sk_telecom_quote_repair", "schema": _REPAIR_SCHEMA, "strict": True}})
+        repairs = json.loads(response.choices[0].message.content).get("repairs", [])
+    except Exception:
+        return []
+    originals = {claim["claim_id"]: claim for claim in failed}
+    return [{**originals[repair["claim_id"]], **repair} for repair in repairs if repair.get("claim_id") in originals and repair.get("evidence_quote")]
 
-    message = response.choices[0].message
-    if message.refusal:
-        raise PipelineStageError(
-            stage=_STAGE,
-            reason=f"analysis refused for doc '{document.doc_id}'",
-            detail=message.refusal,
-        )
 
+def _analyze_part(client: OpenAI, system_prompt: str, document: SourceDocument, question: str, content: str) -> DocumentAnalysis:
+    passages = split_evidence_passages(content)
+    user_content = json.dumps({"question": question, "document": {"title": document.title, "url": document.url, "evidence_passages": passages}}, ensure_ascii=False)
     try:
+        response, _ = call_with_truncation_retry(lambda max_tokens: client.chat.completions.create(model=_model(), max_tokens=max_tokens, messages=[{"role": "system", "content": system_prompt}, {"role": "user", "content": user_content}], response_format={"type": "json_schema", "json_schema": {"name": "sk_telecom_document_analysis", "schema": _ANALYSIS_SCHEMA, "strict": True}}), [_ANALYSIS_MAX_TOKENS, _ANALYSIS_MAX_TOKENS_ESCALATED])
+        message = response.choices[0].message
+        if message.refusal:
+            raise PipelineStageError(stage=_STAGE, reason=f"analysis refused for doc '{document.doc_id}'", detail=message.refusal)
         data = json.loads(message.content)
-        summary = data["summary"]
-        key_points = data["key_points"]
-        sentiment = data["sentiment"]
-        relevant_to_question = data["relevant_to_question"]
-        business_impact = data["business_impact"]
-        risk = data["risk"]
-        opportunity = data["opportunity"]
-        strength = data["strength"]
-        weakness = data["weakness"]
-        metric_points = data["metric_points"]
-        comparison_points = data["comparison_points"]
-        recommended_actions = data["recommended_actions"]
-        monitoring_indicators = data["monitoring_indicators"]
-        evidence = data["evidence"]
-        action_level = data["action_level"]
-        analysis_confidence = data["analysis_confidence"]
-    except (TypeError, json.JSONDecodeError, KeyError) as exc:
-        raise PipelineStageError(
-            stage=_STAGE,
-            reason=f"analysis response for doc '{document.doc_id}' did not match the expected schema",
-            detail=str(exc),
-        ) from exc
-
-    return DocumentAnalysis(
-        doc_id=document.doc_id,
-        summary=summary,
-        key_points=key_points,
-        sentiment=sentiment,
-        relevant_to_question=relevant_to_question,
-        business_impact=business_impact,
-        risk=risk,
-        opportunity=opportunity,
-        strength=strength,
-        weakness=weakness,
-        metric_points=metric_points,
-        comparison_points=comparison_points,
-        recommended_actions=recommended_actions,
-        monitoring_indicators=monitoring_indicators,
-        evidence=evidence,
-        action_level=action_level,
-        analysis_confidence=analysis_confidence,
-    )
+    except PipelineStageError:
+        raise
+    except Exception as exc:
+        raise PipelineStageError(stage=_STAGE, reason=f"analysis API call failed for doc '{document.doc_id}'", detail=str(exc)) from exc
+    verified, failed = verify_claim_quotes(data["grounded_claims"], passages, source_url=document.url)
+    repaired, _ = verify_claim_quotes(_repair_failed_claims(client, failed, passages), passages, source_url=document.url)
+    claims = [*verified, *repaired]
+    metrics = filter_points_by_verified_claim(data["metric_points"], claims, claim_type="metric")
+    comparisons = filter_points_by_verified_claim(data["comparison_points"], claims, claim_type="comparison")
+    relevance = data["relevance_level"]
+    raw_count = len(data["grounded_claims"])
+    status = "not_applicable" if relevance == "irrelevant" else ("insufficient_grounding" if not claims else ("partial_grounding" if len(claims) < raw_count else "verified"))
+    def texts(kind: str) -> list[str]: return [claim["claim"] for claim in claims if claim["claim_type"] == kind]
+    return DocumentAnalysis(doc_id=document.doc_id, source_id=document.source_id, source_title=document.title, source_url=document.url, reliability_tier=document.reliability_tier, summary=data["summary"], relevant_to_question=relevance != "irrelevant", relevance_level=relevance, grounded_claims=claims, key_points=texts("key_point"), business_impact="; ".join(texts("business_impact")), risk="; ".join(texts("risk")), opportunity="; ".join(texts("opportunity")), strength="; ".join(texts("strength")), weakness="; ".join(texts("weakness")), factors=texts("factor"), recommended_actions=texts("action"), monitoring_indicators=texts("monitoring"), metric_points=metrics, comparison_points=comparisons, evidence=[claim["evidence_quote"] for claim in claims], analysis_confidence=data["analysis_confidence"], analysis_validation_status=status, usable_for_synthesis=relevance != "irrelevant" and bool(claims))
 
 
-def analyze(
-    source_documents: list[SourceDocument],
-    question: str,
-    information_needs: list[str] | None = None,
-    # Accepted for signature parity with sk_broadband's analyzer (pipeline.py
-    # calls every sector's analyze() the same way) - not yet acted on here.
-    evidence_requirements: list[str] | None = None,
-) -> list[DocumentAnalysis]:
-    """입력된 SK텔레콤 관련 문서 목록을 분석하여 DocumentAnalysis 리스트로 반환합니다."""
+def _merge_parts(document: SourceDocument, parts: list[DocumentAnalysis]) -> DocumentAnalysis:
+    claims = [claim for part in parts for claim in part.grounded_claims]
+    claim_ids = {claim.claim_id for claim in claims}
+    def texts(kind: str) -> list[str]: return [claim.claim for claim in claims if claim.claim_type == kind]
+    return DocumentAnalysis(doc_id=document.doc_id, source_id=document.source_id, source_title=document.title, source_url=document.url, reliability_tier=document.reliability_tier, summary=" ".join(part.summary or "" for part in parts).strip(), relevant_to_question=any(part.relevant_to_question for part in parts), relevance_level=next((part.relevance_level for part in parts if part.relevance_level != "irrelevant"), "irrelevant"), grounded_claims=claims, key_points=texts("key_point"), business_impact="; ".join(texts("business_impact")), risk="; ".join(texts("risk")), opportunity="; ".join(texts("opportunity")), strength="; ".join(texts("strength")), weakness="; ".join(texts("weakness")), factors=texts("factor"), recommended_actions=texts("action"), monitoring_indicators=texts("monitoring"), metric_points=[point for part in parts for point in part.metric_points if point.evidence_claim_id in claim_ids], comparison_points=[point for part in parts for point in part.comparison_points if point.evidence_claim_id in claim_ids], evidence=[claim.evidence_quote for claim in claims], analysis_confidence="low" if any(part.analysis_confidence == "low" for part in parts) else "medium", analysis_validation_status="verified" if claims else "insufficient_grounding", usable_for_synthesis=bool(claims))
+
+
+def analyze(source_documents: list[SourceDocument], question: str, information_needs: list[str] | None = None, evidence_requirements: list[str] | None = None) -> list[DocumentAnalysis]:
     api_key = os.environ.get(_API_KEY_ENV_VAR)
     if not api_key:
-        raise PipelineStageError(
-            stage=_STAGE,
-            reason=f"template_only: {_API_KEY_ENV_VAR} is not configured",
-        )
-
+        raise PipelineStageError(stage=_STAGE, reason=f"template_only: {_API_KEY_ENV_VAR} is not configured")
     client = OpenAI(api_key=api_key, **openai_client_kwargs(_BASE_URL_ENV_VAR))
-    system_prompt = _load_system_prompt()
-
-    return [_analyze_document(client, system_prompt, document, question) for document in source_documents]
+    prompt = _load_system_prompt()
+    results: list[DocumentAnalysis] = []
+    for document in source_documents:
+        parts = [_analyze_part(client, prompt, document, question, chunk) for chunk in split_content(document.content or "")]
+        results.append(parts[0] if len(parts) == 1 else _merge_parts(document, parts))
+    return results

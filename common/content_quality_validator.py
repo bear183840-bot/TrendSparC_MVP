@@ -25,6 +25,13 @@ MetricShape = Literal["kpi", "bar", "line", "comparison"]
 
 _YEAR_RE = re.compile(r"(20\d{2}|\d{2})")
 _QUARTER_RE = re.compile(r"([1-4])\s*(?:Q|분기)", re.I)
+# Named distinctly from the unrelated `_HALF_RE` below (line ~341, used by
+# `resolve_relative_period`) - both matched module scope under the same
+# name would silently let whichever is defined later in the file win, and
+# that one's group(1) captures the whole word ("상반기"), not the "상"/"하"
+# single-character split `period_sort_key` needs. Live-verified 2026-08-11:
+# exactly this collision made every half-year period sort as quarter 4.
+_HALF_YEAR_RE = re.compile(r"(상|하)반기")
 _TIMELINE_DATE_RE = re.compile(r"(20\d{2}\s*년(?:\s*\d{1,2}\s*월)?|[1-4]\s*분기|\d{1,2}\s*월\s*\d{1,2}\s*일)")
 
 
@@ -70,10 +77,24 @@ _AGE_BRACKET_RE = re.compile(
 )
 _GENDER_WORDS = ("남성", "여성", "남자", "여자", "male", "female")
 _HOUSEHOLD_WORDS = ("1인 가구", "1인가구", "2인 가구", "가구원", "세대주")
+# Words that already name a slice of people on their own - no further
+# qualifier needed, since the word itself is the segment ("학생" is a segment
+# whether or not anything else is said about it).
 _CUSTOMER_SEGMENT_WORDS = (
-    "이용자", "사용자", "가입자", "고객", "시청자", "헤비 유저", "라이트 유저",
-    "신규 가입", "기존 가입", "학생", "직장인", "소득층", "user segment",
-    "subscriber", "customer segment",
+    "헤비 유저", "라이트 유저", "신규 가입", "기존 가입", "학생", "직장인",
+    "소득층", "user segment", "subscriber", "customer segment",
+)
+# A bare population noun ("이용자가 3,615만") describes the whole population
+# a report is about, not a slice of it - live-verified 2026-08-11: "유료방송
+# 가입자가 약 3,615만으로 조사됐다" (a market-wide total) was classified as
+# "segment" purely because it contains "가입자", and surfaced under "Audience
+# Segments" even though it names no subgroup at all. It only names a genuine
+# segment when a qualifier sits immediately in front of it ("유료 가입자" vs
+# "무료 이용자") - `in text` substring checks would also match "유료방송
+# 가입자" (a category label, not "유료" the qualifier), so this requires the
+# qualifier and noun to be adjacent tokens.
+_SEGMENT_QUALIFIED_NOUN_RE = re.compile(
+    r"(?:헤비|라이트|신규|기존|유료|무료|시범)\s*(?:이용자|사용자|가입자|고객|시청자|구독자|유저)"
 )
 
 EntityKind = Literal["age", "gender", "household", "segment", "entity"]
@@ -90,6 +111,8 @@ def entity_kind(entity: str) -> EntityKind:
     if any(word in text for word in _HOUSEHOLD_WORDS):
         return "household"
     if any(word in lowered for word in _CUSTOMER_SEGMENT_WORDS):
+        return "segment"
+    if _SEGMENT_QUALIFIED_NOUN_RE.search(text):
         return "segment"
     return "entity"
 
@@ -491,6 +514,19 @@ _EXPLICIT_METRIC_ALIAS_CONTRACTS: tuple[tuple[str, tuple[str, ...]], ...] = (
         "iptv market share",
         ("IPTV market share", "IPTV 시장 점유율", "IPTV 점유율"),
     ),
+    # No entity prefix on purpose - "시장점유율"/"점유율" is the generic
+    # measurement concept, distinct from the IPTV/OTT-scoped entries above
+    # (which stay their own canonical key since "IPTV market share" and
+    # "market share" are different lexical strings). Any subject's own
+    # "X 점유율"/"X 시장점유율" still keeps X as a topic-bearing prefix and
+    # so still keys separately per subject - this only merges *within* one
+    # subject's own repeated readings, e.g. `entity_attribute_groups` groups
+    # by `subject` first and only asks whether two of that one subject's
+    # labels are the same attribute.
+    (
+        "market share",
+        ("market share", "시장점유율", "시장 점유율", "점유율"),
+    ),
     (
         "ott viewing time",
         ("OTT viewing time", "OTT 시청 시간", "OTT 이용 시간"),
@@ -547,11 +583,27 @@ _EXPLICIT_METRIC_ALIAS_CONTRACTS: tuple[tuple[str, tuple[str, ...]], ...] = (
         ("set-top box unit cost", "STB unit cost", "셋톱박스 원가", "셋톱박스 단위원가"),
     ),
 )
-_EXPLICIT_METRIC_ALIAS_INDEX = {
-    _lexical_metric_key(alias): canonical
-    for canonical, aliases in _EXPLICIT_METRIC_ALIAS_CONTRACTS
-    for alias in aliases
-}
+def _space_collapsed(key: str) -> str:
+    """Korean compounds are written with or without an internal space
+    inconsistently across sources/extractors ("시장 점유율" vs "시장점유율" -
+    live-verified 2026-08-11: "IPTV 시장점유율" and "IPTV 점유율" from two
+    different tables in the same report failed to alias to each other only
+    because of this, not because they meant different things). Collapsing
+    spaces entirely is a second, looser key tried only after the normal one
+    misses - it never runs before the primary lookup, so two genuinely
+    different phrases that both happen to lose their spaces are still only
+    merged if an alias contract says so.
+    """
+    return key.replace(" ", "")
+
+
+_EXPLICIT_METRIC_ALIAS_INDEX: dict[str, str] = {}
+_EXPLICIT_METRIC_ALIAS_INDEX_COMPACT: dict[str, str] = {}
+for _canonical, _aliases in _EXPLICIT_METRIC_ALIAS_CONTRACTS:
+    for _alias in _aliases:
+        _lex = _lexical_metric_key(_alias)
+        _EXPLICIT_METRIC_ALIAS_INDEX[_lex] = _canonical
+        _EXPLICIT_METRIC_ALIAS_INDEX_COMPACT[_space_collapsed(_lex)] = _canonical
 
 
 def semantic_metric_key(label: str | None) -> str:
@@ -564,7 +616,9 @@ def semantic_metric_key(label: str | None) -> str:
     evidence that two measurements share a definition.
     """
     key = _lexical_metric_key(label)
-    return _EXPLICIT_METRIC_ALIAS_INDEX.get(key, key)
+    if key in _EXPLICIT_METRIC_ALIAS_INDEX:
+        return _EXPLICIT_METRIC_ALIAS_INDEX[key]
+    return _EXPLICIT_METRIC_ALIAS_INDEX_COMPACT.get(_space_collapsed(key), key)
 
 
 def _lexical_entity_key(entity: str | None) -> str:
@@ -822,15 +876,33 @@ def period_sort_key(period: str) -> tuple:
     A period with a year but no quarter ("2025년") sorts by its year, at
     quarter 0. Real evidence mixes annual and quarterly figures freely, and
     treating the annual one as unparseable pushed it behind every quarterly
-    period regardless of year - so "2026년 1분기" landed before "2025년"."""
+    period regardless of year - so "2026년 1분기" landed before "2025년".
+
+    "상반기"/"하반기" (half-year) periods used to fall through to the same
+    quarter-0 bucket as a bare year, tying every half-year period in a given
+    year to an identical sort key - live-verified 2026-08-11: with the tie
+    broken by arbitrary set-iteration order (`period_sort_key` is used to
+    sort a `set` of period strings), "2023년 하반기" landed to the left of
+    "2023년 상반기" on a trend chart's x-axis, and the line connecting them
+    zigzagged backward before continuing forward. Mapped onto the same
+    quarter scale as an actual quarter number (상반기→2, 하반기→4) so a
+    half-year period sorts consistently relative to both other half-years
+    and any quarter-labeled periods mixed into the same series."""
     year_m = _YEAR_RE.search(period or "")
     quarter_m = _QUARTER_RE.search(period or "")
+    half_m = _HALF_YEAR_RE.search(period or "") if not quarter_m else None
     if not year_m:
         return (1, period or "")
     year = int(year_m.group(1))
     if year < 100:
         year += 2000
-    return (0, year, int(quarter_m.group(1)) if quarter_m else 0)
+    if quarter_m:
+        quarter = int(quarter_m.group(1))
+    elif half_m:
+        quarter = 2 if half_m.group(1) == "상" else 4
+    else:
+        quarter = 0
+    return (0, year, quarter)
 
 # Words that signal a *prescriptive* ask ("how do I improve/increase this")
 # layered on top of what might otherwise read as a pure status question -
@@ -994,8 +1066,19 @@ def classify_metric_shape(points_for_one_label: list[Any]) -> MetricShape:
             }
             for subject in subjects
         ]
+        # A single subject needs 3+ points to earn "line" (two dots are a
+        # before/after bar, not a trend - see below). Two or more subjects
+        # tracked over the same sparse timeline is a different shape even at
+        # 2 points each: "국내 OTT 시장규모 2017→2019" beside "글로벌 OTT
+        # 시장규모 2017→2019" is a genuine "compare how these two moved"
+        # story the evidence already states, not an invented interpolation -
+        # live-verified 2026-08-11, this stayed a plain "comparison" bar
+        # table and the Executive Summary's own trend sentence never became
+        # a chart at all. Missing years are never filled in either case;
+        # `render_metric_chart`/`_metric_chart_svg` already only ever plot
+        # the periods actually present.
         if all(
-            len(periods) >= 3 and all(is_time_period(period) for period in periods)
+            len(periods) >= 2 and all(is_time_period(period) for period in periods)
             for periods in periods_per_subject
         ):
             return "line"
@@ -1242,6 +1325,49 @@ def _content_overlap(a: str, b: str) -> float:
     if not tokens_a or not tokens_b:
         return 0.0
     return len(tokens_a & tokens_b) / min(len(tokens_a), len(tokens_b))
+
+
+_CAUSAL_MARKER_RE = re.compile(
+    r"때문|원인|영향으로|영향을|요인|기인|비롯|이유|배경에는|계기로|따른\s*결과"
+)
+_TREND_DIRECTION_WORDS = (
+    "증가", "감소", "상승", "하락", "완만", "지속", "유지", "성장", "축소",
+    "확대", "둔화", "하향", "상향",
+)
+
+
+def is_chart_trend_restatement(sentence: str, chart_subjects: list[str]) -> bool:
+    """Whether `sentence` just narrates a trend a chart already draws.
+
+    General, structural test - not this report's wording: a "Key Drivers"
+    (or any factor/finding) sentence that (a) names two or more of the exact
+    subjects a trend chart is already plotting, (b) describes them only with
+    a bare direction word (증가/감소/...), and (c) states no causal or
+    explanatory link (때문/원인/영향/요인/...) is a caption for the chart,
+    not a driver of anything - a reader already saw the direction in the
+    line itself. A sentence that says *why* the trend moved, or that adds a
+    subject the chart never plotted, survives regardless of how similar its
+    wording looks.
+    """
+    if not chart_subjects or not sentence:
+        return False
+    if _CAUSAL_MARKER_RE.search(sentence):
+        return False
+    if not any(word in sentence for word in _TREND_DIRECTION_WORDS):
+        return False
+    # A chart label often carries a bracketed unit/device qualifier the
+    # chart legend needs but prose never repeats - live-verified 2026-08-11:
+    # the chart plotted "SO [단말장치・단자]"/"위성방송 [단말장치・단자]",
+    # and the driver sentence just said "SO"/"위성방송", so a literal
+    # substring check against the full label matched only 1 of the 3 series
+    # it was actually restating. Only the part before the first bracket is
+    # the name a reader (and a sentence) would use.
+    bare_subjects = [
+        re.split(r"[\[（(]", subject, maxsplit=1)[0].strip()
+        for subject in chart_subjects
+    ]
+    named = [subject for subject in bare_subjects if subject and subject in sentence]
+    return len(named) >= 2
 
 
 def is_duplicate_statement(a: str, b: str, threshold: float = 0.6) -> bool:

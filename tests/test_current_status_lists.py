@@ -97,11 +97,27 @@ def test_the_recommendation_card_still_appears_when_there_are_actions():
 
 def test_a_short_list_stays_prose_rather_than_claiming_a_card():
     """Two bullets are a sentence, not a list worth its own block."""
-    synthesis = _synthesis(risks=["요금 부담", "속도 불만"])
+    synthesis = _synthesis(factors=["요금 부담", "속도 불만"])
 
     by_id = {slot.slot.slot_id: slot for slot in resolve_slots("current_status", synthesis, None)}
 
     assert by_id["factors"].block_type == "narrative_list"
+
+
+def test_key_drivers_does_not_borrow_risks_as_a_substitute():
+    """"Key Drivers" no longer falls back to risks/weaknesses/opportunities.
+
+    Live-verified 2026-08-11: with no real `factors` content, the slot used
+    to borrow risk/opportunity text instead - a SWOT statement is not a
+    driver, and it read as generic narrative under a heading that promises
+    "why". The slot must render nothing rather than force-fill from a
+    different question's answer.
+    """
+    synthesis = _synthesis(risks=["요금 부담", "속도 불만"], opportunities=["신규 결합상품"])
+
+    by_id = {slot.slot.slot_id: slot for slot in resolve_slots("current_status", synthesis, None)}
+
+    assert "factors" not in by_id
 
 
 def test_factor_claims_reach_the_factor_block_without_audience_item_limits():
@@ -127,7 +143,10 @@ def test_the_factor_card_keeps_every_item_not_the_first_four(monkeypatch):
     assert "순서는 우열이 아닙니다" in body
 
 
-def test_factor_slot_renderer_does_not_reintroduce_a_display_cap(monkeypatch):
+def test_factor_slot_renderer_caps_key_drivers_at_five(monkeypatch):
+    """Key Drivers shows at most 5, ranked by importance when the model
+    scored any - capped 2026-08-11 so a factor_list fallback reads the same
+    as driver_bars instead of dumping every extracted factor onto the card."""
     from reporting.dashboard_streamlit.blocks import slot_blocks
 
     captured: list[list[tuple[str, str | None]]] = []
@@ -146,7 +165,7 @@ def test_factor_slot_renderer_does_not_reintroduce_a_display_cap(monkeypatch):
     renderer = slot_blocks._factor_list(context)
     assert renderer is not None
     renderer()
-    assert [value for value, _ in captured[0]] == synthesis.factors
+    assert [value for value, _ in captured[0]] == synthesis.factors[:5]
 
 
 def test_the_new_slots_are_all_optional():
@@ -155,4 +174,4 @@ def test_the_new_slots_are_all_optional():
         slot.slot_id for slot in PURPOSE_SLOTS["current_status"] if slot.optional
     }
 
-    assert optional == {"ranking", "factors", "segments", "keywords", "response"}
+    assert optional == {"ranking", "factors", "segments", "response"}

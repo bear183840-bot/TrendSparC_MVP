@@ -63,8 +63,7 @@
       "purpose_id": "current_status",
       "expected_elements": [
         {"element_id": "content_ranking", "label": "콘텐츠 인기 순위", "acceptable_slot_ids": ["ranking"], "acceptable_block_types": ["item_bar", "grouped_bar", "table"]},
-        {"element_id": "popularity_factor", "label": "인기 요인", "acceptable_slot_ids": ["factors"], "acceptable_block_types": ["driver_bars", "factor_list"]},
-        {"element_id": "related_keywords", "label": "주요 연관 키워드", "acceptable_slot_ids": ["keywords"], "acceptable_block_types": ["recurring_terms"]}
+        {"element_id": "popularity_factor", "label": "인기 요인", "acceptable_slot_ids": ["factors"], "acceptable_block_types": ["driver_bars", "factor_list"]}
       ]
     },
     {

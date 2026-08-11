@@ -115,7 +115,9 @@ def render_issue_response_dashboard(result: Any, question: str, sector: str, aud
 
     render_page_header(question, sector, audience, purpose)
     # This view only ever renders issue_response reports.
-    headline_point = headline_kpi(synthesis.metric_series, question)
+    entities = getattr(result, "entities", None)
+    core_entities = list(getattr(entities, "organizations", None) or [])
+    headline_point = headline_kpi(synthesis.metric_series, question, core_entities)
     render_executive_summary(
         summary, heading=presentation.summary_label, headline_point=headline_point,
     )

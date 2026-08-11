@@ -72,7 +72,11 @@ def _system_prompt(max_urls: int) -> str:
         'summary of what this source says about the query, "key_facts": '
         '[{"text": "...", "metric": null-or-string, "value": null-or-number, '
         '"unit": null-or-string, "time": null-or-string, "value_type": null or '
-        'one of "actual"/"estimate"/"forecast"/"target"/"guidance"}], '
+        'one of "actual"/"estimate"/"forecast"/"target"/"guidance"/"planned" '
+        '("planned" is a stated roadmap/schedule commitment, e.g. a product '
+        'or supply date the source says is scheduled - distinct from '
+        '"target" (an aspirational goal figure) or "forecast" (a '
+        'prediction))}], '
         '"relevance": how this source answers the query}. Only populate a '
         "key_fact's metric/value/unit/time/value_type when the source text "
         "actually states it - never invent or estimate a number yourself. "
@@ -127,17 +131,41 @@ def _coerce_value(raw) -> float | None:
         return None
 
 
-def _coerce_value_type(raw) -> str | None:
-    """Keep malformed model labels from invalidating an entire search round.
+_VALID_VALUE_TYPES = {"actual", "estimate", "forecast", "target", "guidance", "planned"}
+# "reported" describes provenance ("이 수치는 보도됐다"), not a projection
+# state - it isn't one of the contract's value_type buckets, but the model
+# means "this is the evidence-stated figure", which is what "actual" means
+# here. Mapped rather than dropped so a genuinely fine reading doesn't
+# become a silently missing value_type.
+_VALUE_TYPE_ALIASES = {"reported": "actual"}
 
-    ``reported`` describes provenance, not a projection state, so it maps to
-    the contract's evidence-stated ``actual`` value. Unknown labels are
-    omitted rather than guessed.
-    """
-    normalized = str(raw or "").strip().casefold()
-    if normalized == "reported":
-        return "actual"
-    return normalized if normalized in {"actual", "estimate", "forecast", "target", "guidance"} else None
+
+def _coerce_value_type(raw) -> str | None:
+    """KeyFact.value_type is a strict enum, but this is a plain-text-prompted
+    reply (not a strict JSON schema tool call - see this module's docstring),
+    so the model sometimes writes a compound guess like "actual/forecast"
+    instead of committing to one value, or a synonym like "reported" that
+    isn't in the enum at all. Live-verified 2026-08-11: the compound-value
+    case crashed the whole search call with a pydantic ValidationError, same
+    failure mode _coerce_value already guards value against. Splits on
+    common delimiters and keeps the first recognized (or aliased) token;
+    falls back to None ("the model didn't commit to one") rather than
+    guessing which half is right - same spirit as _coerce_value's "no clean
+    number stated"."""
+    if not raw:
+        return None
+    text = str(raw).strip().casefold()
+    if text in _VALUE_TYPE_ALIASES:
+        return _VALUE_TYPE_ALIASES[text]
+    if text in _VALID_VALUE_TYPES:
+        return text
+    for token in re.split(r"[/,&]|\bor\b", text):
+        token = token.strip()
+        if token in _VALUE_TYPE_ALIASES:
+            return _VALUE_TYPE_ALIASES[token]
+        if token in _VALID_VALUE_TYPES:
+            return token
+    return None
 
 
 def _parse_results(text: str, grounded: set[str]) -> list[WebSearchResult]:

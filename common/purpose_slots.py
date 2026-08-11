@@ -203,10 +203,17 @@ _CURRENT_STATUS: tuple[Slot, ...] = (
     # its own place rather than being squeezed into 시장 상황's prose
     # fallback. driver_bars first, because a scored factor list beats an
     # unordered one where the analyzer managed to score it.
+    # `fields` used to also fall back to risks/weaknesses/opportunities when
+    # `factors` was empty - live-verified 2026-08-11: those are SWOT
+    # categories, not causes, so "Key Drivers" ended up listing plain
+    # opportunity/risk sentences ("AI 메모리 수요 증가에 기반한 시장 성장
+    # 기회가 있다") under a heading that promises "왜 그런가". A slot with no
+    # real factor content should render nothing (it's optional=True), not
+    # borrow content that answers a different question.
     Slot("factors", "요인", "무엇이 그것을 좌우하는가",
          ("driver_bars", "factor_list", "narrative_list"),
          (),
-         ("factors", "risks", "weaknesses", "opportunities"), optional=True),
+         ("factors",), optional=True),
     # Age and gender breakdowns have their own place. They used to land in
     # 경쟁사 because the only question asked was "do two entities share a
     # criterion" - true of 50대 vs 60대, and wrong for that heading.
@@ -215,8 +222,6 @@ _CURRENT_STATUS: tuple[Slot, ...] = (
     Slot("segments", "이용자 구성", "어떤 집단에서 어떻게 다른가",
          ("grouped_bar", "segment_table", "narrative_list"),
          ("market_status",), (), subject="demographic", optional=True),
-    Slot("keywords", "반복 언급", "여러 출처가 공통으로 짚은 표현",
-         ("keyword_tags",), (), (), optional=True),
     # Optional because 현황파악 is a "what is happening" question. Four of the
     # five 현황 questions we tested want no recommendation at all, and a
     # 권고 조치 card appearing under an external-audience market report was
@@ -328,16 +333,16 @@ _STATUS_MARKET = _nslot(
 )
 _STATUS_COMPARISON = _nslot(
     "comparison", "주요 비교", "같은 기준에서 무엇이 앞서는가",
-    ("share_split", "grouped_bar", "composition_breakdown", "item_bar",
-     "ranking_list", "metric_comparison", "table", "narrative_list"),
+    ("share_split", "grouped_bar", "entity_attribute_bars", "composition_breakdown",
+     "item_bar", "ranking_list", "metric_comparison", "table", "narrative_list"),
     ("key_metrics", "market_status"), role="analysis",
     question_answered="주요 대상은 같은 기준에서 어떻게 다른가?",
     why_here="현황과 변화 확인 뒤 상대적 위치를 비교한다.",
 )
 _STATUS_EXPLICIT_COMPARISON = _nslot(
     "comparison", "주요 비교", "질문이 지정한 상태·대상을 같은 기준으로 비교",
-    ("bar", "share_split", "grouped_bar", "composition_breakdown", "item_bar",
-     "ranking_list", "metric_comparison", "benchmark_table", "table", "chart",
+    ("bar", "share_split", "grouped_bar", "entity_attribute_bars", "composition_breakdown",
+     "item_bar", "ranking_list", "metric_comparison", "benchmark_table", "table", "chart",
      "narrative_list"),
     ("key_metrics", "market_status"), role="answer",
     question_answered="질문이 지정한 두 상태 또는 대상은 어떻게 다른가?",
@@ -353,7 +358,7 @@ _STATUS_COMPETITOR = _nslot(
 _STATUS_FACTORS = _nslot(
     "factors", "주요 요인", "무엇이 현재 상태를 좌우하는가",
     ("driver_bars", "factor_list", "narrative_list"), (),
-    ("factors", "risks", "weaknesses", "opportunities"), optional=True,
+    ("factors",), optional=True,
     role="analysis", question_answered="현재 상태를 좌우하는 요인은 무엇인가?",
     why_here="관찰된 결과 뒤에 그 배경 요인을 해석한다.",
 )
@@ -363,12 +368,6 @@ _STATUS_SEGMENTS = _nslot(
     optional=True, subject="demographic", role="support",
     question_answered="어떤 이용자 집단에서 차이가 나는가?",
     why_here="질문과 관련된 세그먼트 근거가 있을 때만 상세로 제시한다.",
-)
-_STATUS_KEYWORDS = _nslot(
-    "keywords", "반복 언급", "여러 출처의 공통 표현",
-    ("keyword_tags",), optional=True, role="support",
-    question_answered="여러 출처가 공통으로 언급한 것은 무엇인가?",
-    why_here="정량·구조 분석을 보조하는 하단 근거다.",
 )
 _STATUS_RESPONSE = _nslot(
     "response", "대응 방향", "근거에서 도출되는 다음 행동",
@@ -387,15 +386,15 @@ _STATUS_SWOT = _nslot(
 
 _STATUS_GENERAL = (
     _STATUS_SNAPSHOT, _STATUS_MARKET, _STATUS_COMPARISON, _STATUS_COMPETITOR,
-    _STATUS_FACTORS, _STATUS_SEGMENTS, _STATUS_SWOT, _STATUS_KEYWORDS, _STATUS_RESPONSE,
+    _STATUS_FACTORS, _STATUS_SEGMENTS, _STATUS_SWOT, _STATUS_RESPONSE,
 )
 _STATUS_COMPARE = (
     _STATUS_EXPLICIT_COMPARISON, _STATUS_SNAPSHOT, _STATUS_COMPETITOR, _STATUS_MARKET,
-    _STATUS_FACTORS, _STATUS_SEGMENTS, _STATUS_SWOT, _STATUS_KEYWORDS, _STATUS_RESPONSE,
+    _STATUS_FACTORS, _STATUS_SEGMENTS, _STATUS_SWOT, _STATUS_RESPONSE,
 )
 _STATUS_TREND = (
     _STATUS_MARKET, _STATUS_SNAPSHOT, _STATUS_FACTORS, _STATUS_COMPARISON,
-    _STATUS_COMPETITOR, _STATUS_SEGMENTS, _STATUS_SWOT, _STATUS_KEYWORDS, _STATUS_RESPONSE,
+    _STATUS_COMPETITOR, _STATUS_SEGMENTS, _STATUS_SWOT, _STATUS_RESPONSE,
 )
 
 _RECOMMEND = (
@@ -425,8 +424,16 @@ _RECOMMEND = (
            ("recommended_action", "strategic_recommendation"), ("recommended_actions",),
            role="decision", question_answered="최종적으로 무엇을 추천하는가?",
            why_here="타깃·후보·비교·적합도 근거를 확인한 뒤 선택을 제시한다."),
+    # No "timeline" candidate - live-verified 2026-08-11: Timeline's own
+    # data source (`has_timeline`, dated evidence generally) isn't scoped
+    # to execution steps, so whenever the only dated evidence in a report
+    # was about market/industry events, this late "execution" slot still
+    # claimed it as its own lead before the market-category slot (which
+    # tries "timeline" too, but only after landscape/chart) ever got a
+    # turn - putting a market timeline at the bottom of the page next to
+    # Recommended Actions instead of near Market Analysis at the top.
     _nslot("execution", "실행", "추천을 어떻게 실행할 것인가",
-           ("timeline", "kpi_grid", "narrative_list"),
+           ("kpi_grid", "narrative_list"),
            ("strategic_recommendation",), ("monitoring_indicators",), optional=True,
            role="action", question_answered="추천안을 어떻게 실행하고 확인할 것인가?",
            why_here="실행 근거가 있을 때만 추천 이후 단계로 제시한다."),
@@ -483,8 +490,10 @@ _ISSUE_NARRATIVE = (
            ("response_actions", "recommended_action"), ("recommended_actions",),
            role="decision", question_answered="가장 우선할 대응은 무엇인가?",
            why_here="대안 비교 뒤 근거 기반 권고로 결론을 낸다."),
+    # No "timeline" candidate - see the identical note on the other
+    # "execution" slot above.
     _nslot("execution", "실행", "대응의 순서와 확인 지표",
-           ("timeline", "kpi_grid", "narrative_list"),
+           ("kpi_grid", "narrative_list"),
            ("response_actions",), ("monitoring_indicators",), optional=True,
            role="action", question_answered="권장 조치를 언제 어떻게 실행할 것인가?",
            why_here="실행 시점이나 확인 지표가 있을 때만 후속 계획을 제시한다."),
@@ -521,8 +530,10 @@ _STRATEGY_NARRATIVE = (
            ("recommended_actions",), role="decision",
            question_answered="최종적으로 어디로 가야 하는가?",
            why_here="분석과 선택의 결론을 명확한 방향으로 제시한다."),
+    # No "timeline" candidate - see the identical note on _ISSUE_RESPONSE's
+    # "execution" slot.
     _nslot("execution", "실행 단계", "전략 실행 순서",
-           ("action_list", "timeline", "kpi_grid", "narrative_list"),
+           ("action_list", "kpi_grid", "narrative_list"),
            ("strategic_recommendation",), ("recommended_actions", "monitoring_indicators"),
            role="action", question_answered="선택한 전략을 어떻게 실행할 것인가?",
            why_here="전략 방향을 실제 행동과 확인 지표로 닫는다."),
@@ -649,6 +660,13 @@ def _availability() -> dict[str, Callable[[Any, list[str]], bool]]:
         # Three axes at once (metric x subject x category) - strictly more
         # than item_bar shows, so it is offered first wherever both fit.
         "grouped_bar": lambda synthesis, items: block_shapes.has_grouped_bars(synthesis.metric_series),
+        # Two or more subjects with their OWN distinct attributes and no
+        # shared category between them at all - "grouped_bar" above requires
+        # the opposite (every subject measured on the same categories), so
+        # this is not a narrower version of it, it is the complementary shape.
+        "entity_attribute_bars": lambda synthesis, items: block_shapes.has_entity_attribute_bars(
+            synthesis.metric_series
+        ),
         "status_bar": lambda synthesis, items: block_shapes.has_status_levels(
             synthesis.comparison_points
         ),
@@ -811,6 +829,7 @@ _SHAPE_FAMILIES: dict[str, str] = {
     "item_bar": "bars",
     "ranking_list": "bars",
     "grouped_bar": "bars",
+    "entity_attribute_bars": "bars",
     "metric_comparison": "bars",
     # A timeline built from a repeated metric (see `_timeline_keys`) draws
     # the exact figures a bar/item_bar/metric_comparison would for that same
@@ -1024,6 +1043,10 @@ def _consumption(question: str | None = None) -> dict[str, Callable[[Any, list[s
         "grouped_bar": lambda s, i: {
             f"metric:{semantic_metric_key(label)}"
             for label, _, _ in block_shapes.grouped_bar_series(s.metric_series)
+        },
+        "entity_attribute_bars": lambda s, i: {
+            f"entity_attr:{semantic_entity_key(subject)}"
+            for subject, _ in block_shapes.entity_attribute_groups(s.metric_series)
         },
         "share_split": lambda s, i: _share_keys(block_shapes.share_groups(s.metric_series)),
         "composition_breakdown": lambda s, i: _share_keys(
