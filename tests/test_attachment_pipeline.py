@@ -20,7 +20,7 @@ def test_attachment_is_analyzed_beside_web_documents_and_can_continue_without_co
     monkeypatch.setattr(processor, "process", lambda documents: documents)
     monkeypatch.setattr(validator, "validate", lambda documents, search_context=None: documents)
 
-    def fake_analyze(documents, question, information_needs=None, target_block_shapes=None):
+    def fake_analyze(documents, question, information_needs=None, evidence_requirements=None):
         assert len(documents) == 1
         assert documents[0].doc_id.startswith("attachment:")
         assert "첨부의 핵심 사실" in question

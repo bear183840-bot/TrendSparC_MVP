@@ -70,7 +70,7 @@ def test_analyzer_chunks_and_merges_long_document(monkeypatch):
     first = "HBM demand reached 100 units in 2026."
     second = "Capacity investment reached 200 units in 2026."
     content = first + "x" * 12_100 + "\n\n" + second
-    _wire(monkeypatch, [_analysis_response([_claim(first, "first")]), _analysis_response([_claim(second, "second", "metric")], metrics=[{"label": "capacity", "period": "2026", "value": 200, "unit": "units", "subject": None, "is_relative": False, "comparison_period": None, "evidence_claim_id": "second"}])])
+    _wire(monkeypatch, [_analysis_response([_claim(first, "first")]), _analysis_response([_claim(second, "second", "metric")], metrics=[{"label": "capacity", "period": "2026", "value": 200, "unit": "units", "subject": None, "is_relative": False, "comparison_period": None, "value_origin": "source", "evidence_claim_id": "second"}])])
 
     result = analyzer_module.analyze([_document(content)], "HBM capacity?")[0]
 

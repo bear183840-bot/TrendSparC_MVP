@@ -457,6 +457,11 @@ def _run_pipeline_stages(
                     and result.source_collection.minimum_validated_documents is not None
                     else profile.min_validated_documents
                 )
+                # An attachment is already extracted, attributed evidence.
+                # When collection is unavailable, do not reject that evidence
+                # merely because a sector's web-document floor is higher.
+                if attachment_documents and result.source_collection is None:
+                    minimum = 0
                 max_recollections = profile.max_validation_recollection_attempts
                 recollection_attempt = 0
                 while minimum > 0 and len(output) < minimum and recollection_attempt < max_recollections:
@@ -548,6 +553,8 @@ def _run_pipeline_stages(
                 profile = result.sector_route.matched_profile
                 minimum = profile.min_analyzed_documents
                 target = max(minimum, profile.target_analyzed_documents)
+                if attachment_documents and result.source_collection is None:
+                    minimum = target = 1
                 # The collection mode used to decide this: a `source_router`
                 # run got 0 attempts, on the assumption that the router's own
                 # gap loop had already collected everything it was going to.

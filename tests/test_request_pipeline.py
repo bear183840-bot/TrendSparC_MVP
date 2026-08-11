@@ -169,11 +169,31 @@ def test_analyzer_documents_flagged_irrelevant_are_dropped_before_synthesis(monk
     monkeypatch.setattr(sk_hynix_analyzer, "analyze", fake_analyze)
 
     request = _make_request("SK하이닉스 HBM 시장 전망", requested_sector_id="sk_hynix")
+    # Meet the profile's analyzed-document target so this test remains about
+    # dropping irrelevant analyses, not bounded recollection.
+    fake_documents.extend(
+        SourceDocument(doc_id=f"d{index}", source_id="source", title=f"t{index}", content=f"c{index}")
+        for index in range(3, 7)
+    )
+
+    def analyze_with_one_irrelevant(documents, question, information_needs=None, evidence_requirements=None):
+        return [
+            DocumentAnalysis(
+                doc_id=document.doc_id,
+                summary="irrelevant" if document.doc_id == "d2" else "relevant",
+                key_points=["point"],
+                relevant_to_question=document.doc_id != "d2",
+            )
+            for document in documents
+        ]
+
+    monkeypatch.setattr(sk_hynix_analyzer, "analyze", analyze_with_one_irrelevant)
+
     result = run_pipeline(request, dry_run=False)
 
     assert result.halted_at_stage is None
     assert result.collected_source_documents == fake_documents
-    assert [analysis.doc_id for analysis in result.document_analyses] == ["d1"]
+    assert [analysis.doc_id for analysis in result.document_analyses] == ["d1", "d3", "d4", "d5", "d6"]
 
 
 def test_progress_sink_is_the_same_object_as_result_collection_events_and_receives_live_events(monkeypatch):
@@ -198,6 +218,28 @@ def test_progress_sink_is_the_same_object_as_result_collection_events_and_receiv
     )
 
     request = _make_request("SK하이닉스 HBM 시장 전망", requested_sector_id="sk_hynix")
+    # The SK hynix profile now intentionally asks for five analyzed documents.
+    # Keep this progress identity test focused on its own contract by meeting
+    # that floor in the fixture, rather than triggering recollection events.
+    def enough_documents(_source_plan):
+        from core.collection_progress import emit_collection_event
+
+        emit_collection_event("source", 1, 1, "started")
+        emit_collection_event("source", 1, 1, "completed", document_count=5)
+        return [
+            SourceDocument(doc_id=f"d{index}", source_id="source", title=f"t{index}", content=f"c{index}")
+            for index in range(1, 6)
+        ]
+
+    def analyze_enough(documents, question, information_needs=None, evidence_requirements=None):
+        return [
+            DocumentAnalysis(doc_id=document.doc_id, summary="s", key_points=["p"], relevant_to_question=True)
+            for document in documents
+        ]
+
+    monkeypatch.setattr(sk_hynix_collector, "collect", enough_documents)
+    monkeypatch.setattr(sk_hynix_analyzer, "analyze", analyze_enough)
+
     sink: list = []
 
     result = run_pipeline(request, dry_run=False, progress_sink=sink)

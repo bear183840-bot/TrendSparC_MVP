@@ -15,6 +15,12 @@ from common.analyzer_quality import (
     split_evidence_passages,
     verify_claim_quotes,
 )
+from common.content_quality_validator import (
+    COMPARISON_COMPLETENESS_INSTRUCTION,
+    RELATIVE_METRIC_EXTRACTION_INSTRUCTION,
+    SWOT_COMPLETENESS_INSTRUCTION,
+    TABLE_COMPLETENESS_INSTRUCTION,
+)
 from common.contracts import DocumentAnalysis, SourceDocument
 from common.errors import PipelineStageError
 from sources.openai_retry import call_with_truncation_retry
@@ -59,7 +65,7 @@ _ANALYSIS_SCHEMA = {
         "summary": {"type": "string"},
         "relevance_level": {"type": "string", "enum": ["direct", "partial", "background", "irrelevant"]},
         "grounded_claims": {"type": "array", "maxItems": _MAX_CLAIMS_PER_CALL, "items": _CLAIM_SCHEMA},
-        "metric_points": {"type": "array", "maxItems": _MAX_METRIC_POINTS_PER_CALL, "items": {"type": "object", "properties": {"label": {"type": "string"}, "period": {"type": "string"}, "value": {"type": "number"}, "unit": {"type": ["string", "null"]}, "subject": {"type": ["string", "null"]}, "is_relative": {"type": "boolean"}, "comparison_period": {"type": ["string", "null"]}, "evidence_claim_id": {"type": "string"}}, "required": ["label", "period", "value", "unit", "subject", "is_relative", "comparison_period", "evidence_claim_id"], "additionalProperties": False}},
+        "metric_points": {"type": "array", "maxItems": _MAX_METRIC_POINTS_PER_CALL, "items": {"type": "object", "properties": {"label": {"type": "string"}, "period": {"type": "string"}, "value": {"type": "number"}, "unit": {"type": ["string", "null"]}, "subject": {"type": ["string", "null"]}, "is_relative": {"type": "boolean"}, "comparison_period": {"type": ["string", "null"]}, "value_origin": {"type": "string", "enum": ["source"]}, "evidence_claim_id": {"type": "string"}}, "required": ["label", "period", "value", "unit", "subject", "is_relative", "comparison_period", "value_origin", "evidence_claim_id"], "additionalProperties": False}},
         "comparison_points": {"type": "array", "maxItems": _MAX_COMPARISON_POINTS_PER_CALL, "items": {"type": "object", "properties": {"entity": {"type": "string"}, "criterion": {"type": "string"}, "value": {"type": "string"}, "level": {"type": ["string", "null"], "enum": ["low", "medium", "high", None]}, "evidence_claim_id": {"type": "string"}}, "required": ["entity", "criterion", "value", "level", "evidence_claim_id"], "additionalProperties": False}},
         "analysis_confidence": {"type": "string", "enum": ["low", "medium", "high"]},
     },
@@ -70,7 +76,15 @@ _REPAIR_SCHEMA = {"type": "object", "properties": {"repairs": {"type": "array", 
 
 
 def _load_system_prompt() -> str:
-    return "\n\n".join(path.read_text(encoding="utf-8") for path in (_ANALYZER_PROMPT_PATH, _SECTOR_PROMPT_PATH))
+    return "\n\n".join(
+        [
+            *(path.read_text(encoding="utf-8") for path in (_ANALYZER_PROMPT_PATH, _SECTOR_PROMPT_PATH)),
+            SWOT_COMPLETENESS_INSTRUCTION,
+            COMPARISON_COMPLETENESS_INSTRUCTION,
+            TABLE_COMPLETENESS_INSTRUCTION,
+            RELATIVE_METRIC_EXTRACTION_INSTRUCTION,
+        ]
+    )
 
 
 def _repair_failed_claims(client: OpenAI, failed: list[dict], passages: list[dict[str, str]]) -> list[dict]:
