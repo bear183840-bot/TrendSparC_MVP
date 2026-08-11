@@ -132,25 +132,37 @@ def _coerce_value(raw) -> float | None:
 
 
 _VALID_VALUE_TYPES = {"actual", "estimate", "forecast", "target", "guidance", "planned"}
+# "reported" describes provenance ("이 수치는 보도됐다"), not a projection
+# state - it isn't one of the contract's value_type buckets, but the model
+# means "this is the evidence-stated figure", which is what "actual" means
+# here. Mapped rather than dropped so a genuinely fine reading doesn't
+# become a silently missing value_type.
+_VALUE_TYPE_ALIASES = {"reported": "actual"}
 
 
 def _coerce_value_type(raw) -> str | None:
     """KeyFact.value_type is a strict enum, but this is a plain-text-prompted
     reply (not a strict JSON schema tool call - see this module's docstring),
     so the model sometimes writes a compound guess like "actual/forecast"
-    instead of committing to one value. Live-verified 2026-08-11: that exact
-    string crashed the whole search call with a pydantic ValidationError,
-    same failure mode _coerce_value already guards value against. Splits on
-    common delimiters and keeps the first recognized token; falls back to
-    None ("the model didn't commit to one") rather than guessing which half
-    is right - same spirit as _coerce_value's "no clean number stated"."""
+    instead of committing to one value, or a synonym like "reported" that
+    isn't in the enum at all. Live-verified 2026-08-11: the compound-value
+    case crashed the whole search call with a pydantic ValidationError, same
+    failure mode _coerce_value already guards value against. Splits on
+    common delimiters and keeps the first recognized (or aliased) token;
+    falls back to None ("the model didn't commit to one") rather than
+    guessing which half is right - same spirit as _coerce_value's "no clean
+    number stated"."""
     if not raw:
         return None
     text = str(raw).strip().casefold()
+    if text in _VALUE_TYPE_ALIASES:
+        return _VALUE_TYPE_ALIASES[text]
     if text in _VALID_VALUE_TYPES:
         return text
     for token in re.split(r"[/,&]|\bor\b", text):
         token = token.strip()
+        if token in _VALUE_TYPE_ALIASES:
+            return _VALUE_TYPE_ALIASES[token]
         if token in _VALID_VALUE_TYPES:
             return token
     return None

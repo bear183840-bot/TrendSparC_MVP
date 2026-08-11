@@ -42,6 +42,90 @@ class UserRequest(BaseModel):
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 
+class QuestionContext(BaseModel):
+    """Question boundaries that every downstream interpretation must preserve."""
+
+    question: str
+    language: Literal["ko", "en", "other"] = "other"
+    question_answer_type: Literal[
+        "status", "compare", "trend", "cause", "issue_response", "recommend", "strategy",
+        "impact", "case_study", "ranking", "driver", "pain_point", "causal_effect"
+    ] = "status"
+    # A compound question can explicitly demand more than one answer shape:
+    # "5년 추이 (국내 vs 글로벌 비교)" is both trend and comparison.  The
+    # scalar above remains the reader-facing primary shape for compatibility;
+    # this list preserves every shape the evidence must satisfy.
+    required_answer_shapes: list[Literal[
+        "status", "compare", "trend", "cause", "issue_response", "recommend", "strategy",
+        "impact", "case_study", "ranking", "driver", "pain_point", "causal_effect"
+    ]] = Field(default_factory=list)
+    time_scope: Optional[str] = None
+    geography_scope: Optional[str] = None
+    explicit_constraints: list[str] = Field(default_factory=list)
+
+
+class RequestedAnswer(BaseModel):
+    """One user-facing answer the finished result must answer or disclose as missing."""
+
+    answer_id: str
+    question_anchor: str
+    answer_type: Literal[
+        "status", "compare", "trend", "cause", "issue_response", "recommend", "strategy",
+        "impact", "case_study", "ranking", "driver", "pain_point", "causal_effect"
+    ]
+    subject: str
+    dimensions: list[str] = Field(default_factory=list)
+    # A user-stated decision criterion (for example "브랜드 이미지 개선에
+    # 맞는"). It qualifies how an answer is judged; it is not a second answer
+    # the system may silently turn into a market-status investigation.
+    selection_criteria: list[str] = Field(default_factory=list)
+    priority: Literal["primary", "secondary"] = "primary"
+    origin: Literal["user_explicit", "ai_refined"] = "user_explicit"
+    rationale: Optional[str] = None
+
+
+class EvidenceRequirement(BaseModel):
+    """Minimum evidence shape for one requested answer, never a UI instruction."""
+
+    requirement_id: str
+    for_answer_id: str
+    kind: Literal["status", "metric", "comparison", "trend", "causal_link", "action", "outcome", "risk", "definition"]
+    semantic_target: str
+    comparison_dimension: Optional[str] = None
+    common_basis_required: bool = False
+    directness: Literal["direct_required", "supporting_or_direct"] = "supporting_or_direct"
+    acceptable_evidence_patterns: list[str] = Field(default_factory=list)
+    derivation_type: Literal["explicit", "semantic_inference"] = "explicit"
+    origin: Literal["rule", "ai_refined", "derived"] = "rule"
+    rationale: Optional[str] = None
+
+
+class AnswerFulfillment(BaseModel):
+    """Evidence-backed status for one requested answer after synthesis."""
+
+    for_answer_id: str
+    status: Literal["fulfilled", "partial", "unmet"]
+    supported_requirement_ids: list[str] = Field(default_factory=list)
+    missing_requirement_ids: list[str] = Field(default_factory=list)
+    claim_ids: list[str] = Field(default_factory=list)
+    metric_ids: list[str] = Field(default_factory=list)
+    comparison_ids: list[str] = Field(default_factory=list)
+    document_ids: list[str] = Field(default_factory=list)
+    explanation: str = ""
+
+
+class QuestionBrief(BaseModel):
+    """Question-first contract from interpretation through evidence and reporting."""
+
+    request_id: str
+    question_context: QuestionContext
+    requested_answers: list[RequestedAnswer] = Field(default_factory=list)
+    evidence_requirements: list[EvidenceRequirement] = Field(default_factory=list)
+    fulfillment: list[AnswerFulfillment] = Field(default_factory=list)
+    refinement_mode: Literal["rule_based", "ai_refined"] = "rule_based"
+    validation_feedback: list[str] = Field(default_factory=list)
+
+
 class EntityExtractionResult(BaseModel):
     request_id: str
     primary_intent: str
@@ -67,6 +151,10 @@ class EntityExtractionResult(BaseModel):
     # semantic requirements (comparable figures, segment facts, causal links,
     # candidate criteria...), never renderer names such as KPI or BAR.
     evidence_requirements: list[str] = Field(default_factory=list)
+    # The structured successor to the two compatibility lists above.  The
+    # lists remain populated during migration because legacy source-planning
+    # and archived runs still read them.
+    question_brief: Optional[QuestionBrief] = None
     # Conversational questions do not enter the report pipeline. Report-worthy
     # questions without an SK-sector match continue through the general route.
     response_mode: Optional[Literal["report", "direct_answer"]] = None

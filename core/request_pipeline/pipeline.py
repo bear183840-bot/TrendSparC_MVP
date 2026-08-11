@@ -65,6 +65,12 @@ from core.question_coverage import (
     derive_answer_and_evidence_requirements,
     derive_question_coverage,
 )
+from core.question_brief import (
+    build_fulfillment,
+    build_rule_based_question_brief,
+    legacy_requirement_lists,
+    refine_question_brief_ai,
+)
 from core.report_purpose.classifier import classify_report_purpose
 from core.run_archive import archive_run
 from core.request_pipeline.direct_response import direct_response_for
@@ -346,15 +352,22 @@ def _run_pipeline_stages(
             request.request_id, result.report_purpose.purpose_id,
             result.report_purpose.question_answer_type,
         )
+        rule_brief = build_rule_based_question_brief(
+            request.request_id,
+            request.question,
+        )
+        question_brief = refine_question_brief_ai(rule_brief)
+        brief_answers, brief_evidence = legacy_requirement_lists(question_brief)
         answer_requirements, evidence_requirements = derive_answer_and_evidence_requirements(
             request.question,
             result.report_purpose.question_answer_type,
-            result.entities.answer_requirements,
-            result.entities.evidence_requirements,
+            brief_answers,
+            brief_evidence,
         )
         result.entities = result.entities.model_copy(update={
             "answer_requirements": answer_requirements,
             "evidence_requirements": evidence_requirements,
+            "question_brief": question_brief,
         })
         result.trace.append(StageTrace(stage="block_priority_planner", status=StageStatus.OK))
     except PipelineStageError as exc:
@@ -870,6 +883,10 @@ def _run_report_stages(
             result.synthesis.recommended_actions, action_owner
         )
     })
+    if result.entities and result.entities.question_brief:
+        result.entities = result.entities.model_copy(update={
+            "question_brief": build_fulfillment(result.entities.question_brief, result.synthesis)
+        })
     # 6. report_planner
     try:
         maybe_force_fail("report_planner")
@@ -906,6 +923,7 @@ def _run_report_stages(
             canonical_entities=canonical_entities,
             missing_information_needs=still_missing,
             target_company=action_owner,
+            question_brief=(entities.question_brief if entities else None),
         )
         # The dashboard's chart/KPI/timeline blocks read
         # TrendSynthesis.metric_series, not the report's sections, so figures

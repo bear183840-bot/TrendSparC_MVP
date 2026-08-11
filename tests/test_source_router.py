@@ -937,6 +937,21 @@ def test_execute_web_search_coerces_approximate_text_value_instead_of_crashing(m
     assert results[0].key_facts[0].value == 500.0
 
 
+def test_execute_web_search_normalizes_reported_value_type_instead_of_crashing(monkeypatch):
+    """A live Solar search response used ``reported``, which is provenance
+    wording rather than one of KeyFact's projection states."""
+    url = "https://real.example.com/reported"
+    items = [{
+        "url": url, "title": "t", "summary": "s", "relevance": "r",
+        "key_facts": [{"text": "source-stated figure", "value": 42, "value_type": "reported"}],
+    }]
+    _patch_web_search(monkeypatch, [_search_response(items, [url])])
+
+    results = web_search_module.execute_web_search("query")
+
+    assert results[0].key_facts[0].value_type == "actual"
+
+
 def test_execute_web_search_key_fact_value_none_when_no_number_present(monkeypatch):
     url = "https://real.example.com/b"
     items = [
