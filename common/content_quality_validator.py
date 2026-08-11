@@ -70,10 +70,24 @@ _AGE_BRACKET_RE = re.compile(
 )
 _GENDER_WORDS = ("남성", "여성", "남자", "여자", "male", "female")
 _HOUSEHOLD_WORDS = ("1인 가구", "1인가구", "2인 가구", "가구원", "세대주")
+# Words that already name a slice of people on their own - no further
+# qualifier needed, since the word itself is the segment ("학생" is a segment
+# whether or not anything else is said about it).
 _CUSTOMER_SEGMENT_WORDS = (
-    "이용자", "사용자", "가입자", "고객", "시청자", "헤비 유저", "라이트 유저",
-    "신규 가입", "기존 가입", "학생", "직장인", "소득층", "user segment",
-    "subscriber", "customer segment",
+    "헤비 유저", "라이트 유저", "신규 가입", "기존 가입", "학생", "직장인",
+    "소득층", "user segment", "subscriber", "customer segment",
+)
+# A bare population noun ("이용자가 3,615만") describes the whole population
+# a report is about, not a slice of it - live-verified 2026-08-11: "유료방송
+# 가입자가 약 3,615만으로 조사됐다" (a market-wide total) was classified as
+# "segment" purely because it contains "가입자", and surfaced under "Audience
+# Segments" even though it names no subgroup at all. It only names a genuine
+# segment when a qualifier sits immediately in front of it ("유료 가입자" vs
+# "무료 이용자") - `in text` substring checks would also match "유료방송
+# 가입자" (a category label, not "유료" the qualifier), so this requires the
+# qualifier and noun to be adjacent tokens.
+_SEGMENT_QUALIFIED_NOUN_RE = re.compile(
+    r"(?:헤비|라이트|신규|기존|유료|무료|시범)\s*(?:이용자|사용자|가입자|고객|시청자|구독자|유저)"
 )
 
 EntityKind = Literal["age", "gender", "household", "segment", "entity"]
@@ -90,6 +104,8 @@ def entity_kind(entity: str) -> EntityKind:
     if any(word in text for word in _HOUSEHOLD_WORDS):
         return "household"
     if any(word in lowered for word in _CUSTOMER_SEGMENT_WORDS):
+        return "segment"
+    if _SEGMENT_QUALIFIED_NOUN_RE.search(text):
         return "segment"
     return "entity"
 

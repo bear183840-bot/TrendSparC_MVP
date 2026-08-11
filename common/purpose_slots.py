@@ -215,8 +215,6 @@ _CURRENT_STATUS: tuple[Slot, ...] = (
     Slot("segments", "이용자 구성", "어떤 집단에서 어떻게 다른가",
          ("grouped_bar", "segment_table", "narrative_list"),
          ("market_status",), (), subject="demographic", optional=True),
-    Slot("keywords", "반복 언급", "여러 출처가 공통으로 짚은 표현",
-         ("keyword_tags",), (), (), optional=True),
     # Optional because 현황파악 is a "what is happening" question. Four of the
     # five 현황 questions we tested want no recommendation at all, and a
     # 권고 조치 card appearing under an external-audience market report was
@@ -328,16 +326,16 @@ _STATUS_MARKET = _nslot(
 )
 _STATUS_COMPARISON = _nslot(
     "comparison", "주요 비교", "같은 기준에서 무엇이 앞서는가",
-    ("share_split", "grouped_bar", "composition_breakdown", "item_bar",
-     "ranking_list", "metric_comparison", "table", "narrative_list"),
+    ("share_split", "grouped_bar", "entity_attribute_bars", "composition_breakdown",
+     "item_bar", "ranking_list", "metric_comparison", "table", "narrative_list"),
     ("key_metrics", "market_status"), role="analysis",
     question_answered="주요 대상은 같은 기준에서 어떻게 다른가?",
     why_here="현황과 변화 확인 뒤 상대적 위치를 비교한다.",
 )
 _STATUS_EXPLICIT_COMPARISON = _nslot(
     "comparison", "주요 비교", "질문이 지정한 상태·대상을 같은 기준으로 비교",
-    ("bar", "share_split", "grouped_bar", "composition_breakdown", "item_bar",
-     "ranking_list", "metric_comparison", "benchmark_table", "table", "chart",
+    ("bar", "share_split", "grouped_bar", "entity_attribute_bars", "composition_breakdown",
+     "item_bar", "ranking_list", "metric_comparison", "benchmark_table", "table", "chart",
      "narrative_list"),
     ("key_metrics", "market_status"), role="answer",
     question_answered="질문이 지정한 두 상태 또는 대상은 어떻게 다른가?",
@@ -364,12 +362,6 @@ _STATUS_SEGMENTS = _nslot(
     question_answered="어떤 이용자 집단에서 차이가 나는가?",
     why_here="질문과 관련된 세그먼트 근거가 있을 때만 상세로 제시한다.",
 )
-_STATUS_KEYWORDS = _nslot(
-    "keywords", "반복 언급", "여러 출처의 공통 표현",
-    ("keyword_tags",), optional=True, role="support",
-    question_answered="여러 출처가 공통으로 언급한 것은 무엇인가?",
-    why_here="정량·구조 분석을 보조하는 하단 근거다.",
-)
 _STATUS_RESPONSE = _nslot(
     "response", "대응 방향", "근거에서 도출되는 다음 행동",
     ("action_list", "narrative_list"), ("recommended_action", "near_term_outlook"),
@@ -387,15 +379,15 @@ _STATUS_SWOT = _nslot(
 
 _STATUS_GENERAL = (
     _STATUS_SNAPSHOT, _STATUS_MARKET, _STATUS_COMPARISON, _STATUS_COMPETITOR,
-    _STATUS_FACTORS, _STATUS_SEGMENTS, _STATUS_SWOT, _STATUS_KEYWORDS, _STATUS_RESPONSE,
+    _STATUS_FACTORS, _STATUS_SEGMENTS, _STATUS_SWOT, _STATUS_RESPONSE,
 )
 _STATUS_COMPARE = (
     _STATUS_EXPLICIT_COMPARISON, _STATUS_SNAPSHOT, _STATUS_COMPETITOR, _STATUS_MARKET,
-    _STATUS_FACTORS, _STATUS_SEGMENTS, _STATUS_SWOT, _STATUS_KEYWORDS, _STATUS_RESPONSE,
+    _STATUS_FACTORS, _STATUS_SEGMENTS, _STATUS_SWOT, _STATUS_RESPONSE,
 )
 _STATUS_TREND = (
     _STATUS_MARKET, _STATUS_SNAPSHOT, _STATUS_FACTORS, _STATUS_COMPARISON,
-    _STATUS_COMPETITOR, _STATUS_SEGMENTS, _STATUS_SWOT, _STATUS_KEYWORDS, _STATUS_RESPONSE,
+    _STATUS_COMPETITOR, _STATUS_SEGMENTS, _STATUS_SWOT, _STATUS_RESPONSE,
 )
 
 _RECOMMEND = (
@@ -649,6 +641,13 @@ def _availability() -> dict[str, Callable[[Any, list[str]], bool]]:
         # Three axes at once (metric x subject x category) - strictly more
         # than item_bar shows, so it is offered first wherever both fit.
         "grouped_bar": lambda synthesis, items: block_shapes.has_grouped_bars(synthesis.metric_series),
+        # Two or more subjects with their OWN distinct attributes and no
+        # shared category between them at all - "grouped_bar" above requires
+        # the opposite (every subject measured on the same categories), so
+        # this is not a narrower version of it, it is the complementary shape.
+        "entity_attribute_bars": lambda synthesis, items: block_shapes.has_entity_attribute_bars(
+            synthesis.metric_series
+        ),
         "status_bar": lambda synthesis, items: block_shapes.has_status_levels(
             synthesis.comparison_points
         ),
@@ -811,6 +810,7 @@ _SHAPE_FAMILIES: dict[str, str] = {
     "item_bar": "bars",
     "ranking_list": "bars",
     "grouped_bar": "bars",
+    "entity_attribute_bars": "bars",
     "metric_comparison": "bars",
     # A timeline built from a repeated metric (see `_timeline_keys`) draws
     # the exact figures a bar/item_bar/metric_comparison would for that same
@@ -1024,6 +1024,10 @@ def _consumption(question: str | None = None) -> dict[str, Callable[[Any, list[s
         "grouped_bar": lambda s, i: {
             f"metric:{semantic_metric_key(label)}"
             for label, _, _ in block_shapes.grouped_bar_series(s.metric_series)
+        },
+        "entity_attribute_bars": lambda s, i: {
+            f"entity_attr:{semantic_entity_key(subject)}"
+            for subject, _ in block_shapes.entity_attribute_groups(s.metric_series)
         },
         "share_split": lambda s, i: _share_keys(block_shapes.share_groups(s.metric_series)),
         "composition_breakdown": lambda s, i: _share_keys(

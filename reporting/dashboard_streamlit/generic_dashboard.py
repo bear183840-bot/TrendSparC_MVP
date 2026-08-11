@@ -26,6 +26,7 @@ from common.block_shapes import (
 )
 from common.block_titles import block_title, slot_title
 from common.content_quality_validator import select_chartable_series
+from common.content_quality_validator import plotted_chart_series
 from common.content_quality_validator import dedupe_across_blocks
 from common.content_quality_validator import exclude_non_competitor_comparisons
 # Importing the package is what registers every block, including the live
@@ -64,6 +65,7 @@ from reporting.dashboard_streamlit.components import (
     render_footer_note,
     render_metric_bar,
     render_metric_chart,
+    render_metric_insight,
     render_cause_map,
     render_cause_tree,
     render_factor_list,
@@ -215,7 +217,7 @@ _BLOCK_UNITS = {
     "factor_list": 1, "status_bar": 1,
     # Comparisons and actions need two readable columns.
     "benchmark_table": 2, "table": 2, "level_matrix": 2,
-    "radar": 2, "metric_comparison": 2, "grouped_bar": 2,
+    "radar": 2, "metric_comparison": 2, "grouped_bar": 2, "entity_attribute_bars": 2,
     "action_list": 2, "narrative_list": 2, "chart": 2, "driver_bars": 2,
     "question_comparison": 2,
     "composition_breakdown": 2, "share_split": 2,
@@ -432,6 +434,16 @@ def _render_slot(
         with st.container(border=True):
             st.markdown(f'<div class="ts-card-inner"><h3>{escape(card_title)}</h3></div>', unsafe_allow_html=True)
             draw()
+        # AI Insight now sits below the card, not inside it - live-verified
+        # 2026-08-11: nested inside `landscape`'s own bordered container, it
+        # read as part of the trend chart specifically rather than a comment
+        # on the whole card. Recomputed here (not threaded out of `draw()`)
+        # so this stays a pure addition after the container closes, rather
+        # than changing what every other block's `draw()` returns.
+        if block_type == "landscape":
+            chartable_points = plotted_chart_series(select_chartable_series(synthesis.metric_series))
+            if chartable_points:
+                render_metric_insight(chartable_points, synthesis.grounded_claims)
 
 
 def _body_renderer(

@@ -39,6 +39,7 @@ from common.block_shapes import (
     competitor_panels_not_covered_by_ranking,
     has_level_matrix,
     has_grouped_bars,
+    entity_attribute_groups,
     has_landscape,
     has_ranking_list,
     share_groups,
@@ -65,6 +66,7 @@ from reporting.dashboard_streamlit.components import (
     render_level_matrix,
     render_cause_tree,
     render_comparison_table,
+    render_entity_attribute_bars,
     render_factor_list,
     render_grouped_bars,
     render_importance_bars,
@@ -148,6 +150,11 @@ def _landscape(context: SlotContext):
 def _grouped_bars(context: SlotContext):
     points = context.synthesis.metric_series
     return (lambda: render_grouped_bars(points)) if has_grouped_bars(points) else None
+
+
+def _entity_attribute_bars(context: SlotContext):
+    groups = entity_attribute_groups(context.synthesis.metric_series)
+    return (lambda: render_entity_attribute_bars(groups)) if groups else None
 
 
 def _status_bar(context: SlotContext):
@@ -459,6 +466,8 @@ _LIVE_BLOCKS: tuple[tuple[str, Any, str], ...] = (
     ("item_bar", _bars(item_bar_groups), "항목 간 순위 비교 막대."),
     ("ranking_list", _ranking_list, "4개 이상 항목의 순위·값을 압축한 목록."),
     ("grouped_bar", _grouped_bars, "한 지표를 여러 주체 × 여러 항목으로 비교하는 묶음 막대."),
+    ("entity_attribute_bars", _entity_attribute_bars,
+     "카테고리별로 서로 다른 속성을 각각 막대로, 카테고리마다 별도 패널로 병치."),
     ("status_bar", _status_bar, "근거가 등급을 매긴 항목들의 정성 상태 한 줄."),
     ("metric_comparison", _metric_comparison, "같은 시점·같은 단위 지표들의 항목 비교."),
     ("kpi_grid", _kpi, "확인된 수치 카드 묶음."),

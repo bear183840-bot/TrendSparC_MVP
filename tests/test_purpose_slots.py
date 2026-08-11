@@ -49,7 +49,7 @@ def _resolve(fixture_name: str, mutate=None):
 def test_every_purpose_has_the_agreed_slot_order():
     assert [slot.slot_id for slot in PURPOSE_SLOTS["current_status"]] == [
         "summary", "ranking", "market", "metrics", "competitor", "factors",
-        "segments", "keywords", "response",
+        "segments", "response",
     ]
     assert [slot.slot_id for slot in PURPOSE_SLOTS["issue_response"]] == [
         "problem", "cause", "impact", "options", "recommendation",

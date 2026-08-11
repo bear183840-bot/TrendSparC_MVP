@@ -250,6 +250,49 @@ def has_grouped_bars(metric_points: list[Any]) -> bool:
     return bool(grouped_bar_series(metric_points))
 
 
+def entity_attribute_groups(metric_points: list[Any]) -> list[tuple[str, list[Any]]]:
+    """(subject, points) for two or more subjects each measured on several of
+    their OWN distinct percentage attributes, with no shared category between
+    subjects at all - "롱폼 콘텐츠: 깊이감 71.1%, 전문지식 습득 68.4%" and
+    "숏폼 콘텐츠: 가성비 구독 64.7%, 광고 요금제 34.8%" name two subjects
+    whose attributes don't overlap, so `grouped_bar_series` (which requires
+    the *same* categories measured for every subject) can never group them -
+    each subject would need a value for the other's attributes that no
+    source stated.
+
+    General condition, not this question's vocabulary: any 2+ subjects with
+    2+ distinct attribute labels each. A subject whose points already carry
+    a stated `share_of` is excluded - that is a real composition, drawn by
+    `share_groups` instead, and showing it here too would be the same data
+    twice. Without `share_of` nothing else ever draws it as a composition,
+    so a coincidental sum near 100% is not reason enough to hide it -
+    live-verified 2026-08-11: the real "숏폼 콘텐츠" case (가성비 구독
+    64.7% + 광고 요금제 34.8%) sums to 99.5% by coincidence despite being
+    two unrelated survey answers, not a stated whole split in two.
+    """
+    by_subject: dict[str, dict[str, Any]] = {}
+    for point in metric_points:
+        subject = (getattr(point, "subject", None) or "").strip()
+        if not subject or (point.unit or "").strip() not in {"%", "％"}:
+            continue
+        # One point per label per subject - a repeat is the same attribute
+        # at another period, not a second attribute.
+        by_subject.setdefault(subject, {}).setdefault(point.label, point)
+    groups: list[tuple[str, list[Any]]] = []
+    for subject, by_label in by_subject.items():
+        points = list(by_label.values())
+        if len(points) < 2:
+            continue
+        if all(getattr(point, "share_of", None) for point in points):
+            continue
+        groups.append((subject, points))
+    return groups if len(groups) >= 2 else []
+
+
+def has_entity_attribute_bars(metric_points: list[Any]) -> bool:
+    return bool(entity_attribute_groups(metric_points))
+
+
 def status_levels(comparison_points: list[Any], limit: int = 4) -> list[tuple[str, str, str]]:
     """(criterion, entity + value, level) for the artwork's KPI status bar.
 

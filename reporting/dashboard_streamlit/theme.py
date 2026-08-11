@@ -528,9 +528,16 @@ def dashboard_css(dark: bool, accent_theme: str = "orange") -> str:
     .ts-swot > .ts-swot-cell:nth-child(odd) {{ border-right:1px solid var(--ts-border); }}
     .ts-swot > .ts-swot-cell:nth-child(-n+2):not(:only-child) {{ border-bottom:1px solid var(--ts-border); }}
     .ts-swot.duo > .ts-swot-cell {{ border-bottom:0; }}
-    .ts-actions {{ margin-top:.65rem; padding:.65rem 1rem; border:1.5px solid var(--ts-line); border-radius:20px;
+    /* Compact and landscape-shaped (wide, not tall) rather than the card's
+       old default square-ish proportions - live-verified 2026-08-11, a
+       narrow-and-tall card here read heavier than the data (a handful of
+       short action titles) actually needed. Row padding/font are the main
+       lever: shrinking row height is what turns "narrow and tall" into
+       "wide and short" for a fixed number of rows, without touching layout
+       width (`_BLOCK_UNITS` in generic_dashboard.py). */
+    .ts-actions {{ margin-top:.4rem; padding:.4rem .6rem; border:1.5px solid var(--ts-line); border-radius:14px;
       background:var(--ts-panel); }}
-    .ts-actions-owner {{ display:block; margin:0 0 .45rem; font-size:.72rem; font-weight:600;
+    .ts-actions-owner {{ display:block; margin:0 0 .3rem; font-size:.66rem; font-weight:600;
       color:var(--ts-muted); }}
     /* `minmax(250px,…)`/`minmax(160px,…)` used to force these two columns
        wider than the card actually had once `action_list` shares a row with
@@ -539,22 +546,22 @@ def dashboard_css(dark: bool, accent_theme: str = "orange") -> str:
        card and the header's columns stopped lining up with the body's.
        `minmax(0,…)` keeps the same *relative* proportions but lets both
        shrink (and wrap/truncate) to whatever width the card actually has. */
-    .ts-actions-head {{ display:grid; grid-template-columns:42px minmax(0,1.5fr) minmax(0,1fr) 44px;
-      gap:.75rem; padding:0 .3rem .3rem; color:var(--ts-muted); font-size:.66rem; font-weight:700;
+    .ts-actions-head {{ display:grid; grid-template-columns:30px minmax(0,1.5fr) minmax(0,1fr) 34px;
+      gap:.5rem; padding:0 .2rem .2rem; color:var(--ts-muted); font-size:.58rem; font-weight:700;
       text-transform:uppercase; letter-spacing:.04em; }}
     .ts-actions-head span:last-child, .ts-actions-head span:nth-child(3) {{ text-align:right; }}
-    .ts-action-row {{ display:grid; grid-template-columns:42px minmax(0,1.5fr) minmax(0,1fr) 44px;
-      gap:.75rem; align-items:center; padding:.5rem .3rem; border-bottom:1px solid var(--ts-line); font-size:.88rem; }}
-    .ts-action-row:last-child {{ border-bottom:0; }} .ts-action-row .num {{ font-size:1.1rem; color:var(--ts-muted); }}
+    .ts-action-row {{ display:grid; grid-template-columns:30px minmax(0,1.5fr) minmax(0,1fr) 34px;
+      gap:.5rem; align-items:center; padding:.3rem .2rem; border-bottom:1px solid var(--ts-line); font-size:.76rem; }}
+    .ts-action-row:last-child {{ border-bottom:0; }} .ts-action-row .num {{ font-size:.86rem; color:var(--ts-muted); }}
     .ts-action-row .action {{ font-weight:800; }}
     /* Expected-impact cell: plain right-aligned text (reference design's
        "Expected Impact" column). The rank-derived progress bar that used to
        live here was removed - it encoded nothing but row order. */
-    .ts-action-row .impact {{ text-align:right; font-size:.8rem; font-weight:500; color:var(--ts-muted); }}
-    .ts-action-row .impact.ts-empty {{ font-size:.74rem; opacity:.7; }}
-    .ts-evidence-link {{ display:grid; place-items:center; width:27px; height:27px; border-radius:50%;
+    .ts-action-row .impact {{ text-align:right; font-size:.68rem; font-weight:500; color:var(--ts-muted); }}
+    .ts-action-row .impact.ts-empty {{ font-size:.64rem; opacity:.7; }}
+    .ts-evidence-link {{ display:grid; place-items:center; width:20px; height:20px; border-radius:50%;
       background:color-mix(in srgb,var(--ts-accent) 28%,var(--ts-panel)); color:var(--ts-accent); text-decoration:none;
-      justify-self:end; }}
+      justify-self:end; font-size:.7rem; }}
     .ts-footer-note {{ display:flex; gap:1rem; margin-top:.45rem; padding:.45rem .8rem; border-bottom:1px solid var(--ts-orange);
       font-size:.82rem; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }}
     /* auto-fit with a real 260px floor: empty panels are now dropped rather

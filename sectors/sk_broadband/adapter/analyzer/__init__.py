@@ -1113,14 +1113,11 @@ def _semantically_complete_label(text: str, *, context: str = "sentence") -> boo
     return True
 
 
-def _metric_label_before(text: str, position: int, fallback: str) -> str:
-    prefix = text[:position]
-    # Protect the numeric spans, split on real clause boundaries, restore.
-    masked = _GROUPED_NUMBER_RE.sub(
-        lambda m: m.group().replace(",", _COMMA_SENTINEL), prefix
-    )
-    fragment = _METRIC_LABEL_BOUNDARY_RE.split(masked)[-1].replace(_COMMA_SENTINEL, ",")
-    fragment = re.sub(r"^[\s*#|:'\"([{]+|[\s*#|:'\"([{]+$", "", fragment).strip()
+def _clean_label_fragment(fragment: str) -> str:
+    """Shared cleanup for a raw clause-boundary split, either direction."""
+    fragment = re.sub(
+        r"^[\s*#|:'\"“”‘’([{]+|[\s*#|:'\"“”‘’([{]+$", "", fragment
+    ).strip()
     fragment = re.sub(r"\b20\d{2}\s*년?\b", "", fragment).strip(" :-()[]")
     fragment = re.sub(r"^\d+(?:\.\d+)?\s*%p?\s*(?:로|보다|에서)?\s*", "", fragment)
     if fragment.endswith("전년"):
@@ -1129,9 +1126,64 @@ def _metric_label_before(text: str, position: int, fallback: str) -> str:
     # judging completeness, so "으로 전년 대비 증감" can still recover as
     # "전년 대비 증감" rather than being thrown away wholesale.
     fragment = _DANGLING_LABEL_PREFIX_RE.sub("", fragment).strip()
+    return fragment
+
+
+def _metric_label_before(text: str, position: int, fallback: str) -> str:
+    prefix = text[:position]
+    # Protect the numeric spans, split on real clause boundaries, restore.
+    masked = _GROUPED_NUMBER_RE.sub(
+        lambda m: m.group().replace(",", _COMMA_SENTINEL), prefix
+    )
+    fragment = _clean_label_fragment(
+        _METRIC_LABEL_BOUNDARY_RE.split(masked)[-1].replace(_COMMA_SENTINEL, ",")
+    )
     if not _semantically_complete_label(fragment):
         fragment = fallback
     return fragment[-70:].strip()
+
+
+def _metric_label_after(text: str, position: int) -> str:
+    """A subject named right after the number, not before it.
+
+    `_metric_label_before` has nothing to work with when the number leads the
+    quote entirely - live-verified 2026-08-11: bullet-point survey findings
+    are commonly written "<percent>, <description>" (`**\\- 71.1%, "'롱폼
+    콘텐츠', 숏폼과 달리 깊이감 있어"**`), so `text[:position]` is empty or
+    just markdown/punctuation. Korean headline phrasing like this often
+    juxtaposes the subject before a comma with no topic particle attached at
+    all ("'롱폼 콘텐츠', 숏폼과 달리..." - not "롱폼 콘텐츠는"), so this reads
+    up to the same clause boundary `_metric_label_before` reads backward from
+    (comma, sentence end, etc.) rather than requiring a particle - the first
+    clause after the number is the subject a reader would take it to be.
+    """
+    # The number sits right at the start of `suffix` (that's the whole reason
+    # this function is being tried), almost always followed immediately by
+    # its own delimiter - "71.1%," - so splitting without stripping that
+    # leading delimiter first returns an empty leading segment, not the
+    # clause after it.
+    suffix = text[position:].lstrip("*\\").lstrip(",.;: \t")
+    masked = _GROUPED_NUMBER_RE.sub(
+        lambda m: m.group().replace(",", _COMMA_SENTINEL), suffix
+    )
+    segments = [
+        segment for segment in _METRIC_LABEL_BOUNDARY_RE.split(masked) if segment.strip()
+    ]
+    if not segments:
+        return ""
+    fragment = _clean_label_fragment(segments[0].replace(_COMMA_SENTINEL, ","))
+    return fragment[:70].strip() if _semantically_complete_label(fragment) else ""
+
+
+def _metric_label_near(text: str, start: int, end: int, fallback: str) -> str:
+    """Prefer the text before the number; only read after it if that failed.
+
+    Both directions read the same clause a reader would - the label is
+    whichever side of the number actually names what was measured. Falling
+    all the way to `fallback` (usually the whole claim sentence) only
+    happens when neither side offers a real label.
+    """
+    return _metric_label_before(text, start, "") or _metric_label_after(text, end) or fallback
 
 
 def _canonical_recovered_unit(unit: str) -> str:
@@ -1685,7 +1737,7 @@ def _recovered_metric_points(
         matches = list(_GROUNDED_METRIC_RE.finditer(quote))
         list_contexts = _list_metric_contexts(quote, matches)
         base_label = (
-            _metric_label_before(quote, matches[0].start(), claim.get("claim") or "수치")
+            _metric_label_near(quote, matches[0].start(), matches[0].end(), claim.get("claim") or "수치")
             if matches else claim.get("claim") or "수치"
         )
         last_label: str | None = None
@@ -1712,7 +1764,7 @@ def _recovered_metric_points(
                     metric_start = previous.start()
             if value.is_integer():
                 value = int(value)
-            local_label = _metric_label_before(quote, metric_start, "")
+            local_label = _metric_label_near(quote, metric_start, match.end(), "")
             if (
                 local_label.casefold() in _WEAK_METRIC_LABELS
                 or len(local_label) < 2
