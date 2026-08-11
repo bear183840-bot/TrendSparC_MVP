@@ -151,6 +151,57 @@ def test_fallback_report_carries_structured_fields_into_market_status_section():
     assert len(market_section.comparison_points) == 2
 
 
+def test_fallback_executive_summary_length_tracks_audience_detail_level():
+    """The fallback path - every dry-run, every OpenAI failure - used to
+    give every audience the exact same executive_summary text regardless of
+    detail_level. Mechanical sentence-count truncation only, never a
+    reworded sentence, so the fallback's verbatim-evidence guarantee holds.
+    """
+    analysis = DocumentAnalysis(
+        doc_id="attachment:brief",
+        summary="요약",
+        key_points=[
+            "수요가 증가했다",
+            "공급이 지연되고 있다",
+            "대체 공급처를 검토 중이다",
+        ],
+        business_impact="운영 비용이 증가한다",
+        risk="공급 지연 위험이 있다",
+        opportunity="대체 공급처 확보 기회가 있다",
+        evidence=[
+            "수요가 증가했다. 공급이 지연되고 있다. 대체 공급처를 검토 중이다. 비용 영향은 제한적이다.",
+        ],
+        analysis_confidence="high",
+    )
+    synthesis = synthesize("req_report", "general", [analysis]).model_copy(
+        update={
+            "synthesis_text": (
+                "수요가 증가했다. 공급이 지연되고 있다. "
+                "대체 공급처를 검토 중이다. 비용 영향은 제한적이다."
+            )
+        }
+    )
+    purpose = ReportPurposeClassification(
+        request_id="req_report", purpose_id="current_status",
+        display_name="현황 파악", recommended_sections=["overview"],
+    )
+
+    plan_management = plan_report(synthesis, "management", purpose)
+    plan_practitioner = plan_report(synthesis, "practitioner", purpose)
+    report_management = generate_report("질문", synthesis, plan_management, "management")
+    report_practitioner = generate_report("질문", synthesis, plan_practitioner, "practitioner")
+
+    assert report_management.generation_mode == "rule_based"
+    assert report_practitioner.generation_mode == "rule_based"
+    assert report_management.executive_summary != report_practitioner.executive_summary
+    assert len(report_management.executive_summary) < len(report_practitioner.executive_summary)
+    # Truncated, not rewritten: every word in the shorter summary is a
+    # verbatim prefix of the fuller one.
+    assert report_practitioner.executive_summary.startswith(
+        report_management.executive_summary
+    )
+
+
 def test_fallback_report_gives_each_metric_point_single_ownership_across_sections(monkeypatch):
     monkeypatch.delenv("TRENDSPARC_REPORT_GENERATOR_API_KEY", raising=False)
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)

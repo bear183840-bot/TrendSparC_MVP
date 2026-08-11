@@ -1348,10 +1348,22 @@ def importance_ranked(grounded_claims: list[Any], limit: int = 5) -> list[Any]:
     Only claims carrying both a score and its stated basis - the verifier
     drops one without the other, and a renderer must show the basis, so a
     claim that can't explain its own score never reaches a bar.
+
+    Restricted to `claim_type == "factor"` - live-verified 2026-08-11: this
+    fed "Key Drivers" (block_title "driver_bars") from every claim type the
+    model happened to score, so an `opportunity` claim like "AI 메모리 수요
+    증가에 기반한 시장 성장 기회가 있다" or a `risk` claim ended up ranked
+    under a heading that promises causes, not general findings. `factor` is
+    the one claim_type the schema defines as "무엇이 그것을 좌우하는가" - an
+    actual driver/reason, not a fact, impact, or opportunity about the
+    subject. A `business_impact`/`risk`/`opportunity` claim can still be
+    important; it just isn't a *driver*, and this block's whole promise is
+    that ranking.
     """
     scored = [
         claim for claim in grounded_claims
-        if getattr(claim, "importance", None) is not None
+        if getattr(claim, "claim_type", None) == "factor"
+        and getattr(claim, "importance", None) is not None
         and (getattr(claim, "importance_basis", None) or "").strip()
     ]
     return sorted(scored, key=lambda claim: claim.importance, reverse=True)[:limit]

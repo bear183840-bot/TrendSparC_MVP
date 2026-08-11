@@ -778,6 +778,35 @@ def _missing_needs_limitation(missing_information_needs: list[str] | None) -> li
     ]
 
 
+_SUMMARY_SENTENCE_LIMITS = {"highlight_only": 1, "condensed": 2, "summary": 3}
+_SENTENCE_SPLIT_RE = re.compile(r"(?<=[.!?。])\s+")
+
+
+def _detail_scoped_summary(text: str, detail_level: str) -> str:
+    """Trim the executive summary to how much the audience's profile says
+    they read, without rewriting a single word.
+
+    Live-verified 2026-08-11: `_fallback_report` - the path every dry-run
+    and every OpenAI failure actually takes - always used the complete,
+    identical `synthesis.synthesis_text` as `executive_summary` regardless
+    of audience, so a 관리자(highlight_only) and 실무진(full) report opened
+    on the exact same paragraph. This is mechanical sentence-boundary
+    truncation only (never paraphrase) - the fallback path's whole point is
+    that every sentence is copied verbatim from evidence-grounded synthesis
+    text, and that guarantee has to survive audience-scoping too.
+    `full`/unlisted detail levels (e.g. practitioner) get the complete text.
+    """
+    if not text:
+        return text
+    limit = _SUMMARY_SENTENCE_LIMITS.get(detail_level)
+    if limit is None:
+        return text
+    sentences = [s for s in _SENTENCE_SPLIT_RE.split(text.strip()) if s]
+    if len(sentences) <= limit:
+        return text
+    return " ".join(sentences[:limit])
+
+
 def _fallback_report(
     synthesis: TrendSynthesis,
     report_plan: ReportPlan,
@@ -982,7 +1011,9 @@ def _fallback_report(
         audience_id=profile.audience_id,
         purpose_id=purpose_id,
         title=f"{synthesis.sector_id} {purpose_id} 보고서",
-        executive_summary=synthesis.synthesis_text or "분석 가능한 근거가 부족합니다.",
+        executive_summary=_detail_scoped_summary(
+            synthesis.synthesis_text, profile.detail_level
+        ) or "분석 가능한 근거가 부족합니다.",
         sections=sections,
         source_count=synthesis.source_count,
         unique_source_count=synthesis.unique_source_count,

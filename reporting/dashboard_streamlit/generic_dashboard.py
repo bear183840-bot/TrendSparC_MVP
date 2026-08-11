@@ -768,17 +768,33 @@ def render_generic_dashboard(
     # Landscape lose its own donut whenever Executive Summary claimed the
     # same composition first, splitting the trend chart and its composition
     # into two separate cards instead of the one paired card they belong in.
+    # Seeded in *both* the kpi and bars namespaces for every point drawn here,
+    # not just whichever shape Executive Summary happened to use. Live-verified
+    # 2026-08-11: "Global semiconductor market growth: 975 billion" drawn here
+    # as a bars comparison still showed up again under Key Metrics, because
+    # `_undrawn_kpi_points` only checks the kpi-shaped key and this seed had
+    # only recorded the bars-shaped one for the same point - two different
+    # spellings of "already shown" for a fact the reader has already seen once,
+    # on the one section that always renders first and is never itself subject
+    # to dedup. The multi-shape-family allowance in `resolve_slots()` is for
+    # slots choosing between shapes for their *own* undrawn facts; it was never
+    # meant to let a slot re-draw what the fixed cover section already shows.
     exec_summary_drawn: set[str] = set()
     if headline_point is not None:
         exec_summary_drawn.add(kpi_evidence_key(headline_point))
-    exec_summary_drawn.update(kpi_evidence_key(point) for point in supporting_points)
+        exec_summary_drawn.add(bars_evidence_key(headline_point))
+    for point in supporting_points:
+        exec_summary_drawn.add(kpi_evidence_key(point))
+        exec_summary_drawn.add(bars_evidence_key(point))
     if comparison is not None:
         kind, subject, points = comparison
         if kind == "share":
             if not landscape_owns_this_share:
                 exec_summary_drawn.add(share_evidence_key(subject))
         else:
-            exec_summary_drawn.update(bars_evidence_key(point) for point in points)
+            for point in points:
+                exec_summary_drawn.add(bars_evidence_key(point))
+                exec_summary_drawn.add(kpi_evidence_key(point))
     resolved = order_slots_for_audience(
         resolve_slots(
             purpose_id, synthesis, report,

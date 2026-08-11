@@ -203,10 +203,17 @@ _CURRENT_STATUS: tuple[Slot, ...] = (
     # its own place rather than being squeezed into 시장 상황's prose
     # fallback. driver_bars first, because a scored factor list beats an
     # unordered one where the analyzer managed to score it.
+    # `fields` used to also fall back to risks/weaknesses/opportunities when
+    # `factors` was empty - live-verified 2026-08-11: those are SWOT
+    # categories, not causes, so "Key Drivers" ended up listing plain
+    # opportunity/risk sentences ("AI 메모리 수요 증가에 기반한 시장 성장
+    # 기회가 있다") under a heading that promises "왜 그런가". A slot with no
+    # real factor content should render nothing (it's optional=True), not
+    # borrow content that answers a different question.
     Slot("factors", "요인", "무엇이 그것을 좌우하는가",
          ("driver_bars", "factor_list", "narrative_list"),
          (),
-         ("factors", "risks", "weaknesses", "opportunities"), optional=True),
+         ("factors",), optional=True),
     # Age and gender breakdowns have their own place. They used to land in
     # 경쟁사 because the only question asked was "do two entities share a
     # criterion" - true of 50대 vs 60대, and wrong for that heading.
@@ -351,7 +358,7 @@ _STATUS_COMPETITOR = _nslot(
 _STATUS_FACTORS = _nslot(
     "factors", "주요 요인", "무엇이 현재 상태를 좌우하는가",
     ("driver_bars", "factor_list", "narrative_list"), (),
-    ("factors", "risks", "weaknesses", "opportunities"), optional=True,
+    ("factors",), optional=True,
     role="analysis", question_answered="현재 상태를 좌우하는 요인은 무엇인가?",
     why_here="관찰된 결과 뒤에 그 배경 요인을 해석한다.",
 )

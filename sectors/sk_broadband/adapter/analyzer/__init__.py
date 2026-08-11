@@ -1139,6 +1139,35 @@ def _clean_label_fragment(fragment: str) -> str:
     return fragment
 
 
+def _trim_trailing_fragment(text: str, limit: int) -> str:
+    """Keep at most `limit` trailing characters without starting mid-token.
+
+    Live-verified 2026-08-11: a plain `text[-limit:]` on a long clause landed
+    inside the compound number "1조 3,674억 원" and kept only "674억 원으로
+    전년" - a stray-looking figure fragment stitched onto whatever number
+    followed it in the next label slot. Drops the leading partial word
+    instead, even if that leaves fewer than `limit` characters.
+    """
+    if len(text) <= limit:
+        return text
+    truncated = text[-limit:]
+    if text[-limit - 1] not in " \t\n":
+        first_space = truncated.find(" ")
+        truncated = truncated[first_space + 1:] if first_space != -1 else ""
+    return truncated
+
+
+def _trim_leading_fragment(text: str, limit: int) -> str:
+    """The forward-reading twin of `_trim_trailing_fragment` - see there."""
+    if len(text) <= limit:
+        return text
+    truncated = text[:limit]
+    if text[limit] not in " \t\n":
+        last_space = truncated.rfind(" ")
+        truncated = truncated[:last_space] if last_space != -1 else ""
+    return truncated
+
+
 def _metric_label_before(text: str, position: int, fallback: str) -> str:
     prefix = text[:position]
     # Protect the numeric spans, split on real clause boundaries, restore.
@@ -1150,7 +1179,7 @@ def _metric_label_before(text: str, position: int, fallback: str) -> str:
     )
     if not _semantically_complete_label(fragment):
         fragment = fallback
-    return fragment[-70:].strip()
+    return _trim_trailing_fragment(fragment, 70).strip()
 
 
 def _metric_label_after(text: str, position: int) -> str:
@@ -1182,7 +1211,30 @@ def _metric_label_after(text: str, position: int) -> str:
     if not segments:
         return ""
     fragment = _clean_label_fragment(segments[0].replace(_COMMA_SENTINEL, ","))
-    return fragment[:70].strip() if _semantically_complete_label(fragment) else ""
+    return _trim_leading_fragment(fragment, 70).strip() if _semantically_complete_label(fragment) else ""
+
+
+_BASELINE_QUALIFIER_RE = re.compile(r"(전년(?:\s*동기)?|직전(?:\s*분기|\s*연도)?|전월|지난해|전분기)\s*\(\s*$")
+
+
+def _parenthetical_baseline_qualifier(text: str, position: int) -> str | None:
+    """A baseline word ("전년", "직전분기", ...) sitting right before the
+    open paren a same-subject comparison figure lives inside.
+
+    Live-verified 2026-08-11: "...채널제공 매출액은 1조 3,674억 원으로
+    전년(1조 3,008억 원) 대비..." - the 3,008억원 inside the parens has no
+    label of its own (`_semantically_complete_label` rejects it as an
+    unmatched-paren fragment, by design: it *is* one), so the caller falls
+    back to reusing its sibling figure's label verbatim. Two different
+    numbers under the identical "Key Comparisons" label read as one label
+    smeared across two bars. This only supplies a qualifier to distinguish
+    them - it never manufactures a label from nothing.
+    """
+    paren_start = text.rfind("(", 0, position)
+    if paren_start == -1:
+        return None
+    match = _BASELINE_QUALIFIER_RE.search(text[:paren_start + 1])
+    return match.group(1) if match else None
 
 
 def _metric_label_near(text: str, start: int, end: int, fallback: str) -> str:
@@ -1797,12 +1849,25 @@ def _recovered_metric_points(
                     subject = None
                 if not _semantically_complete_label(label or ""):
                     label = base_label
+                # A heading shared by every figure in its list ("...채널제공
+                # 매출액은") does not by itself tell a same-year figure apart
+                # from the "전년(...)" one right beside it - same fix as the
+                # plain-label branch below, needed here too since a heading
+                # match takes priority over `local_label`.
+                if not local_label:
+                    qualifier = _parenthetical_baseline_qualifier(quote, metric_start)
+                    if qualifier and label:
+                        label = f"{label} ({qualifier})"
                 last_label = label
             elif canonical_unit == "%p":
                 label = f"{last_label or base_label} 증감폭"
                 subject = None
             else:
                 label = local_label or last_label or base_label
+                if not local_label:
+                    qualifier = _parenthetical_baseline_qualifier(quote, metric_start)
+                    if qualifier and label:
+                        label = f"{label} ({qualifier})"
                 subject = local_label or None
                 last_label = label
             is_relative, comparison_period = relative_metric_context(quote)

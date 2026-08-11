@@ -559,9 +559,15 @@ def dashboard_css(dark: bool, accent_theme: str = "orange") -> str:
        live here was removed - it encoded nothing but row order. */
     .ts-action-row .impact {{ text-align:right; font-size:.68rem; font-weight:500; color:var(--ts-muted); }}
     .ts-action-row .impact.ts-empty {{ font-size:.64rem; opacity:.7; }}
+    /* Same evidence-link glyph and weight as `.ts-inline-evidence` below -
+       live-verified 2026-08-11: this used to be a pale 28%-opacity circle
+       around a thin accent-coloured arrow, while Key Drivers/Competitive
+       Landscape's `.ts-inline-evidence` drew a bold white arrow on a filled
+       circle. Same "↗" character, different weight, so Recommended Actions'
+       link read as a plain dot next to every other block's clear arrow. */
     .ts-evidence-link {{ display:grid; place-items:center; width:20px; height:20px; border-radius:50%;
-      background:color-mix(in srgb,var(--ts-accent) 28%,var(--ts-panel)); color:var(--ts-accent); text-decoration:none;
-      justify-self:end; font-size:.7rem; }}
+      background:color-mix(in srgb,var(--ts-accent) 75%,#6e2525); color:white; text-decoration:none;
+      justify-self:end; font-size:.7rem; font-weight:900; }}
     .ts-footer-note {{ display:flex; gap:1rem; margin-top:.45rem; padding:.45rem .8rem; border-bottom:1px solid var(--ts-orange);
       font-size:.82rem; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }}
     /* auto-fit with a real 260px floor: empty panels are now dropped rather

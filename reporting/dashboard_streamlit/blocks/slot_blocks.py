@@ -163,6 +163,8 @@ def _status_bar(context: SlotContext):
 
 
 def _metric_comparison(context: SlotContext):
+    from common.purpose_slots import bars_evidence_key
+
     snapshots = metric_snapshot_groups(context.synthesis.metric_series)
     snapshot_periods = {period for period, _ in snapshots}
     groups = [
@@ -172,6 +174,21 @@ def _metric_comparison(context: SlotContext):
             if group[0] not in snapshot_periods
         ),
     ]
+    # A group is chosen (or not) as a whole by `resolve_slots()`, which only
+    # rejects a candidate when *every* point it would draw is already shown
+    # elsewhere - a group mixing new and already-drawn points still gets
+    # picked, and used to render every point in it regardless. Live-verified
+    # 2026-08-11: Executive Summary's own comparison bars ("Global
+    # semiconductor market growth: 975 billion") stayed in this same group
+    # alongside genuinely new figures, so Key Comparisons repeated them.
+    # Same self-filtering `_undrawn_kpi_points` already does for Key Metrics.
+    drawn = context.drawn_before
+    if drawn:
+        groups = [
+            (period, [point for point in points if bars_evidence_key(point) not in drawn])
+            for period, points in groups
+        ]
+        groups = [(period, points) for period, points in groups if points]
     if not groups:
         return None
     if context.compact:

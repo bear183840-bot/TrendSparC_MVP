@@ -97,11 +97,27 @@ def test_the_recommendation_card_still_appears_when_there_are_actions():
 
 def test_a_short_list_stays_prose_rather_than_claiming_a_card():
     """Two bullets are a sentence, not a list worth its own block."""
-    synthesis = _synthesis(risks=["요금 부담", "속도 불만"])
+    synthesis = _synthesis(factors=["요금 부담", "속도 불만"])
 
     by_id = {slot.slot.slot_id: slot for slot in resolve_slots("current_status", synthesis, None)}
 
     assert by_id["factors"].block_type == "narrative_list"
+
+
+def test_key_drivers_does_not_borrow_risks_as_a_substitute():
+    """"Key Drivers" no longer falls back to risks/weaknesses/opportunities.
+
+    Live-verified 2026-08-11: with no real `factors` content, the slot used
+    to borrow risk/opportunity text instead - a SWOT statement is not a
+    driver, and it read as generic narrative under a heading that promises
+    "why". The slot must render nothing rather than force-fill from a
+    different question's answer.
+    """
+    synthesis = _synthesis(risks=["요금 부담", "속도 불만"], opportunities=["신규 결합상품"])
+
+    by_id = {slot.slot.slot_id: slot for slot in resolve_slots("current_status", synthesis, None)}
+
+    assert "factors" not in by_id
 
 
 def test_factor_claims_reach_the_factor_block_without_audience_item_limits():
