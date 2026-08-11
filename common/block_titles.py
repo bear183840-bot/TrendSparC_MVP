@@ -27,7 +27,7 @@ SLOT_TITLES: dict[str, str] = {
     "metrics": "Key Metrics",
     "snapshot": "Key Metrics",
     "comparison": "Key Comparisons",
-    "position": "Positioning",
+    "position": "SWOT",
     "competitor": "Competitive Landscape",
     "factors": "Key Drivers",
     "segments": "Audience Segments",
@@ -65,6 +65,14 @@ SLOT_TITLES: dict[str, str] = {
     "competitive_fit": "Competitive Landscape",  # benchmark_table/radar of us vs competitors - same content as "competitor" above
     "strategic_choice": "Key Comparisons",  # matrix/benchmark_table/table comparing candidate directions
     "execution": "Recommended Actions",  # action_list/timeline of what to do next - same role as "recommendation"/"roadmap" above
+    # _RECOMMEND (question-first "추천" skeleton) - live-verified
+    # 2026-08-11: same gap as _STRATEGY_NARRATIVE above, just a different
+    # skeleton nobody had exercised yet ("타깃"/"후보" stayed Korean). Same
+    # rule: named by what the slot's own candidates/fields actually draw.
+    "target": "Key Metrics",  # kpi_grid/segment_table of the target audience's own stats (a single-stat card, not literally "a target")
+    "candidates": "Key Comparisons",  # item_bar/ranking_list/table enumerating the candidate options
+    "fit": "SWOT",  # matrix/level_matrix/driver_bars assessing suitability - same SWOT-shaped content as "position"/"matrix" above
+    "evidence": "Evidence",  # table/narrative_list of supporting detail - same name the "Evidence & Sources" panel already uses elsewhere
 }
 
 # Headings a renderer draws *inside* a card, keyed by block type. Separate
@@ -82,11 +90,11 @@ BLOCK_TITLES: dict[str, str] = {
     # A SWOT quadrant grid's meaning doesn't depend on which slot's
     # candidate list happened to include "matrix" - `_matrix()` always
     # draws from the full strengths/weaknesses/opportunities/risks pool,
-    # so its card is always "positioning" regardless of the slot's own
-    # narrower title. See generic_dashboard.py's `_render_slot`, which
-    # applies this even when `matrix` is the lead block (every other
-    # block type only gets a BLOCK_TITLES lookup as a companion).
-    "matrix": "Positioning",
+    # so its card is always "SWOT" regardless of the slot's own narrower
+    # title. See generic_dashboard.py's `_render_slot`, which applies this
+    # even when `matrix` is the lead block (every other block type only
+    # gets a BLOCK_TITLES lookup as a companion).
+    "matrix": "SWOT",
 }
 
 

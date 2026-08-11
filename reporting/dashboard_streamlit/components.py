@@ -1882,8 +1882,9 @@ def render_importance_bars(
         for claim in ranked
     )
     target = (
-        f'<p class="ts-driver-target"><b>영향 기준</b> {escape(impact_target)}</p>'
-        if impact_target else ""
+        f'<p class="ts-driver-target"><span class="ts-ai-badge">AI 판단</span> '
+        f'<b>영향 기준</b> {escape(impact_target)}</p>'
+        if impact_target else '<p class="ts-driver-target"><span class="ts-ai-badge">AI 판단</span></p>'
     )
     note = (
         '<p class="ts-drivers-note">AI가 근거 문서 안에서 매긴 상대적 중요도이며 측정값이 아닙니다.</p>'
@@ -1892,11 +1893,15 @@ def render_importance_bars(
         '각 항목 아래에 그렇게 본 이유를 함께 적었습니다.</p>'
     )
     st.markdown(
-        # "질문 결론 영향도" named a quantity nobody could point at. What the
-        # bars actually order is which findings the model thought mattered
-        # most for this question, so the heading says that.
-        '<section class="ts-drivers"><div class="ts-block-title">' + escape(block_title("driver_bars")) + ' '
-        '<span class="ts-ai-badge">AI 판단</span></div>' + target +
+        # No repeated ".ts-block-title" line here anymore - live-verified
+        # 2026-08-11: whenever this block renders as a slot's *companion*
+        # (not its lead), the outer card header already reads
+        # block_title("driver_bars") ("Ranked by Relevance") via
+        # generic_dashboard.py's `_render_slot`, so printing that exact
+        # string again inside the card body was a plain duplicate. The
+        # AI-judgement badge and the basis line are what actually add
+        # information, not a second copy of the card's own name.
+        '<section class="ts-drivers">' + target +
         note + rows + "</section>",
         unsafe_allow_html=True,
     )

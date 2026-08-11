@@ -465,7 +465,7 @@ def _render_slot(
         # to `matrix` specifically rather than applying to every lead
         # block via `block_title()`.
         card_title = (
-            block_title("matrix", "Positioning") if block_type == "matrix"
+            block_title("matrix", "SWOT") if block_type == "matrix"
             else title if index == 0
             else block_title(block_type, title)
         )
