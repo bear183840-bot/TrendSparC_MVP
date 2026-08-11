@@ -397,6 +397,23 @@ def dashboard_css(dark: bool, accent_theme: str = "orange") -> str:
     .ts-under-evidenced {{ min-height:0; max-height:none; margin-top:.65rem;
       border-color:color-mix(in srgb,var(--ts-accent) 40%,var(--ts-line));
       background:color-mix(in srgb,var(--ts-accent) 6%,var(--ts-panel)); }}
+    /* A standalone `chart` block (not paired with a donut inside
+       `.ts-landscape`, which already has its own tuned width above) used
+       to fill the full card width whenever nothing else shared its row -
+       `st.columns([2])` with one entry always renders that one column at
+       100%, regardless of `_BLOCK_UNITS["chart"]` declaring it a
+       half-width block; the ratio only matters relative to a sibling
+       column that isn't there. A trend line rarely needs more than half a
+       wide card's width to read cleanly, so this caps the card itself
+       rather than just the SVG inside it (capping only the SVG left the
+       now-mostly-empty card looking like an oversized frame around a
+       small chart, not an actually narrower card). Live-verified
+       2026-08-11. NOTE: this does not (and, without touching
+       `_grid_rows`'s row-packing in generic_dashboard.py, cannot) let a
+       *different* card expand into the space this frees - the freed space
+       is simply left blank next to the narrowed card. */
+    :is(div[data-testid="stVerticalBlockBorderWrapper"],div[data-testid="stVerticalBlock"][data-test-scroll-behavior]):has(> div .ts-chart-svg):not(:has(.ts-landscape)) {{
+      max-width:min(60%, 620px); }}
     .ts-under-evidenced h3 {{ margin:0 0 .3rem; font-size:.92rem; }}
     .ts-under-evidenced p {{ margin:0; font-size:.8rem; color:var(--ts-muted); line-height:1.5; }}
     /* Deployment stamp - bottom-LEFT, deliberately quiet. Streamlit Cloud
@@ -822,6 +839,15 @@ def dashboard_css(dark: bool, accent_theme: str = "orange") -> str:
        the page (AI Insight, Evidence & Sources, ...) that were never part
        of this row. */
     [class*="st-key-landing_saved_run"] [data-testid="stExpander"] {{
+      max-width:1080px; margin-left:auto; margin-right:auto; }}
+    /* Same fixed-width baseline for the live run-progress status widget
+       (`st.status`, "[1/1] Source Router — 수집 중" etc.) - it's a
+       different Streamlit widget than the expander above but defaults to
+       the same kind of full-container width, and its label text changes
+       length stage to stage (Source Router vs Processor vs Validator vs
+       Analyzer), so anything content-sized would visibly resize as the
+       pipeline progresses. Fixed to the same 1080px baseline instead. */
+    [class*="st-key-run_progress_status"] [data-testid="stExpander"] {{
       max-width:1080px; margin-left:auto; margin-right:auto; }}
     [data-testid="stExpander"] details {{ border:1px solid var(--ts-accent); border-radius:8px;
       background:var(--ts-panel); margin:.3rem 0 0; }}

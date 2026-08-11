@@ -53,6 +53,18 @@ SLOT_TITLES: dict[str, str] = {
     # root_cause's own slot id. One heading for one role, regardless of
     # which purpose's skeleton reaches it.
     "improvement": "Recommended Actions",
+    # _STRATEGY_NARRATIVE (question-first skeleton) - live-verified
+    # 2026-08-11: these 5 slot_ids had no SLOT_TITLES entry, so `slot_title()`
+    # fell back to each Slot's own Korean `title` argument verbatim
+    # ("현재 위치", "미래 변화", ...), the only Korean headers left once every
+    # purpose skeleton's own slots were mapped. Named by what each slot's own
+    # candidates/fields actually draw, not by literal translation of the
+    # Korean title:
+    "current_position": "Key Metrics",  # kpi_grid/benchmark_table of the company's own current standing
+    "future_change": "Market Analysis",  # landscape/chart/timeline of market & tech direction - same content as "market" above
+    "competitive_fit": "Competitive Landscape",  # benchmark_table/radar of us vs competitors - same content as "competitor" above
+    "strategic_choice": "Key Comparisons",  # matrix/benchmark_table/table comparing candidate directions
+    "execution": "Recommended Actions",  # action_list/timeline of what to do next - same role as "recommendation"/"roadmap" above
 }
 
 # Headings a renderer draws *inside* a card, keyed by block type. Separate
@@ -67,6 +79,14 @@ BLOCK_TITLES: dict[str, str] = {
     "action_list": "Recommended Actions",
     "share_split": "Composition",
     "composition_breakdown": "Composition",
+    # A SWOT quadrant grid's meaning doesn't depend on which slot's
+    # candidate list happened to include "matrix" - `_matrix()` always
+    # draws from the full strengths/weaknesses/opportunities/risks pool,
+    # so its card is always "positioning" regardless of the slot's own
+    # narrower title. See generic_dashboard.py's `_render_slot`, which
+    # applies this even when `matrix` is the lead block (every other
+    # block type only gets a BLOCK_TITLES lookup as a companion).
+    "matrix": "Positioning",
 }
 
 

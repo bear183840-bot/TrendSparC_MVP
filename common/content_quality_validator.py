@@ -1066,8 +1066,19 @@ def classify_metric_shape(points_for_one_label: list[Any]) -> MetricShape:
             }
             for subject in subjects
         ]
+        # A single subject needs 3+ points to earn "line" (two dots are a
+        # before/after bar, not a trend - see below). Two or more subjects
+        # tracked over the same sparse timeline is a different shape even at
+        # 2 points each: "국내 OTT 시장규모 2017→2019" beside "글로벌 OTT
+        # 시장규모 2017→2019" is a genuine "compare how these two moved"
+        # story the evidence already states, not an invented interpolation -
+        # live-verified 2026-08-11, this stayed a plain "comparison" bar
+        # table and the Executive Summary's own trend sentence never became
+        # a chart at all. Missing years are never filled in either case;
+        # `render_metric_chart`/`_metric_chart_svg` already only ever plot
+        # the periods actually present.
         if all(
-            len(periods) >= 3 and all(is_time_period(period) for period in periods)
+            len(periods) >= 2 and all(is_time_period(period) for period in periods)
             for periods in periods_per_subject
         ):
             return "line"

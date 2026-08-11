@@ -424,8 +424,16 @@ _RECOMMEND = (
            ("recommended_action", "strategic_recommendation"), ("recommended_actions",),
            role="decision", question_answered="최종적으로 무엇을 추천하는가?",
            why_here="타깃·후보·비교·적합도 근거를 확인한 뒤 선택을 제시한다."),
+    # No "timeline" candidate - live-verified 2026-08-11: Timeline's own
+    # data source (`has_timeline`, dated evidence generally) isn't scoped
+    # to execution steps, so whenever the only dated evidence in a report
+    # was about market/industry events, this late "execution" slot still
+    # claimed it as its own lead before the market-category slot (which
+    # tries "timeline" too, but only after landscape/chart) ever got a
+    # turn - putting a market timeline at the bottom of the page next to
+    # Recommended Actions instead of near Market Analysis at the top.
     _nslot("execution", "실행", "추천을 어떻게 실행할 것인가",
-           ("timeline", "kpi_grid", "narrative_list"),
+           ("kpi_grid", "narrative_list"),
            ("strategic_recommendation",), ("monitoring_indicators",), optional=True,
            role="action", question_answered="추천안을 어떻게 실행하고 확인할 것인가?",
            why_here="실행 근거가 있을 때만 추천 이후 단계로 제시한다."),
@@ -482,8 +490,10 @@ _ISSUE_NARRATIVE = (
            ("response_actions", "recommended_action"), ("recommended_actions",),
            role="decision", question_answered="가장 우선할 대응은 무엇인가?",
            why_here="대안 비교 뒤 근거 기반 권고로 결론을 낸다."),
+    # No "timeline" candidate - see the identical note on the other
+    # "execution" slot above.
     _nslot("execution", "실행", "대응의 순서와 확인 지표",
-           ("timeline", "kpi_grid", "narrative_list"),
+           ("kpi_grid", "narrative_list"),
            ("response_actions",), ("monitoring_indicators",), optional=True,
            role="action", question_answered="권장 조치를 언제 어떻게 실행할 것인가?",
            why_here="실행 시점이나 확인 지표가 있을 때만 후속 계획을 제시한다."),
@@ -520,8 +530,10 @@ _STRATEGY_NARRATIVE = (
            ("recommended_actions",), role="decision",
            question_answered="최종적으로 어디로 가야 하는가?",
            why_here="분석과 선택의 결론을 명확한 방향으로 제시한다."),
+    # No "timeline" candidate - see the identical note on _ISSUE_RESPONSE's
+    # "execution" slot.
     _nslot("execution", "실행 단계", "전략 실행 순서",
-           ("action_list", "timeline", "kpi_grid", "narrative_list"),
+           ("action_list", "kpi_grid", "narrative_list"),
            ("strategic_recommendation",), ("recommended_actions", "monitoring_indicators"),
            role="action", question_answered="선택한 전략을 어떻게 실행할 것인가?",
            why_here="전략 방향을 실제 행동과 확인 지표로 닫는다."),

@@ -456,24 +456,25 @@ if result is None:
             worker = threading.Thread(target=_run_pipeline_in_background, daemon=True)
             worker.start()
 
-            with st.status("관련 근거를 수집하고 의사결정 흐름을 구성하고 있습니다...", expanded=True) as status:
-                shown = 0
-                while worker.is_alive():
-                    pending = progress_events[shown:]
-                    for event in pending:
-                        icon, label, _ = _STATUS_LABELS.get(event.status, ("·", event.status, ""))
-                        detail = f" · {event.document_count}건" if event.status == "completed" else ""
-                        status.update(
-                            label=f"[{event.source_index}/{event.source_total}] {event.source_name} — {label}{detail}"
-                        )
-                        st.write(f"{icon} [{event.source_index}/{event.source_total}] {event.source_name} — {label}{detail}")
-                    shown = len(progress_events)
-                    time.sleep(0.4)
-                worker.join()
-                if run_outcome.get("error") is not None:
-                    status.update(label="오류가 발생했습니다.", state="error", expanded=True)
-                else:
-                    status.update(label="수집·분석이 끝났습니다.", state="complete", expanded=False)
+            with st.container(key="run_progress_status"):
+                with st.status("관련 근거를 수집하고 의사결정 흐름을 구성하고 있습니다...", expanded=True) as status:
+                    shown = 0
+                    while worker.is_alive():
+                        pending = progress_events[shown:]
+                        for event in pending:
+                            icon, label, _ = _STATUS_LABELS.get(event.status, ("·", event.status, ""))
+                            detail = f" · {event.document_count}건" if event.status == "completed" else ""
+                            status.update(
+                                label=f"[{event.source_index}/{event.source_total}] {event.source_name} — {label}{detail}"
+                            )
+                            st.write(f"{icon} [{event.source_index}/{event.source_total}] {event.source_name} — {label}{detail}")
+                        shown = len(progress_events)
+                        time.sleep(0.4)
+                    worker.join()
+                    if run_outcome.get("error") is not None:
+                        status.update(label="오류가 발생했습니다.", state="error", expanded=True)
+                    else:
+                        status.update(label="수집·분석이 끝났습니다.", state="complete", expanded=False)
 
             if run_outcome.get("error") is not None:
                 st.session_state.terminal_log = log_buffer.getvalue()

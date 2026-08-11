@@ -452,7 +452,23 @@ def _render_slot(
         )
         if draw is None:
             continue
-        card_title = title if index == 0 else block_title(block_type, title)
+        # `matrix` (the SWOT quadrant grid) is the one block type whose own
+        # meaning doesn't track the slot that picked it: `_matrix()` always
+        # draws from the full strengths/weaknesses/opportunities/risks
+        # pool (see slot_blocks.py), never just the calling slot's own
+        # narrow category - live-verified 2026-08-11, the "opportunity"
+        # slot (titled "Opportunity") ended up leading with a 3-quadrant
+        # SWOT once strengths/weaknesses were also populated, so the card
+        # showed Strength+Weakness+Opportunity under a header that named
+        # only one of them. Every other block type's meaning doesn't shift
+        # under a different slot this way, so this override stays scoped
+        # to `matrix` specifically rather than applying to every lead
+        # block via `block_title()`.
+        card_title = (
+            block_title("matrix", "Positioning") if block_type == "matrix"
+            else title if index == 0
+            else block_title(block_type, title)
+        )
         with st.container(border=True):
             st.markdown(f'<div class="ts-card-inner"><h3>{escape(card_title)}</h3></div>', unsafe_allow_html=True)
             draw()
