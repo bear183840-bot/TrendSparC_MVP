@@ -118,7 +118,11 @@ _ANALYSIS_SCHEMA = {
                         "type": "string",
                         "enum": ["key_point", "business_impact", "risk", "opportunity", "strength", "weakness", "comparison", "metric", "factor", "action", "monitoring"],
                     },
-                    "claim": {"type": "string", "maxLength": 350},
+                    "claim": {
+                        "type": "string", "maxLength": 350,
+                        "description": "한국어로 쓸 것. 원문이 영어 등 다른 언어여도 반드시 한국어로 번역·요약. "
+                                        "고유명사(회사명·제품명 등)만 원문 표기 유지 가능.",
+                    },
                     "evidence_passage_id": {
                         "type": ["string", "null"],
                         "maxLength": 80,
@@ -152,7 +156,7 @@ _ANALYSIS_SCHEMA = {
                     "importance_basis": {
                         "type": ["string", "null"],
                         "maxLength": 240,
-                        "description": "그 중요도로 본 이유. importance를 채웠으면 필수.",
+                        "description": "그 중요도로 본 이유. importance를 채웠으면 필수. 반드시 한국어로 작성.",
                     },
                 },
                 "required": ["claim_id", "claim_type", "claim", "evidence_passage_id", "evidence_quote", "evidence_location", "as_of_date", "parent_claim_id", "importance", "importance_basis"],
@@ -1102,9 +1106,15 @@ def _semantically_complete_label(text: str, *, context: str = "sentence") -> boo
         context == "table" and candidate in _TABLE_STRUCTURAL_LABELS
     ):
         return False
-    # An unmatched closing bracket means the split landed inside a
-    # parenthetical: "008억 원) 대비" kept the tail of "(9,008억 원)".
+    # An unmatched bracket in either direction means the split landed inside
+    # a parenthetical: "008억 원) 대비" kept the tail of "(9,008억 원)", and
+    # "IPTV 점유율(B" (an unmatched *open* paren - live-verified 2026-08-11,
+    # a table column header like "점유율(B수치)" split mid-parenthetical the
+    # other way) kept the head. Both read as a real, complete-looking label
+    # on their own, so only the bracket count reveals either is a fragment.
     if candidate.count(")") > candidate.count("(") or candidate.count("）") > candidate.count("（"):
+        return False
+    if candidate.count("(") > candidate.count(")") or candidate.count("（") > candidate.count("）"):
         return False
     # A fragment that starts mid-number ("006가구 내") is the far end of a
     # figure the boundary split cut through.

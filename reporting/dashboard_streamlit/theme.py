@@ -833,8 +833,14 @@ def dashboard_css(dark: bool, accent_theme: str = "orange") -> str:
          nothing to shrink-wrap to. An explicit `min-width` floor sidesteps
          that auto-sizing ambiguity by giving the column real space to work
          with regardless of how the browser resolves the content pass. */
-      flex:0 0 auto !important; width:auto !important; min-width:180px !important; max-width:240px;
-      border-left:1px solid var(--ts-line); padding-left:.6rem; margin-left:.6rem; }}
+      /* Tightened from .6rem/.6rem - live-verified 2026-08-11, at that
+         spacing plus the `gap:0` row gap the donut still sat ~20px clear of
+         the chart, reading as two adjacent boxes rather than one drawing's
+         two halves. A hairline divider stays (this is still conceptually a
+         trend + what-it's-made-of split, not one seamless graphic) but the
+         air around it is cut roughly in half. */
+      flex:0 0 auto !important; width:auto !important; min-width:180px !important; max-width:220px;
+      border-left:1px solid var(--ts-line); padding-left:.3rem; margin-left:.3rem; }}
     /* The chart keeps its usual cap (defined once, next to `_CHART_W`) even
        here - letting it grow unbounded was what pulled the whole row wide
        enough to strand the companion column's content on the far right. */

@@ -507,6 +507,19 @@ _EXPLICIT_METRIC_ALIAS_CONTRACTS: tuple[tuple[str, tuple[str, ...]], ...] = (
         "iptv market share",
         ("IPTV market share", "IPTV 시장 점유율", "IPTV 점유율"),
     ),
+    # No entity prefix on purpose - "시장점유율"/"점유율" is the generic
+    # measurement concept, distinct from the IPTV/OTT-scoped entries above
+    # (which stay their own canonical key since "IPTV market share" and
+    # "market share" are different lexical strings). Any subject's own
+    # "X 점유율"/"X 시장점유율" still keeps X as a topic-bearing prefix and
+    # so still keys separately per subject - this only merges *within* one
+    # subject's own repeated readings, e.g. `entity_attribute_groups` groups
+    # by `subject` first and only asks whether two of that one subject's
+    # labels are the same attribute.
+    (
+        "market share",
+        ("market share", "시장점유율", "시장 점유율", "점유율"),
+    ),
     (
         "ott viewing time",
         ("OTT viewing time", "OTT 시청 시간", "OTT 이용 시간"),
@@ -563,11 +576,27 @@ _EXPLICIT_METRIC_ALIAS_CONTRACTS: tuple[tuple[str, tuple[str, ...]], ...] = (
         ("set-top box unit cost", "STB unit cost", "셋톱박스 원가", "셋톱박스 단위원가"),
     ),
 )
-_EXPLICIT_METRIC_ALIAS_INDEX = {
-    _lexical_metric_key(alias): canonical
-    for canonical, aliases in _EXPLICIT_METRIC_ALIAS_CONTRACTS
-    for alias in aliases
-}
+def _space_collapsed(key: str) -> str:
+    """Korean compounds are written with or without an internal space
+    inconsistently across sources/extractors ("시장 점유율" vs "시장점유율" -
+    live-verified 2026-08-11: "IPTV 시장점유율" and "IPTV 점유율" from two
+    different tables in the same report failed to alias to each other only
+    because of this, not because they meant different things). Collapsing
+    spaces entirely is a second, looser key tried only after the normal one
+    misses - it never runs before the primary lookup, so two genuinely
+    different phrases that both happen to lose their spaces are still only
+    merged if an alias contract says so.
+    """
+    return key.replace(" ", "")
+
+
+_EXPLICIT_METRIC_ALIAS_INDEX: dict[str, str] = {}
+_EXPLICIT_METRIC_ALIAS_INDEX_COMPACT: dict[str, str] = {}
+for _canonical, _aliases in _EXPLICIT_METRIC_ALIAS_CONTRACTS:
+    for _alias in _aliases:
+        _lex = _lexical_metric_key(_alias)
+        _EXPLICIT_METRIC_ALIAS_INDEX[_lex] = _canonical
+        _EXPLICIT_METRIC_ALIAS_INDEX_COMPACT[_space_collapsed(_lex)] = _canonical
 
 
 def semantic_metric_key(label: str | None) -> str:
@@ -580,7 +609,9 @@ def semantic_metric_key(label: str | None) -> str:
     evidence that two measurements share a definition.
     """
     key = _lexical_metric_key(label)
-    return _EXPLICIT_METRIC_ALIAS_INDEX.get(key, key)
+    if key in _EXPLICIT_METRIC_ALIAS_INDEX:
+        return _EXPLICIT_METRIC_ALIAS_INDEX[key]
+    return _EXPLICIT_METRIC_ALIAS_INDEX_COMPACT.get(_space_collapsed(key), key)
 
 
 def _lexical_entity_key(entity: str | None) -> str:
@@ -1258,6 +1289,49 @@ def _content_overlap(a: str, b: str) -> float:
     if not tokens_a or not tokens_b:
         return 0.0
     return len(tokens_a & tokens_b) / min(len(tokens_a), len(tokens_b))
+
+
+_CAUSAL_MARKER_RE = re.compile(
+    r"때문|원인|영향으로|영향을|요인|기인|비롯|이유|배경에는|계기로|따른\s*결과"
+)
+_TREND_DIRECTION_WORDS = (
+    "증가", "감소", "상승", "하락", "완만", "지속", "유지", "성장", "축소",
+    "확대", "둔화", "하향", "상향",
+)
+
+
+def is_chart_trend_restatement(sentence: str, chart_subjects: list[str]) -> bool:
+    """Whether `sentence` just narrates a trend a chart already draws.
+
+    General, structural test - not this report's wording: a "Key Drivers"
+    (or any factor/finding) sentence that (a) names two or more of the exact
+    subjects a trend chart is already plotting, (b) describes them only with
+    a bare direction word (증가/감소/...), and (c) states no causal or
+    explanatory link (때문/원인/영향/요인/...) is a caption for the chart,
+    not a driver of anything - a reader already saw the direction in the
+    line itself. A sentence that says *why* the trend moved, or that adds a
+    subject the chart never plotted, survives regardless of how similar its
+    wording looks.
+    """
+    if not chart_subjects or not sentence:
+        return False
+    if _CAUSAL_MARKER_RE.search(sentence):
+        return False
+    if not any(word in sentence for word in _TREND_DIRECTION_WORDS):
+        return False
+    # A chart label often carries a bracketed unit/device qualifier the
+    # chart legend needs but prose never repeats - live-verified 2026-08-11:
+    # the chart plotted "SO [단말장치・단자]"/"위성방송 [단말장치・단자]",
+    # and the driver sentence just said "SO"/"위성방송", so a literal
+    # substring check against the full label matched only 1 of the 3 series
+    # it was actually restating. Only the part before the first bracket is
+    # the name a reader (and a sentence) would use.
+    bare_subjects = [
+        re.split(r"[\[（(]", subject, maxsplit=1)[0].strip()
+        for subject in chart_subjects
+    ]
+    named = [subject for subject in bare_subjects if subject and subject in sentence]
+    return len(named) >= 2
 
 
 def is_duplicate_statement(a: str, b: str, threshold: float = 0.6) -> bool:

@@ -308,12 +308,23 @@ def _share_split(context: SlotContext):
 
 
 def _factor_list(context: SlotContext):
-    # Keep the complete grounded set.  Source/analyzer/synthesis all preserve
-    # these factors, so imposing a new display-layer cap here would silently
-    # discard information precisely while building the final block.
-    values = context.items
-    if context.compact:
-        values = values[:getattr(context.presentation, "narrative_limit", 4)]
+    # This is the fallback shape for the "factors" slot (titled "Key
+    # Drivers"), used when driver_bars has no importance-scored claims to
+    # rank. Ordered and capped the same way driver_bars is - by the model's
+    # importance score where one was given, top 5 - so "Key Drivers" reads
+    # the same regardless of which of the two blocks ends up drawing it.
+    # Claims with no importance score keep their original (extraction)
+    # order and sort after every scored one.
+    importance_by_text = {
+        claim.claim: claim.importance
+        for claim in context.synthesis.grounded_claims
+        if claim.claim_type == "factor" and claim.importance is not None
+    }
+    values = sorted(
+        context.items, key=lambda value: importance_by_text.get(value, -1), reverse=True,
+    )
+    limit = getattr(context.presentation, "narrative_limit", 4) if context.compact else 5
+    values = values[:limit]
     rows = [(value, evidence_url(value, context.result)) for value in values]
     return (lambda: render_factor_list(rows)) if rows else None
 

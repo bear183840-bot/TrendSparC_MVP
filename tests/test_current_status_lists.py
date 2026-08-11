@@ -127,7 +127,10 @@ def test_the_factor_card_keeps_every_item_not_the_first_four(monkeypatch):
     assert "순서는 우열이 아닙니다" in body
 
 
-def test_factor_slot_renderer_does_not_reintroduce_a_display_cap(monkeypatch):
+def test_factor_slot_renderer_caps_key_drivers_at_five(monkeypatch):
+    """Key Drivers shows at most 5, ranked by importance when the model
+    scored any - capped 2026-08-11 so a factor_list fallback reads the same
+    as driver_bars instead of dumping every extracted factor onto the card."""
     from reporting.dashboard_streamlit.blocks import slot_blocks
 
     captured: list[list[tuple[str, str | None]]] = []
@@ -146,7 +149,7 @@ def test_factor_slot_renderer_does_not_reintroduce_a_display_cap(monkeypatch):
     renderer = slot_blocks._factor_list(context)
     assert renderer is not None
     renderer()
-    assert [value for value, _ in captured[0]] == synthesis.factors
+    assert [value for value, _ in captured[0]] == synthesis.factors[:5]
 
 
 def test_the_new_slots_are_all_optional():

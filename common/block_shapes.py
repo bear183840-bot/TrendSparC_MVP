@@ -250,6 +250,36 @@ def has_grouped_bars(metric_points: list[Any]) -> bool:
     return bool(grouped_bar_series(metric_points))
 
 
+def _strip_leading_subject(label: str, subject: str) -> str:
+    """`label` with a leading exact copy of `subject` removed, if present.
+
+    Case/whitespace-insensitive so "KT 점유율" strips to "점유율" regardless
+    of how the subject itself was cased. Only a *leading* match is removed -
+    "IPTV 대비 SO 점유율" keeps "IPTV" since it names something else first.
+    """
+    subject_clean = subject.strip().casefold()
+    if not subject_clean:
+        return label
+    lowered = label.casefold()
+    if lowered.startswith(subject_clean):
+        return label[len(subject_clean):].strip()
+    return label
+
+
+def _has_unbalanced_bracket(text: str) -> bool:
+    """A dangling `(`/`)` (or full-width `（`/`）`) means the text is a cut
+    fragment of a parenthetical, not a complete label - live-verified
+    2026-08-11: "KT 점유율 (B" (an unclosed paren from a source table's own
+    "(A안)"/"(B안)" column sub-headers) read as a complete, distinct
+    attribute next to the genuinely complete "KT 시장점유율", multiplying
+    one real figure into several fake ones.
+    """
+    return (
+        text.count("(") != text.count(")")
+        or text.count("（") != text.count("）")
+    )
+
+
 def entity_attribute_groups(metric_points: list[Any]) -> list[tuple[str, list[Any]]]:
     """(subject, points) for two or more subjects each measured on several of
     their OWN distinct percentage attributes, with no shared category between
@@ -273,11 +303,31 @@ def entity_attribute_groups(metric_points: list[Any]) -> list[tuple[str, list[An
     by_subject: dict[str, dict[str, Any]] = {}
     for point in metric_points:
         subject = (getattr(point, "subject", None) or "").strip()
+        label = (point.label or "").strip()
         if not subject or (point.unit or "").strip() not in {"%", "％"}:
             continue
-        # One point per label per subject - a repeat is the same attribute
-        # at another period, not a second attribute.
-        by_subject.setdefault(subject, {}).setdefault(point.label, point)
+        if not label or _has_unbalanced_bracket(label):
+            continue
+        # A label that just restates the subject ("subject: IPTV, label:
+        # IPTV") names no attribute at all - live-verified 2026-08-11, a
+        # table-cell recovery path falls back to the bare entity name as the
+        # label when its own column header didn't survive cleanly, and that
+        # fallback must not be read as a real attribute here.
+        if semantic_metric_key(label) == semantic_metric_key(subject):
+            continue
+        # One point per semantic label per subject, not per exact string -
+        # "KT 점유율"/"KT 시장점유율" from two different source passages are
+        # the same attribute stated twice, not two attributes, even though
+        # their raw label text differs. The subject name is stripped from
+        # the front first: `semantic_metric_key` keeps topic-bearing words
+        # on purpose (so "HBM market size" and "DRAM market size" stay
+        # separate), which is right for a *label* but means a subject's own
+        # name baked into its own label ("KT 점유율" vs "KT 시장점유율")
+        # would never collapse without this - the alias entries this relies
+        # on ("시장점유율"/"점유율" -> "market share") are entity-neutral by
+        # design, see common/content_quality_validator.py.
+        attribute_key = semantic_metric_key(_strip_leading_subject(label, subject))
+        by_subject.setdefault(subject, {}).setdefault(attribute_key, point)
     groups: list[tuple[str, list[Any]]] = []
     for subject, by_label in by_subject.items():
         points = list(by_label.values())

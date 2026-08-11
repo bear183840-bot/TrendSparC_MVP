@@ -29,6 +29,7 @@ from common.content_quality_validator import select_chartable_series
 from common.content_quality_validator import plotted_chart_series
 from common.content_quality_validator import dedupe_across_blocks
 from common.content_quality_validator import exclude_non_competitor_comparisons
+from common.content_quality_validator import is_chart_trend_restatement
 # Importing the package is what registers every block, including the live
 # ones - the registry is only "the one table" if nothing can reach the
 # dashboard without it being populated.
@@ -364,6 +365,27 @@ def _render_slot(
         # already account for it, and an apology card here would be the third
         # copy of the same message.
         return
+    if slot.slot.slot_id == "factors":
+        # A "factors" item that only narrates the trend the Market Analysis
+        # chart already draws (same subjects, direction words, no causal
+        # link) adds nothing next to the chart itself - live-verified
+        # 2026-08-11: "최근 3년간 추이를 보면 IPTV 가입자는 완만하게
+        # 증가한 반면 SO와 위성방송은 감소세가 이어졌다" names the same
+        # three series the chart plots and states no "why".
+        # `is_chart_trend_restatement` is the general, structural test - a
+        # sentence that explains a cause, or names a subject the chart never
+        # plotted, is kept regardless of wording. Filtered here, before the
+        # block_type branch below, so it also governs whether driver_bars/
+        # factor_list (which key on `len(items)`) are eligible at all - a
+        # slot whose only content was a restatement should end up with
+        # nothing to show, not fall through to a different shape for the
+        # same now-empty list.
+        chart_subjects = list(dict.fromkeys(
+            point.label for point in plotted_chart_series(select_chartable_series(synthesis.metric_series))
+        ))
+        items = [item for item in items if not is_chart_trend_restatement(item, chart_subjects)]
+        if not items:
+            return
     if slot.block_type == "narrative_list":
         # A status/finding slot may quote what the source observed, but a
         # source author's proposal is not itself market status. Recommendations
@@ -775,6 +797,16 @@ def render_generic_dashboard(
     # same rule again over the rendered slots removed items a second time -
     # "시장 변화" showed 1 of its 3 key points because two had been claimed by
     # a neighbouring slot that was drawing from the same section.
+    # A "factors" slot whose only items are chart restatements (see
+    # `_render_slot`, which applies the same `is_chart_trend_restatement`
+    # filter) draws nothing - excluded here too, before `_grid_rows` sizes
+    # the row, so a blank reserved column doesn't sit next to Key
+    # Comparisons squeezing it to a width its bar labels can't fit in.
+    # Live-verified 2026-08-11: an empty grid column (Key Drivers' old spot)
+    # left Key Comparisons at 186px with overlapping axis text next to it.
+    chart_subjects_for_factors = list(dict.fromkeys(
+        point.label for point in plotted_chart_series(select_chartable_series(synthesis.metric_series))
+    ))
     dashboard_slots = _detail_slot_order([
         slot for slot in resolved
         if not slot.is_last_resort and slot.slot.slot_id != "summary"
@@ -783,6 +815,14 @@ def render_generic_dashboard(
             and not (
                 synthesis.recommended_actions
                 or getattr(synthesis, "ai_recommended_actions", None)
+            )
+        )
+        and not (
+            slot.slot.slot_id == "factors"
+            and slot.items
+            and all(
+                is_chart_trend_restatement(item, chart_subjects_for_factors)
+                for item in slot.items
             )
         )
     ])

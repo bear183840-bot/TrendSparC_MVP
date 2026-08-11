@@ -72,7 +72,11 @@ def _system_prompt(max_urls: int) -> str:
         'summary of what this source says about the query, "key_facts": '
         '[{"text": "...", "metric": null-or-string, "value": null-or-number, '
         '"unit": null-or-string, "time": null-or-string, "value_type": null or '
-        'one of "actual"/"estimate"/"forecast"/"target"/"guidance"}], '
+        'one of "actual"/"estimate"/"forecast"/"target"/"guidance"/"planned" '
+        '("planned" is a stated roadmap/schedule commitment, e.g. a product '
+        'or supply date the source says is scheduled - distinct from '
+        '"target" (an aspirational goal figure) or "forecast" (a '
+        'prediction))}], '
         '"relevance": how this source answers the query}. Only populate a '
         "key_fact's metric/value/unit/time/value_type when the source text "
         "actually states it - never invent or estimate a number yourself. "
